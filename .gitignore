@@ -1,0 +1,5 @@
+*.xlsx
+S7 - Seleção de Ideias.pdf
+.venv
+__pycache__/
+.env
