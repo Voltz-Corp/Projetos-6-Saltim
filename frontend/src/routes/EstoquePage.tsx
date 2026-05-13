@@ -41,7 +41,15 @@ const col = createColumnHelper<StockItem>()
 const columns = [
   col.accessor('name', {
     header: 'Insumo',
-    cell: i => <span className="font-medium text-stone-900">{i.getValue()}</span>,
+    cell: i => (
+      <Link
+        to="/ingredientes/$id/editar"
+        params={{ id: String(i.row.original.id) }}
+        className="font-medium text-stone-900 hover:text-brand-600 hover:underline transition-colors"
+      >
+        {i.getValue()}
+      </Link>
+    ),
     enableSorting: true,
   }),
   col.accessor('category', {
