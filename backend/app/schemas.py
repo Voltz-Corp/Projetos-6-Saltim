@@ -1,6 +1,6 @@
 from pydantic import BaseModel, ConfigDict
 from datetime import datetime
-from typing import Optional
+from typing import Optional, List
 
 
 class IngredienteOut(BaseModel):
@@ -40,3 +40,19 @@ class LogContagemOut(BaseModel):
 class ResultadoLote(BaseModel):
     ok: bool
     atualizados: int
+
+
+class EstoquePaginado(BaseModel):
+    items: List[IngredienteOut]
+    total: int
+    page: int
+    page_size: int
+    total_pages: int
+
+
+class AtualizacaoIngrediente(BaseModel):
+    name: Optional[str] = None
+    unit: Optional[str] = None
+    price: Optional[float] = None
+    category: Optional[str] = None
+    min_qty: Optional[float] = None

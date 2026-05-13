@@ -49,6 +49,79 @@ export function useEstoque() {
   })
 }
 
+export type StockStatusFilter = 'OK' | 'Atenção' | 'Crítico' | 'Esgotado'
+
+export interface EstoqueFiltros {
+  category?: string
+  status?: StockStatusFilter
+  q?: string
+  page?: number
+  pageSize?: number
+}
+
+export interface EstoquePaginado {
+  items: StockItem[]
+  total: number
+  page: number
+  page_size: number
+  total_pages: number
+}
+
+export function useEstoquePaginado(filtros: EstoqueFiltros) {
+  const params = new URLSearchParams()
+  if (filtros.category) params.set('category', filtros.category)
+  if (filtros.status) params.set('status', filtros.status)
+  if (filtros.q) params.set('q', filtros.q)
+  if (filtros.page) params.set('page', String(filtros.page))
+  if (filtros.pageSize) params.set('page_size', String(filtros.pageSize))
+
+  return useQuery({
+    queryKey: ['estoque-paginado', filtros],
+    queryFn: async (): Promise<EstoquePaginado> => {
+      const res = await fetch(`${API_URL}/api/estoque/paginado?${params}`)
+      if (!res.ok) throw new Error('Falha ao carregar estoque')
+      const data = await res.json()
+      return {
+        ...data,
+        items: data.items.map((item: Record<string, unknown>) => ({
+          ...(item as any),
+          minQty: item['min_qty'] as number,
+          currentQty: item['current_qty'] as number,
+        })),
+      }
+    },
+    staleTime: 15_000,
+    placeholderData: (prev) => prev,
+  })
+}
+
+export interface AtualizacaoIngrediente {
+  name?: string
+  unit?: string
+  price?: number
+  category?: string
+  min_qty?: number
+}
+
+export function useAtualizarIngrediente() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async ({ id, ...dados }: AtualizacaoIngrediente & { id: number }): Promise<StockItem> => {
+      const res = await fetch(`${API_URL}/api/ingredientes/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(dados),
+      })
+      if (!res.ok) throw new Error('Falha ao atualizar ingrediente')
+      const item = await res.json()
+      return { ...item, minQty: item.min_qty, currentQty: item.current_qty }
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: QUERY_KEY })
+    },
+  })
+}
+
 export function useAtualizarEstoque() {
   const qc = useQueryClient()
   return useMutation({

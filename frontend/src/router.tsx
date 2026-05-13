@@ -4,12 +4,14 @@ import { dashboardRoute } from './routes/DashboardPage'
 import { estoqueRoute } from './routes/EstoquePage'
 import { contagemRoute } from './routes/ContagemPage'
 import { contagemCategoriaRoute } from './routes/ContagemCategoriaPage'
+import { ingredienteEditRoute } from './routes/IngredienteEditPage'
 
 const routeTree = rootRoute.addChildren([
   dashboardRoute,
   estoqueRoute,
   contagemRoute,
   contagemCategoriaRoute,
+  ingredienteEditRoute,
 ])
 
 export const router = createRouter({ routeTree })

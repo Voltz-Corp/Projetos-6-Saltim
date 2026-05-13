@@ -10,6 +10,19 @@ export function resetContagem() {
   globalTouched.clear()
 }
 
+// Pré-inicializa todos os itens: preenche contagens e marca os que já atingem o mínimo.
+// Idempotente — seguro chamar em qualquer render.
+export function initializeAll(allItems: StockItem[]) {
+  for (const item of allItems) {
+    if (!globalCounts.has(item.id)) {
+      globalCounts.set(item.id, item.currentQty)
+      if (item.currentQty >= item.minQty) {
+        globalTouched.add(item.id)
+      }
+    }
+  }
+}
+
 export function getGlobalProgress(allItems: StockItem[]) {
   const touchedCount = allItems.filter(i => globalTouched.has(i.id)).length
   const totalCount = allItems.length
@@ -37,11 +50,14 @@ export function buildAllUpdates(allItems: StockItem[]): Map<number, number> {
 export function useContagem(items: StockItem[]) {
   const [, forceRender] = useState(0)
 
-  // Pré-preenche com o estoque atual na primeira vez que o item aparece,
-  // sem marcar como contado — o usuário ainda precisa confirmar.
+  // Pré-preenche com o estoque atual na primeira vez que o item aparece.
+  // Itens acima do mínimo são marcados automaticamente como contados.
   for (const item of items) {
     if (!globalCounts.has(item.id)) {
       globalCounts.set(item.id, item.currentQty)
+      if (item.currentQty >= item.minQty) {
+        globalTouched.add(item.id)
+      }
     }
   }
 
@@ -82,6 +98,13 @@ export function useContagem(items: StockItem[]) {
     return globalTouched.has(id)
   }
 
+  function marcarTodos() {
+    for (const item of items) {
+      globalTouched.add(item.id)
+    }
+    forceRender(n => n + 1)
+  }
+
   const touchedCount = items.filter(i => globalTouched.has(i.id)).length
   const totalCount = items.length
   const progress = totalCount === 0 ? 0 : touchedCount / totalCount
@@ -96,5 +119,5 @@ export function useContagem(items: StockItem[]) {
     return updates
   }
 
-  return { adjust, setCount, confirmar, desmarcar, getCount, isTouched, progress, touchedCount, totalCount, buildUpdates }
+  return { adjust, setCount, confirmar, desmarcar, marcarTodos, getCount, isTouched, progress, touchedCount, totalCount, buildUpdates }
 }

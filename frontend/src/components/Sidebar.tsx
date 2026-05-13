@@ -2,7 +2,7 @@ import { Link } from '@tanstack/react-router'
 
 function HomeIcon() {
   return (
-    <svg viewBox="0 0 20 20" className="size-4.5 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <svg viewBox="0 0 20 20" className="size-5 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <path d="M3 9.5L10 3l7 6.5V17a1 1 0 01-1 1H4a1 1 0 01-1-1V9.5z" />
       <path d="M7 18v-6h6v6" />
     </svg>
@@ -11,12 +11,13 @@ function HomeIcon() {
 
 function PackageIcon() {
   return (
-    <svg viewBox="0 0 20 20" className="size-4.5 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <svg viewBox="0 0 20 20" className="size-5 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <rect x="2" y="7" width="16" height="11" rx="1" />
       <path d="M5 7V5a5 5 0 0110 0v2" />
     </svg>
   )
 }
+
 
 interface NavItemProps {
   to: string

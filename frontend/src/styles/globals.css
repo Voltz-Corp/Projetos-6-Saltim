@@ -6,6 +6,8 @@
   /* Brand primary — laranja do logo (letra T) */
   --color-brand-50:  #FEF4E8;
   --color-brand-100: #FDEBD0;
+  --color-brand-200: #FAD4A8;
+  --color-brand-300: #F5A565;
   --color-brand-600: #F07820;
   --color-brand-700: #C5621A;
 
@@ -28,4 +30,12 @@
 @layer base {
   html { font-family: var(--font-sans); }
   body { background-color: var(--color-surface); color: var(--color-ink); }
+}
+
+button {
+  cursor: pointer;
+}
+
+svg {
+  overflow: visible;
 }
