@@ -1,0 +1,31 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: 'DM Sans', ui-sans-serif, system-ui, sans-serif;
+
+  /* Brand primary — laranja do logo (letra T) */
+  --color-brand-50:  #FEF4E8;
+  --color-brand-100: #FDEBD0;
+  --color-brand-600: #F07820;
+  --color-brand-700: #C5621A;
+
+  /* Paleta completa do logo Saltim */
+  --color-saltim-dark:   #1A1918;
+  --color-saltim-red:    #E4332B;
+  --color-saltim-green:  #2D7A3A;
+  --color-saltim-blue:   #52B9EB;
+  --color-saltim-orange: #F07820;
+  --color-saltim-cream:  #EDE0B4;
+
+  /* Surface */
+  --color-surface: #F5F4F1;
+  --color-ink:     #1A1918;
+  --color-muted:   #888780;
+  --color-subtle:  #5F5E5A;
+  --color-border:  #E8E6E0;
+}
+
+@layer base {
+  html { font-family: var(--font-sans); }
+  body { background-color: var(--color-surface); color: var(--color-ink); }
+}
