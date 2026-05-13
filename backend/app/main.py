@@ -122,6 +122,8 @@ def update_estoque(lote: AtualizacaoLote, db: Session = Depends(get_db)):
             continue
 
         anterior = float(ingrediente.current_qty)
+        if round(atualizacao.new_qty, 3) == round(anterior, 3):
+            continue
         db.add(LogContagem(
             ingrediente_id=ingrediente.id,
             quantidade_anterior=anterior,
