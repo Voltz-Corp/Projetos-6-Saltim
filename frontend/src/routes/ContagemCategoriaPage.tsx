@@ -6,6 +6,7 @@ import {
   useContagem,
   getGlobalProgress,
   buildAllUpdates,
+  initializeAll,
 } from '../hooks/useContagem';
 import { CATEGORIES, type Category } from '../data/ingredients';
 import { cn } from '../lib/cn';
@@ -150,6 +151,9 @@ export function ContagemCategoriaPage() {
 
   const { data: stock = [] } = useEstoque();
   const atualizar = useAtualizarEstoque();
+
+  // Garante que o progresso global esteja correto mesmo entrando direto na categoria
+  initializeAll(stock);
 
   const items = useMemo(
     () => stock.filter((i) => i.category === category),

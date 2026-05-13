@@ -29,8 +29,9 @@ function NavItem({ to, icon, label }: NavItemProps) {
   return (
     <Link
       to={to}
-      className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-white/40 hover:text-white hover:bg-white/8 transition-colors"
-      activeProps={{ className: 'flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-brand-600 bg-brand-600/15' }}
+      className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-colors"
+      activeProps={{ className: 'text-brand-600 bg-brand-50' }}
+      inactiveProps={{ className: 'text-stone-400 hover:text-stone-900 hover:bg-stone-100' }}
       activeOptions={{ exact: to === '/' }}
     >
       {icon}
@@ -41,14 +42,14 @@ function NavItem({ to, icon, label }: NavItemProps) {
 
 export function Sidebar() {
   return (
-    <aside className="w-56 bg-saltim-dark flex flex-col flex-shrink-0">
+    <aside className="w-56 bg-white border-r border-stone-200 flex flex-col flex-shrink-0">
       {/* Brand */}
-      <div className="px-5 py-5 border-b border-white/8">
+      <div className="px-5 py-5 border-b border-stone-100">
         <div className="flex items-center gap-2.5">
           <div className="size-7 rounded-lg bg-brand-600 flex items-center justify-center flex-shrink-0">
             <span className="text-white text-xs font-black leading-none">S</span>
           </div>
-          <span className="text-base font-bold text-saltim-cream tracking-tight">Saltim Café</span>
+          <span className="text-base font-bold text-stone-900 tracking-tight">Saltim Café</span>
         </div>
       </div>
       <nav className="flex flex-col gap-1 p-3 pt-4">
