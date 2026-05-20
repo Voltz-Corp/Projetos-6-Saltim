@@ -1,7 +1,7 @@
 """
 Gera vendas sintéticas realistas para a cafeteria Saltim (Boa Viagem, Recife).
 
-Saída principal: data/New/vendas.csv
+Saída principal: data/vendas.csv
 Colunas: id, date_time, recipe_id, quantity, unit_price
 """
 
@@ -105,9 +105,36 @@ HOURLY_PDF_WEEKEND = {
     19: 0.095,
 }
 
-COLD_TOKENS = ["SHAKE", "SODA", "BOWL", "AÇAÍ", "ACAI", "IOGURTE", "OVERNIGHT", "AFFOGATO"]
-HOT_TOKENS = ["ESPRESSO", "CHA", "CHÁ", "CAPPUCCINO", "LATTE", "MOCHA", "AFFOGATO", "TONIC"]
-COFFEE_TOKENS = ["ESPRESSO", "AFFOGATO", "CAPPUCCINO", "LATTE", "MOCHA", "TONIC", "CAFÉ", "CAFE"]
+COLD_TOKENS = [
+    "SHAKE",
+    "SODA",
+    "BOWL",
+    "AÇAÍ",
+    "ACAI",
+    "IOGURTE",
+    "OVERNIGHT",
+    "AFFOGATO",
+]
+HOT_TOKENS = [
+    "ESPRESSO",
+    "CHA",
+    "CHÁ",
+    "CAPPUCCINO",
+    "LATTE",
+    "MOCHA",
+    "AFFOGATO",
+    "TONIC",
+]
+COFFEE_TOKENS = [
+    "ESPRESSO",
+    "AFFOGATO",
+    "CAPPUCCINO",
+    "LATTE",
+    "MOCHA",
+    "TONIC",
+    "CAFÉ",
+    "CAFE",
+]
 KIDS_TOKENS = ["INFANTIL"]
 BREAKFAST_TOKENS = [
     "TOAST",
@@ -138,8 +165,27 @@ LUNCH_TOKENS = [
     "KLEBINHO",
     "RECIFE É UM OVO",
 ]
-DESSERT_TOKENS = ["BROWNIE", "BLONDIE", "BOLO", "BRIGADEIRO", "CHEESECAKE", "BANNOFFE", "LEMON BAR", "SORVETE"]
-DRINK_COLD_TOKENS = ["SHAKE", "SODA", "BOWL", "AÇAÍ", "ACAI", "GINGER", "GREENTEA", "LEMON GRASS", "FRUTAS VERMELHAS"]
+DESSERT_TOKENS = [
+    "BROWNIE",
+    "BLONDIE",
+    "BOLO",
+    "BRIGADEIRO",
+    "CHEESECAKE",
+    "BANNOFFE",
+    "LEMON BAR",
+    "SORVETE",
+]
+DRINK_COLD_TOKENS = [
+    "SHAKE",
+    "SODA",
+    "BOWL",
+    "AÇAÍ",
+    "ACAI",
+    "GINGER",
+    "GREENTEA",
+    "LEMON GRASS",
+    "FRUTAS VERMELHAS",
+]
 
 
 def weighted_integer_allocation(total: int, weights: np.ndarray) -> np.ndarray:
@@ -182,7 +228,9 @@ def inflation_factor(year: int) -> float:
 def classify_product_category(name: str) -> str:
     if _has_token(name, KIDS_TOKENS):
         return "kids"
-    if _has_token(name, COFFEE_TOKENS) and not _has_token(name, ["BOWL", "SHAKE", "SODA"]):
+    if _has_token(name, COFFEE_TOKENS) and not _has_token(
+        name, ["BOWL", "SHAKE", "SODA"]
+    ):
         return "drink_coffee"
     if _has_token(name, DRINK_COLD_TOKENS):
         return "drink_cold"
@@ -213,14 +261,22 @@ def load_catalog(path: Path, seed: int) -> pd.DataFrame:
     catalog["sale_price"] = catalog["base_price"]
 
     catalog["category"] = catalog["name"].apply(classify_product_category)
-    catalog["category_weight"] = catalog["category"].map(CATEGORY_POPULARITY).astype(float)
-    catalog["popularity_jitter"] = rng.lognormal(mean=0.0, sigma=0.25, size=len(catalog))
+    catalog["category_weight"] = (
+        catalog["category"].map(CATEGORY_POPULARITY).astype(float)
+    )
+    catalog["popularity_jitter"] = rng.lognormal(
+        mean=0.0, sigma=0.25, size=len(catalog)
+    )
 
     catalog["is_cold"] = catalog["name"].apply(lambda n: _has_token(n, COLD_TOKENS))
     catalog["is_hot"] = catalog["name"].apply(lambda n: _has_token(n, HOT_TOKENS))
-    catalog["is_breakfast"] = catalog["name"].apply(lambda n: _has_token(n, BREAKFAST_TOKENS))
+    catalog["is_breakfast"] = catalog["name"].apply(
+        lambda n: _has_token(n, BREAKFAST_TOKENS)
+    )
     catalog["is_lunch"] = catalog["name"].apply(lambda n: _has_token(n, LUNCH_TOKENS))
-    catalog["is_dessert"] = catalog["name"].apply(lambda n: _has_token(n, DESSERT_TOKENS))
+    catalog["is_dessert"] = catalog["name"].apply(
+        lambda n: _has_token(n, DESSERT_TOKENS)
+    )
     catalog["is_drink"] = catalog["name"].apply(
         lambda n: _has_token(n, COFFEE_TOKENS) or _has_token(n, DRINK_COLD_TOKENS)
     )
@@ -241,15 +297,58 @@ def holiday_weight_for_row(nome: str, tipo: str) -> float:
     nome_u = str(nome).upper()
     tipo_u = str(tipo).upper()
 
+    # Boa Viagem esvazia em feriados: locais viajam (Olinda no Carnaval,
+    # interior no São João), turismo de praia não compensa o fluxo do dia a dia.
     if "CARNAVAL" in nome_u or "CINZAS" in nome_u:
-        return 1.45
+        return 0.70
     if "SÃO JOÃO" in nome_u or "SAO JOAO" in nome_u or "SÃO JOAO" in nome_u:
-        return 1.30
+        return 0.70
     if tipo_u in {"NACIONAL", "MUNICIPAL", "ESTADUAL"}:
         return 0.55
     if tipo_u == "FACULTATIVO":
         return 0.85
     return 1.0
+
+
+def load_unavailability(
+    path: Path, catalog: pd.DataFrame
+) -> list[tuple[pd.Timestamp, pd.Timestamp, frozenset[str]]]:
+    """Lê períodos em que produtos não são vendidos.
+
+    CSV esperado em `path` com colunas:
+      - match: REC#### exato OU substring do nome (ex: "BROWNIE")
+      - data_inicio: YYYY-MM-DD (inclusivo)
+      - data_fim:    YYYY-MM-DD (inclusivo)
+
+    Retorna lista de (data_inicio, data_fim, recipe_ids).
+    """
+    if not path.exists():
+        return []
+
+    df = pd.read_csv(path)
+    if df.empty or not {"match", "data_inicio", "data_fim"}.issubset(df.columns):
+        return []
+
+    df["data_inicio"] = pd.to_datetime(df["data_inicio"], errors="coerce")
+    df["data_fim"] = pd.to_datetime(df["data_fim"], errors="coerce")
+    df = df.dropna(subset=["data_inicio", "data_fim"])
+
+    valid_ids = set(catalog["id"].astype(str))
+    names_upper = catalog["name"].astype(str).str.upper()
+
+    periods: list[tuple[pd.Timestamp, pd.Timestamp, frozenset[str]]] = []
+    for _, row in df.iterrows():
+        token = str(row["match"]).strip()
+        if not token:
+            continue
+        if token in valid_ids:
+            ids = {token}
+        else:
+            mask = names_upper.str.contains(token.upper(), na=False)
+            ids = set(catalog.loc[mask, "id"].astype(str))
+        if ids:
+            periods.append((row["data_inicio"], row["data_fim"], frozenset(ids)))
+    return periods
 
 
 def load_holiday_calendar(path: Path) -> pd.DataFrame:
@@ -271,7 +370,9 @@ def load_holiday_calendar(path: Path) -> pd.DataFrame:
     return daily
 
 
-def build_monthly_targets(end_date: pd.Timestamp, year_factors: dict[int, float]) -> dict[tuple[int, int], int]:
+def build_monthly_targets(
+    end_date: pd.Timestamp, year_factors: dict[int, float]
+) -> dict[tuple[int, int], int]:
     targets: dict[tuple[int, int], int] = {}
     for year in [2023, 2024, 2025, 2026]:
         factor = year_factors[year]
@@ -372,9 +473,11 @@ def compute_daily_weights(cal: pd.DataFrame, seed: int) -> pd.DataFrame:
     out = cal.copy()
     out["weight"] = out["weekday"].map(WEEKDAY_FACTOR).astype(float)
 
-    out.loc[out["is_holiday"] == 1, "weight"] *= out.loc[out["is_holiday"] == 1, "holiday_weight"]
-    out.loc[out["is_carnaval_window"] == 1, "weight"] *= 1.45
-    out.loc[out["is_sao_joao"] == 1, "weight"] *= 1.30
+    out.loc[out["is_holiday"] == 1, "weight"] *= out.loc[
+        out["is_holiday"] == 1, "holiday_weight"
+    ]
+    out.loc[out["is_carnaval_window"] == 1, "weight"] *= 0.70
+    out.loc[out["is_sao_joao"] == 1, "weight"] *= 0.70
     out.loc[out["is_summer"] == 1, "weight"] *= 1.08
     out.loc[out["is_school_vacation"] == 1, "weight"] *= 1.05
     out.loc[out["is_payday_window"] == 1, "weight"] *= 1.06
@@ -383,14 +486,14 @@ def compute_daily_weights(cal: pd.DataFrame, seed: int) -> pd.DataFrame:
     out.loc[out["is_closure"] == 1, "weight"] = 0.0
 
     # Ruído empilhado: diário, semanal, mensal
-    out["weight"] *= rng.lognormal(mean=0.0, sigma=0.42, size=len(out))
+    out["weight"] *= rng.lognormal(mean=0.0, sigma=0.52, size=len(out))
 
     week_keys = out["week_start"].astype(str)
-    week_noise = {k: float(rng.lognormal(0.0, 0.30)) for k in week_keys.unique()}
+    week_noise = {k: float(rng.lognormal(0.0, 0.42)) for k in week_keys.unique()}
     out["weight"] *= week_keys.map(week_noise)
 
     month_keys = list(zip(out["year"], out["month"]))
-    month_noise = {k: float(rng.lognormal(0.0, 0.26)) for k in set(month_keys)}
+    month_noise = {k: float(rng.lognormal(0.0, 0.42)) for k in set(month_keys)}
     out["weight"] *= [month_noise[k] for k in month_keys]
 
     return out
@@ -456,6 +559,7 @@ def product_weights_for_day(
     year: int,
     month: int,
     hour_block: str,
+    unavailable_mask: np.ndarray | None = None,
 ) -> np.ndarray:
     w = (
         catalog["category_weight"].to_numpy(dtype=float)
@@ -485,6 +589,12 @@ def product_weights_for_day(
         w *= np.where(catalog["is_lunch"] | catalog["is_dessert"], 1.10, 1.0)
 
     w = np.where(w <= 0, 1e-9, w)
+    if unavailable_mask is not None and unavailable_mask.any():
+        w = np.where(unavailable_mask, 0.0, w)
+        if w.sum() <= 0:
+            # Fallback degenerado: todos indisponíveis. Mantém uniforme para
+            # não dividir por zero — não deve ocorrer na prática.
+            w = np.ones_like(w)
     return w / w.sum()
 
 
@@ -525,12 +635,21 @@ def sample_quantities(n: int, rng: np.random.Generator) -> np.ndarray:
     return np.clip(qty, 1, 8).astype(int)
 
 
-def generate_sales(daily_df: pd.DataFrame, catalog: pd.DataFrame, seed: int) -> pd.DataFrame:
+def generate_sales(
+    daily_df: pd.DataFrame,
+    catalog: pd.DataFrame,
+    seed: int,
+    unavailable_periods: (
+        list[tuple[pd.Timestamp, pd.Timestamp, frozenset[str]]] | None
+    ) = None,
+) -> pd.DataFrame:
     rng = np.random.default_rng(seed)
     n_products = len(catalog)
     recipe_ids = catalog["id"].values
     base_prices = catalog["base_price"].to_numpy(dtype=float)
     recipe_to_idx = {rid: i for i, rid in enumerate(recipe_ids)}
+    catalog_ids_str = catalog["id"].astype(str).values
+    unavailable_periods = unavailable_periods or []
 
     drift = init_product_drift(n_products, seed)
     current_month: tuple[int, int] | None = None
@@ -563,6 +682,18 @@ def generate_sales(daily_df: pd.DataFrame, catalog: pd.DataFrame, seed: int) -> 
         month = int(day["month"])
         infl = inflation_factor(year)
 
+        # Máscara de produtos indisponíveis neste dia
+        unavailable_mask: np.ndarray | None = None
+        if unavailable_periods:
+            mask_arr = np.zeros(n_products, dtype=bool)
+            any_unavailable = False
+            for start, end, ids in unavailable_periods:
+                if start <= date_only <= end:
+                    mask_arr |= np.isin(catalog_ids_str, list(ids))
+                    any_unavailable = True
+            if any_unavailable:
+                unavailable_mask = mask_arr
+
         timestamps = sample_timestamps_batch(date_only, n_sales, weekday, rng)
         hours = pd.to_datetime(timestamps).hour
         hour_blocks = np.array([hour_to_block(int(h)) for h in hours])
@@ -573,7 +704,9 @@ def generate_sales(daily_df: pd.DataFrame, catalog: pd.DataFrame, seed: int) -> 
             cnt = int(mask.sum())
             if cnt == 0:
                 continue
-            w = product_weights_for_day(catalog, drift, year, month, block)
+            w = product_weights_for_day(
+                catalog, drift, year, month, block, unavailable_mask
+            )
             chosen = rng.choice(recipe_ids, size=cnt, p=w)
             products[mask] = chosen
 
@@ -592,7 +725,9 @@ def generate_sales(daily_df: pd.DataFrame, catalog: pd.DataFrame, seed: int) -> 
         year_chunks.append(np.full(n_sales, year))
 
     if not date_chunks:
-        return pd.DataFrame(columns=["id", "date_time", "recipe_id", "quantity", "unit_price"])
+        return pd.DataFrame(
+            columns=["id", "date_time", "recipe_id", "quantity", "unit_price"]
+        )
 
     all_dt = np.concatenate(date_chunks)
     all_recipe = np.concatenate(recipe_chunks)
@@ -649,7 +784,9 @@ def validate_sales(sales: pd.DataFrame, catalog: pd.DataFrame) -> None:
     max_share = float(shares.iloc[0])
     if max_share > MAX_PRODUCT_SHARE:
         top = shares.index[0]
-        raise ValueError(f"Produto {top} com share {max_share:.1%} > {MAX_PRODUCT_SHARE:.0%}")
+        raise ValueError(
+            f"Produto {top} com share {max_share:.1%} > {MAX_PRODUCT_SHARE:.0%}"
+        )
 
     if len(shares) >= 2:
         ratio = float(shares.iloc[0] / shares.iloc[1])
@@ -661,7 +798,9 @@ def validate_sales(sales: pd.DataFrame, catalog: pd.DataFrame) -> None:
         # Preço médio unitário do item (com inflação), auditável via unit_price
         ticket_2026 = float(sales_2026["unit_price"].mean())
         if not (24.0 <= ticket_2026 <= 35.0):
-            raise ValueError(f"Preço médio unitário 2026 fora de R$24-35: R${ticket_2026:.2f}")
+            raise ValueError(
+                f"Preço médio unitário 2026 fora de R$24-35: R${ticket_2026:.2f}"
+            )
 
 
 def write_summaries(sales: pd.DataFrame, daily: pd.DataFrame, out_dir: Path) -> None:
@@ -692,18 +831,22 @@ def write_summaries(sales: pd.DataFrame, daily: pd.DataFrame, out_dir: Path) -> 
             receita_total=("receita_linha", "sum"),
         )
     )
-    monthly["ticket_medio"] = (monthly["receita_total"] / monthly["unidades_vendidas"]).round(2)
-    monthly["receita_por_venda"] = (monthly["receita_total"] / monthly["vendas_mes"]).round(2)
+    monthly["ticket_medio"] = (
+        monthly["receita_total"] / monthly["unidades_vendidas"]
+    ).round(2)
+    monthly["receita_por_venda"] = (
+        monthly["receita_total"] / monthly["vendas_mes"]
+    ).round(2)
     monthly.to_csv(out_dir / "resumo_mensal_vendas.csv", index=False)
 
 
 def main() -> None:
     root = Path(__file__).resolve().parents[1]
-    new_dir = root / "New"
 
-    recipes_path = new_dir / "receitas.csv"
-    holidays_path = new_dir / "feriados_recife.csv"
-    out_csv = new_dir / "vendas.csv"
+    recipes_path = root / "receitas.csv"
+    holidays_path = root / "feriados_recife.csv"
+    unavailability_path = root / "produtos_indisponiveis.csv"
+    out_csv = root / "vendas.csv"
 
     start = pd.Timestamp(START_DATE)
     end = pd.Timestamp(END_DATE)
@@ -711,6 +854,11 @@ def main() -> None:
     print("Carregando catálogo e feriados...")
     catalog = load_catalog(recipes_path, seed=SEED)
     holidays = load_holiday_calendar(holidays_path)
+    unavailable_periods = load_unavailability(unavailability_path, catalog)
+    if unavailable_periods:
+        print(
+            f"  - {len(unavailable_periods)} período(s) de indisponibilidade carregado(s)"
+        )
     year_factors = build_year_factors(SEED)
 
     print("Montando calendário e alocando demanda diária...")
@@ -720,7 +868,9 @@ def main() -> None:
     daily = allocate_daily_sales(cal, monthly_targets, seed=SEED)
 
     print("Gerando vendas (pode levar alguns segundos)...")
-    sales = generate_sales(daily, catalog, seed=SEED)
+    sales = generate_sales(
+        daily, catalog, seed=SEED, unavailable_periods=unavailable_periods
+    )
 
     print("Validando...")
     validate_sales(sales, catalog)
@@ -729,25 +879,30 @@ def main() -> None:
     sales.to_csv(out_csv, index=False)
 
     print("Gerando resumos...")
-    write_summaries(sales, daily, new_dir)
-
-    yearly = sales.assign(year=sales["date_time"].dt.year).groupby("year").agg(
-        vendas=("id", "count"),
-        ticket_medio=("unit_price", "mean"),
-        qty_media=("quantity", "mean"),
+    write_summaries(sales, daily, root)
+    yearly = (
+        sales.assign(year=sales["date_time"].dt.year)
+        .groupby("year")
+        .agg(
+            vendas=("id", "count"),
+            ticket_medio=("unit_price", "mean"),
+            qty_media=("quantity", "mean"),
+        )
     )
     print(f"Vendas geradas: {len(sales):,}")
     print(f"Período: {sales['date_time'].min()} até {sales['date_time'].max()}")
     print(f"Preço médio unitário: R${sales['unit_price'].mean():.2f}")
-    print(f"Receita média por linha: R${(sales['unit_price'] * sales['quantity']).mean():.2f}")
+    print(
+        f"Receita média por linha: R${(sales['unit_price'] * sales['quantity']).mean():.2f}"
+    )
     print(f"Quantity média: {sales['quantity'].mean():.2f}")
     top_share = sales["recipe_id"].value_counts(normalize=True).iloc[0]
     print(f"Maior share produto: {top_share:.1%}")
     print(f"Totais por ano:\n{yearly}")
     print("Arquivos:")
     print(f"  - {out_csv}")
-    print(f"  - {new_dir / 'resumo_diario_vendas.csv'}")
-    print(f"  - {new_dir / 'resumo_mensal_vendas.csv'}")
+    print(f"  - {root / 'resumo_diario_vendas.csv'}")
+    print(f"  - {root / 'resumo_mensal_vendas.csv'}")
 
 
 if __name__ == "__main__":

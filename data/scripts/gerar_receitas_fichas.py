@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Gera data/New/receitas.csv e data/New/fichas_tecnicas.csv a partir das bases antigas,
+Gera data/receitas.csv e data/fichas_tecnicas.csv a partir das bases antigas,
 mapeando para ingredientes.csv atualizado.
 """
 from __future__ import annotations
@@ -15,7 +15,6 @@ import openpyxl
 
 ROOT = Path(__file__).resolve().parents[2]
 DATA = ROOT / "data"
-NEW = DATA / "New"
 PRODUCTION_CATEGORY_ID = "CAT0015"
 PRODUCTION_CATEGORY_NAME = "Produção"
 
@@ -461,7 +460,7 @@ def normalize_name(value: str | None) -> str:
 
 def load_new_ingredients() -> dict[str, dict]:
     ingredients: dict[str, dict] = {}
-    with open(NEW / "ingredientes.csv", newline="", encoding="utf-8") as fh:
+    with open(DATA / "ingredientes.csv", newline="", encoding="utf-8") as fh:
         for row in csv.DictReader(fh):
             ingredients[row["id"]] = {
                 "name": row["name"],
@@ -738,7 +737,7 @@ def validate(recipes: list[dict], fichas: list[dict], ingredients: dict[str, dic
 
 def ensure_production_category() -> None:
     """Garante CAT0015 Produção em categorias.csv."""
-    path = NEW / "categorias.csv"
+    path = DATA / "categorias.csv"
     rows: list[dict[str, str]] = []
     found = False
     with open(path, newline="", encoding="utf-8") as fh:
@@ -764,7 +763,7 @@ def sync_production_ingredient_categories(recipes: list[dict]) -> int:
         for r in recipes
         if r["type"] == "PRODUCAO" and r.get("output_ingredient_id")
     }
-    path = NEW / "ingredientes.csv"
+    path = DATA / "ingredientes.csv"
     rows: list[dict[str, str]] = []
     updated = 0
     with open(path, newline="", encoding="utf-8") as fh:
@@ -798,12 +797,12 @@ def main() -> None:
     validate(recipes, fichas, ingredients)
 
     write_csv(
-        NEW / "receitas.csv",
+        DATA / "receitas.csv",
         ["id", "name", "type", "yield_qty", "yield_unit", "output_ingredient_id", "sale_price"],
         recipes,
     )
     write_csv(
-        NEW / "fichas_tecnicas.csv",
+        DATA / "fichas_tecnicas.csv",
         ["recipe_id", "ingredient_id", "qty", "unit"],
         fichas,
     )
@@ -821,7 +820,7 @@ def main() -> None:
         f"Categoria {PRODUCTION_CATEGORY_ID} ({PRODUCTION_CATEGORY_NAME}): "
         f"{production_outputs} ingredientes; {cat_updates} atualizados em ingredientes.csv"
     )
-    print(f"Escritos: {NEW / 'receitas.csv'} e {NEW / 'fichas_tecnicas.csv'}")
+    print(f"Escritos: {DATA / 'receitas.csv'} e {DATA / 'fichas_tecnicas.csv'}")
 
 
 if __name__ == "__main__":
