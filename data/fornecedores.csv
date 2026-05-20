@@ -1,0 +1,26 @@
+id,name,cnpj,email,phone,avg_delivery_time
+FOR0001,Distribuidora Doce Sabor Ltda,12.345.678/0001-90,vendas@docesabor.com.br,(11) 3456-7890,3
+FOR0002,Cacau Brasil Importadora S.A.,23.456.789/0001-01,comercial@cacaubrasil.com.br,(11) 4567-8901,5
+FOR0003,Frutas do Vale Distribuidora,34.567.890/0001-12,pedidos@frutasdovale.com.br,(11) 5678-9012,2
+FOR0004,Laticínios Serra Azul Ltda,45.678.901/0001-23,vendas@serraazul.com.br,(31) 6789-0123,2
+FOR0005,Moinho Pão Dourado S.A.,56.789.012/0001-34,atendimento@paodourado.com.br,(11) 7890-1234,4
+FOR0006,Nozes & Castanhas Premium Ltda,67.890.123/0001-45,contato@nczcastanhas.com.br,(11) 8901-2345,6
+FOR0007,Hortifruti Central Distribuidora,78.901.234/0001-56,pedidos@hortifruticentral.com.br,(11) 9012-3456,1
+FOR0008,Frigorífico Bom Corte Ltda,89.012.345/0001-67,vendas@bomcorte.com.br,(11) 2345-6789,3
+FOR0009,Especiarias do Oriente Importadora,90.123.456/0001-78,comercial@especiariasoriente.com.br,(11) 3456-1234,7
+FOR0010,Óleos Vitalle Indústria S.A.,11.223.344/0001-55,vendas@vitalleoleos.com.br,(19) 4567-2345,5
+FOR0011,Bebidas Premium Distribuidora,22.334.455/0001-66,pedidos@bebidaspremium.com.br,(11) 5678-3456,3
+FOR0012,Molhos & Cia Ltda,33.445.566/0001-77,vendas@molhosecia.com.br,(11) 6789-4567,4
+FOR0013,Frutas Secas Brasil Ltda,44.556.677/0001-88,contato@frutassecasbrasil.com.br,(11) 7890-5678,5
+FOR0014,Confeitaria Insumos Ltda,55.667.788/0001-99,vendas@confeitariainsumos.com.br,(11) 8901-6789,4
+FOR0015,Mel Puro Apiário S.A.,66.778.899/0001-10,comercial@melpuroapiario.com.br,(15) 9012-7890,6
+FOR0016,Grãos do Cerrado Distribuidora,77.889.900/0001-21,vendas@graosdocerrado.com.br,(62) 2345-8901,5
+FOR0017,Embalagens Express Ltda,88.990.011/0001-32,pedidos@embalagensexpress.com.br,(11) 3456-9012,2
+FOR0018,Doçaria Fina Distribuidora,99.001.122/0001-43,vendas@docariafina.com.br,(11) 4567-0123,3
+FOR0019,Lácteos Premium SP Ltda,10.111.222/0001-54,atendimento@lacteospremium.com.br,(11) 5678-1234,2
+FOR0020,Aromas e Essências Brasil S.A.,21.222.333/0001-65,comercial@aromasbrasil.com.br,(11) 6789-2345,4
+FOR0021,Chocolates Finos Importados,32.333.444/0001-76,vendas@chocolatesfinos.com.br,(11) 7890-3456,7
+FOR0022,Açúcar & Mel Comércio Ltda,43.444.555/0001-87,contato@acucaremel.com.br,(11) 8901-4567,3
+FOR0023,Legumes Frescos Distribuidora,54.555.666/0001-98,pedidos@legumesfrescos.com.br,(11) 9012-5678,1
+FOR0024,Tempero da Terra Indústria,65.666.777/0001-09,vendas@temperodaterra.com.br,(85) 2345-6780,6
+FOR0025,Insumos Gourmet Distribuidora,76.777.888/0001-20,comercial@insumosgourmet.com.br,(11) 3456-7801,4
