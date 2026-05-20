@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 
 from .database import engine, Base, get_db
-from .models import Ingrediente, LogContagem
+from .models import Ingrediente, LogContagem, EstoqueAtual
 from .schemas import (
     IngredienteOut,
     EstoquePaginado,
@@ -131,7 +131,10 @@ def update_estoque(lote: AtualizacaoLote, db: Session = Depends(get_db)):
             delta=round(atualizacao.new_qty - anterior, 3),
             sessao=lote.session_label,
         ))
-        ingrediente.current_qty = atualizacao.new_qty
+        if ingrediente.estoque_atual is None:
+            ingrediente.estoque_atual = EstoqueAtual(qtd=atualizacao.new_qty)
+        else:
+            ingrediente.estoque_atual.qtd = atualizacao.new_qty
         count += 1
 
     db.commit()
