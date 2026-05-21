@@ -297,16 +297,86 @@ def holiday_weight_for_row(nome: str, tipo: str) -> float:
     nome_u = str(nome).upper()
     tipo_u = str(tipo).upper()
 
-    # Boa Viagem esvazia em feriados: locais viajam (Olinda no Carnaval,
-    # interior no São João), turismo de praia não compensa o fluxo do dia a dia.
-    if "CARNAVAL" in nome_u or "CINZAS" in nome_u:
-        return 0.70
+    # --- Feriados que esvaziam Boa Viagem (já acumulam penalidade dos blocos
+    #     is_carnaval_window / is_sao_joao em compute_daily_weights) ---
+
+    # Carnaval: fluxo vai para Olinda; cinzas já é recuperação parcial
+    if "CARNAVAL" in nome_u:
+        return 0.72
+    if "CINZAS" in nome_u:
+        return 0.82
+
+    # São João: locais migram para o interior; acumula com is_sao_joao (×0.70)
     if "SÃO JOÃO" in nome_u or "SAO JOAO" in nome_u or "SÃO JOAO" in nome_u:
-        return 0.70
-    if tipo_u in {"NACIONAL", "MUNICIPAL", "ESTADUAL"}:
-        return 0.55
-    if tipo_u == "FACULTATIVO":
+        return 0.75
+
+    # Semana Santa: famílias viajam, movimento reduzido
+    if "SEXTA-FEIRA SANTA" in nome_u or "PAIXÃO" in nome_u or "PAIXAO" in nome_u:
+        return 0.75
+    if "QUINTA" in nome_u and "SANTA" in nome_u:
         return 0.85
+
+    # Natal e Ano Novo: família em casa, café opera mas esvaziado
+    if "NATAL" in nome_u:
+        return 0.78
+    if "ANO NOVO" in nome_u:
+        return 0.80
+
+    # Véspera de Ano Novo: agito da cidade, brunch e happy-hour cheios
+    if "VÉSPERA" in nome_u or "VESPERA" in nome_u:
+        return 0.92
+
+    # Finados: manhã em cemitérios, tarde relativamente quieta
+    if "FINADOS" in nome_u:
+        return 0.78
+
+    # --- Feriados que geram movimento extra em café de bairro nobre ---
+
+    # 1º de Maio e Independência: lazer ativo, brunch e almoço fora
+    if "TRABALHO" in nome_u:
+        return 0.95
+    if "INDEPENDÊNCIA" in nome_u or "INDEPENDENCIA" in nome_u:
+        return 0.93
+
+    # Tiradentes e Nossa Sra. Aparecida (Dia das Crianças): famílias saem
+    if "TIRADENTES" in nome_u:
+        return 0.92
+    if "APARECIDA" in nome_u:
+        return 0.92
+
+    # Corpus Christi: missa + brunch, bom fluxo de manhã
+    if "CORPUS" in nome_u:
+        return 0.88
+
+    # Feriados de servidores / professores: folga sem viagem, café lotado
+    if "SERVIDOR" in nome_u:
+        return 0.88
+    if "PROFESSOR" in nome_u:
+        return 0.90
+
+    # Consciência Negra: eventos culturais, boa movimentação
+    if "CONSCIÊNCIA" in nome_u or "CONSCIENCIA" in nome_u:
+        return 0.87
+
+    # Proclamação da República: feriado tranquilo, movimento moderado-alto
+    if "REPÚBLICA" in nome_u or "REPUBLICA" in nome_u:
+        return 0.85
+
+    # Municipais recifenses: N. Sra. do Carmo e N. Sra. da Conceição
+    if "CARMO" in nome_u or "CONCEIÇÃO" in nome_u or "CONCEICAO" in nome_u:
+        return 0.83
+
+    # Data Magna de Pernambuco: feriado estadual com movimento moderado
+    if "MAGNA" in nome_u:
+        return 0.80
+
+    # Fallbacks por tipo (não mapeados acima)
+    if tipo_u == "NACIONAL":
+        return 0.85
+    if tipo_u in {"MUNICIPAL", "ESTADUAL"}:
+        return 0.82
+    if tipo_u == "FACULTATIVO":
+        return 0.90
     return 1.0
 
 
@@ -344,7 +414,7 @@ def load_unavailability(
         if token in valid_ids:
             ids = {token}
         else:
-            mask = names_upper.str.contains(token.upper(), na=False)
+            mask = names_upper.str.contains(token.upper(), na=False, regex=False)
             ids = set(catalog.loc[mask, "id"].astype(str))
         if ids:
             periods.append((row["data_inicio"], row["data_fim"], frozenset(ids)))

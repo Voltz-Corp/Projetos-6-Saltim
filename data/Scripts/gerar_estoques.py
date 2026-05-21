@@ -38,6 +38,12 @@ CALIBRATION_MAX_ITER = 3
 
 CAT_PRODUCAO = "CAT0015"
 
+# Pedidos preferencialmente na sexta-feira (0=Seg … 4=Sex)
+REGULAR_ORDER_DOW = 4
+# Estoque < 12,5% da cobertura de lead-time → pedido emergencial imediato
+# (somente situações realmente críticas; baixo estoque no fim do período é normal)
+EMERGENCY_STOCK_RATIO = 0.125
+
 
 # ---------------------------------------------------------------------------
 # Utilitários (reutilizados de gerar_estoque_sintetico.py)
@@ -131,6 +137,7 @@ class SimulationState:
     rupture_days: np.ndarray
     overstock_days: np.ndarray
     understock_days: np.ndarray
+    orders_log: list[dict] = field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -525,6 +532,7 @@ def rolling_mean(arr: np.ndarray, end: int, window: int) -> float:
     return float(seg.mean()) if len(seg) else 0.0
 
 
+
 def simulate(
     consumo: np.ndarray,
     ingredientes: pd.DataFrame,
@@ -540,11 +548,19 @@ def simulate(
     under_windows: list[list[NoiseWindow]],
     rng: np.random.Generator,
     anchor_strength: float = 1.0,
+    dates: pd.DatetimeIndex | None = None,
 ) -> SimulationState:
     n_days, n_ings = consumo.shape
     ing_idx = {i: k for k, i in enumerate(ing_ids)}
     units = ingredientes["unit"].astype(str).tolist()
     names = ingredientes["name"].astype(str).tolist()
+
+    # Dia da semana por índice de dia
+    weekdays: np.ndarray | None = None
+    if dates is not None and len(dates) == n_days:
+        weekdays = np.array([d.dayofweek for d in dates], dtype=int)
+
+    orders_log: list[dict] = []
 
     # Estoque inicial
     stock = np.zeros(n_ings, dtype=np.float64)
@@ -652,9 +668,9 @@ def simulate(
                 pending_orders.append((min(arrive, n_days + 30), j, prod_qty, True))
                 total_produced[j] += prod_qty
 
-        # (d) Pedidos a fornecedor (folhas e demais não-semi ou semi sem receita)
+        # (d) Pedidos a fornecedor — apenas ingredientes compráveis (não-CAT0015)
         for j in range(n_ings):
-            if policies[j].is_semi and ing_ids[j] in semi_recipe:
+            if policies[j].is_semi:          # CAT0015 são produzidos, nunca comprados
                 continue
             if j in pending_po_today:
                 continue
@@ -679,29 +695,81 @@ def simulate(
                 skip_until[j] = day + w_under.duration
                 continue
 
-            if stock[j] < s_level:
-                order_qty = max(S_level - stock[j], pol.step)
-                order_qty = ceil_to_step(order_qty, pol.step)
+            # Regra de compra: sexta-feira por padrão ---------------------------
+            # Sexta é forward-looking: pede tudo que NÃO vai sobreviver até a
+            # próxima sexta sem reposição. Outros dias só disparam pedido se o
+            # estoque está prestes a zerar (verdadeira exceção).
+            day_of_week = int(weekdays[day]) if weekdays is not None else REGULAR_ORDER_DOW
+            is_friday = day_of_week == REGULAR_ORDER_DOW
 
-                w_over = active_window(over_windows[j], day)
-                if w_over and w_over.kind == "overstock":
-                    order_qty *= w_over.magnitude
+            if is_friday:
+                # Projeta estoque na próxima sexta (7 dias) sem reposição.
+                # Se cairia abaixo do ponto de reordem, pede agora.
+                projected_next_friday = stock[j] - avg14_eff * 7
+                should_order = (
+                    stock[j] < s_level or projected_next_friday < s_level
+                )
+            else:
+                # Mid-week: só verdadeiro emergencial, e nunca em fim de semana
+                if day_of_week > 4:
+                    continue
+                # Janela final de ancoragem: estoque baixo é intencional
+                if (n_days - 1 - day) < ANCHOR_DAYS:
+                    continue
+                if stock[j] >= s_level:
+                    continue  # nem está abaixo do reorder point
 
-                lt = pol.lead_time
-                if w_under and w_under.kind == "delay":
-                    lt = int(lt * w_under.magnitude)
+                days_to_friday = (REGULAR_ORDER_DOW - day_of_week) % 7
+                projected = stock[j] - avg14_eff * days_to_friday
+                should_order = (
+                    projected < pol.step * EMERGENCY_STOCK_RATIO
+                    or stock[j] < pol.lead_time * avg14_eff * EMERGENCY_STOCK_RATIO
+                )
 
-                lt += int(rng.integers(0, 2)) if rng.random() < 0.12 else 0
-                if rng.random() < 0.08:
-                    lt += int(rng.integers(1, 4))
+            if not should_order:
+                continue
 
-                arrive = day + max(1, lt)
-                ship_qty = order_qty
-                if rng.random() < 0.04:
-                    ship_qty *= float(rng.uniform(0.85, 1.25))
+            # Projeção de demanda da semana seguinte (7 dias à frente) ----------
+            # Usa o consumo real futuro do CSV de vendas para escalar o pedido.
+            look_end = min(day + 8, n_days - 1)
+            if look_end > day and avg14_eff > 1e-9:
+                future_vals = consumo[day + 1 : look_end, j]
+                next_week_daily = float(future_vals.mean()) if len(future_vals) else avg14_eff
+                week_mult = float(np.clip(next_week_daily / avg14_eff, 0.5, 2.0))
+            else:
+                week_mult = 1.0
 
-                pending_orders.append((min(arrive, n_days + 30), j, ship_qty, False))
-                pending_po_today.add(j)
+            # Quantidade: cobre o gap até S_level, com ajuste sazonal semanal
+            order_qty = max((S_level - stock[j]) * week_mult, pol.step)
+            order_qty = ceil_to_step(order_qty, pol.step)
+
+            w_over = active_window(over_windows[j], day)
+            if w_over and w_over.kind == "overstock":
+                order_qty *= w_over.magnitude
+
+            lt = pol.lead_time
+            if w_under and w_under.kind == "delay":
+                lt = int(lt * w_under.magnitude)
+
+            lt += int(rng.integers(0, 2)) if rng.random() < 0.12 else 0
+            if rng.random() < 0.08:
+                lt += int(rng.integers(1, 4))
+
+            arrive = day + max(1, lt)
+            ship_qty = order_qty
+            if rng.random() < 0.04:
+                ship_qty *= float(rng.uniform(0.85, 1.25))
+
+            pending_orders.append((min(arrive, n_days + 30), j, ship_qty, False))
+            pending_po_today.add(j)
+
+            orders_log.append({
+                "day": day,
+                "ing_j": j,
+                "qty": float(ship_qty),
+                "arrive_day": int(arrive),  # sem cap — pode ser pós-END_DATE (em_transito)
+                "order_type": "sexta" if is_friday else "emergencial",
+            })
 
         # Eventos de sobrestoque: compra extra no início da janela
         for j in range(n_ings):
@@ -786,6 +854,7 @@ def simulate(
         rupture_days=rupture_days,
         overstock_days=overstock_days,
         understock_days=understock_days,
+        orders_log=orders_log,
     )
 
 
@@ -850,6 +919,7 @@ def calibrate_windows(
     under_windows: list[list[NoiseWindow]],
     rng: np.random.Generator,
     n_days: int,
+    dates: pd.DatetimeIndex | None = None,
 ) -> tuple[list[list[NoiseWindow]], list[list[NoiseWindow]], SimulationState]:
     targets_o = [_target_days(n_days, rng)[0] for _ in range(len(ing_ids))]
     targets_u = [_target_days(n_days, rng)[1] for _ in range(len(ing_ids))]
@@ -857,6 +927,7 @@ def calibrate_windows(
     state = simulate(
         consumo, ingredientes, ing_ids, policies, semi_recipe, semi_ids,
         current_qty, p90, p25, unavail_share, over_windows, under_windows, rng,
+        dates=dates,
     )
 
     max_iter = CALIBRATION_MAX_ITER
@@ -899,6 +970,7 @@ def calibrate_windows(
         state = simulate(
             consumo, ingredientes, ing_ids, policies, semi_recipe, semi_ids,
             current_qty, p90, p25, unavail_share, over_windows, under_windows, rng,
+            dates=dates,
         )
 
     return over_windows, under_windows, state
@@ -1277,6 +1349,7 @@ def main() -> None:
         under_w,
         rng,
         n_days,
+        dates=dates,
     )
 
     print("Calibrando snapshots finais por item...")
@@ -1298,13 +1371,38 @@ def main() -> None:
     print(f"Salvando {out_csv}...")
     estoques.to_csv(out_csv, index=False)
 
-    print("Gerando resumos...")
+    print("Gerando resumos de estoque...")
     write_summaries(estoques, consumo, dates, ing_ids, state, data_dir)
+
+    # Log enxuto das decisões de pedido para alimentar gerar_pedidos.py
+    print("Gravando log de pedidos da simulação...")
+    log_rows = []
+    for order in state.orders_log:
+        d = int(order["day"])
+        ad = int(order["arrive_day"])
+        ing_id = ing_ids[int(order["ing_j"])]
+        data_pedido = dates[d].date()
+        if ad < n_days:
+            data_prevista = dates[ad].date()
+        else:
+            data_prevista = (dates[-1] + pd.Timedelta(days=ad - (n_days - 1))).date()
+        log_rows.append({
+            "data_pedido": data_pedido,
+            "ingredient_id": ing_id,
+            "qty": float(order["qty"]),
+            "data_prevista": data_prevista,
+            "order_type": order["order_type"],
+        })
+    log_df = pd.DataFrame(log_rows)
+    log_path = data_dir / "pedidos_log.csv"
+    log_df.to_csv(log_path, index=False)
+    n_sexta = int((log_df["order_type"] == "sexta").sum()) if len(log_df) else 0
+    n_emerg = int((log_df["order_type"] == "emergencial").sum()) if len(log_df) else 0
 
     eval_days = np.maximum(1, (n_days - 1) - (unavail_share[: n_days - 1] >= 0.5).sum(axis=0))
     pct_over = [state.overstock_days[j] / eval_days[j] for j in range(n_ings)]
     pct_under = [state.understock_days[j] / eval_days[j] for j in range(n_ings)]
-    print(f"Registros: {len(estoques):,}")
+    print(f"Registros estoque: {len(estoques):,}")
     print(f"Período: {estoques['date_time'].min()} até {estoques['date_time'].max()}")
     print(
         f"Sobrestoque por item — mediana: {np.median(pct_over):.1%}, "
@@ -1314,7 +1412,13 @@ def main() -> None:
         f"Substoque por item — mediana: {np.median(pct_under):.1%}, "
         f"min: {np.min(pct_under):.1%}, max: {np.max(pct_under):.1%}"
     )
-    print(f"Arquivos:\n  - {out_csv}\n  - {data_dir / 'resumo_diario_estoques.csv'}\n  - {data_dir / 'resumo_mensal_estoques.csv'}")
+    print(f"Eventos de compra logados: {len(log_df):,} (sexta={n_sexta:,}, emergencial={n_emerg:,})")
+    print(
+        f"Arquivos:\n  - {out_csv}\n  - {log_path}"
+        f"\n  - {data_dir / 'resumo_diario_estoques.csv'}"
+        f"\n  - {data_dir / 'resumo_mensal_estoques.csv'}"
+        f"\nPróximo passo: execute data/Scripts/gerar_pedidos.py para gerar pedidos.csv"
+    )
 
 
 if __name__ == "__main__":
