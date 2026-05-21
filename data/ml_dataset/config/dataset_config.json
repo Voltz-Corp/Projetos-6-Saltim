@@ -1,0 +1,16 @@
+{
+  "start_date": "2023-01-01",
+  "end_date": "2026-05-19",
+  "excluded_purchase_category_id": "CAT0015",
+  "review_cycle_days": 7,
+  "safety_stock_z": 1.65,
+  "rolling_windows": [7, 14, 28],
+  "split_dates": {
+    "train_start": "2023-01-01",
+    "train_end": "2025-06-30",
+    "validation_start": "2025-07-01",
+    "validation_end": "2025-12-31",
+    "test_start": "2026-01-01",
+    "test_end": "2026-05-19"
+  }
+}
