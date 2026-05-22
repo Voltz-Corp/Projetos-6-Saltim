@@ -9,26 +9,13 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      - ./data:/data:ro
       - ./data/ml_dataset/outputs:/ml_dataset_outputs:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U saltim -d saltim_db"]
       interval: 5s
       timeout: 5s
       retries: 5
-
-  db-init:
-    image: postgres:16-alpine
-    depends_on:
-      db:
-        condition: service_healthy
-    environment:
-      PGPASSWORD: saltim123
-    volumes:
-      - ./data/ml_dataset/db:/ml_dataset_db:ro
-    command: >
-      sh -c "psql -h db -U saltim -d saltim_db -v ON_ERROR_STOP=1
-      -f /ml_dataset_db/load_ml_dataset.sql"
-    restart: "no"
 
 volumes:
   postgres_data:

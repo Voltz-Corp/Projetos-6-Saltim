@@ -1,8 +1,9 @@
 -- Loads the Saltim ML datasets into PostgreSQL.
--- This file is executed by the db-init service in docker-compose.yml.
+-- This file is executed by the backend startup loader.
 
 CREATE SCHEMA IF NOT EXISTS ml;
 
+DROP TABLE IF EXISTS ml.abt_reposicao_sample_100;
 DROP TABLE IF EXISTS ml.abt_reposicao;
 CREATE TABLE ml.abt_reposicao (
     "ingredient_id" TEXT,
@@ -116,6 +117,14 @@ COPY ml.abt_reposicao ("ingredient_id", "date", "nome_ingrediente", "unidade", "
 FROM '/ml_dataset_outputs/abt_reposicao_part2.csv'
 WITH (FORMAT csv, HEADER true, NULL '', ENCODING 'UTF8');
 
+CREATE TABLE ml.abt_reposicao_sample_100 (
+    LIKE ml.abt_reposicao INCLUDING DEFAULTS
+);
+
+COPY ml.abt_reposicao_sample_100
+FROM '/ml_dataset_outputs/abt_reposicao_sample_100.csv'
+WITH (FORMAT csv, HEADER true, NULL '', ENCODING 'UTF8');
+
 DROP TABLE IF EXISTS ml.abt_pedidos_eventos;
 CREATE TABLE ml.abt_pedidos_eventos (
     "pedido_id" TEXT,
@@ -167,8 +176,12 @@ CREATE INDEX IF NOT EXISTS idx_ml_abt_reposicao_ingredient_date
 CREATE INDEX IF NOT EXISTS idx_ml_abt_reposicao_split
     ON ml.abt_reposicao ("split_temporal");
 
+CREATE INDEX IF NOT EXISTS idx_ml_abt_reposicao_sample_ingredient_date
+    ON ml.abt_reposicao_sample_100 ("ingredient_id", "date");
+
 CREATE INDEX IF NOT EXISTS idx_ml_pedidos_eventos_ingredient_date
     ON ml.abt_pedidos_eventos ("ingredient_id", "data_pedido");
 
 ANALYZE ml.abt_reposicao;
+ANALYZE ml.abt_reposicao_sample_100;
 ANALYZE ml.abt_pedidos_eventos;

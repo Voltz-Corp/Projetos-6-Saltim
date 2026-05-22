@@ -2,6 +2,6 @@ S7 - Seleção de Ideias.pdf
 .venv
 venv/
 node_modules/
-*/__pycache__/
+**/__pycache__/
 .env
 TODO.md

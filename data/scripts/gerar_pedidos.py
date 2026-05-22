@@ -146,7 +146,7 @@ def main() -> None:
     if not log_path.exists():
         raise FileNotFoundError(
             f"Log não encontrado: {log_path}. "
-            "Execute data/Scripts/gerar_estoques.py primeiro."
+            "Execute data/scripts/gerar_estoques.py primeiro."
         )
 
     print(f"Lendo log: {log_path}")

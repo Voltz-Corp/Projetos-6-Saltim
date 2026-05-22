@@ -768,7 +768,7 @@ def sync_production_ingredient_categories(recipes: list[dict]) -> int:
     updated = 0
     with open(path, newline="", encoding="utf-8") as fh:
         reader = csv.DictReader(fh)
-        fieldnames = reader.fieldnames or ["id", "name", "unit", "category_id", "current_qty"]
+        fieldnames = reader.fieldnames or ["id", "name", "unit", "category_id"]
         for row in reader:
             if row["id"] in output_ids and row["category_id"] != PRODUCTION_CATEGORY_ID:
                 row["category_id"] = PRODUCTION_CATEGORY_ID

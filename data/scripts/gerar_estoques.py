@@ -38,6 +38,12 @@ CALIBRATION_MAX_ITER = 3
 
 CAT_PRODUCAO = "CAT0015"
 
+# Pedidos preferencialmente na sexta-feira (0=Seg … 4=Sex)
+REGULAR_ORDER_DOW = 4
+# Estoque < 12,5% da cobertura de lead-time → pedido emergencial imediato
+# (somente situações realmente críticas; baixo estoque no fim do período é normal)
+EMERGENCY_STOCK_RATIO = 0.125
+
 
 # ---------------------------------------------------------------------------
 # Utilitários (reutilizados de gerar_estoque_sintetico.py)
@@ -131,6 +137,7 @@ class SimulationState:
     rupture_days: np.ndarray
     overstock_days: np.ndarray
     understock_days: np.ndarray
+    orders_log: list[dict] = field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -147,6 +154,18 @@ def load_all(data_dir: Path) -> dict:
     ingredientes = ingredientes.sort_values("id").reset_index(drop=True)
     ing_ids = ingredientes["id"].astype(str).tolist()
     ing_idx = {i: k for k, i in enumerate(ing_ids)}
+
+    # Saldo atual: lido do estoque_atual.csv (id, ingrediente, qtd, data).
+    # Mantém compatibilidade caso o arquivo ainda não exista.
+    estoque_atual_path = data_dir / "estoque_atual.csv"
+    if estoque_atual_path.exists():
+        estoque_atual = pd.read_csv(estoque_atual_path)
+        cur_map = dict(
+            zip(estoque_atual["ingrediente"].astype(str), estoque_atual["qtd"].astype(float))
+        )
+    else:
+        cur_map = {}
+    ingredientes["current_qty"] = ingredientes["id"].astype(str).map(cur_map).fillna(0.0)
 
     fi_best = (
         fi.merge(fornecedores[["id", "avg_delivery_time"]], left_on="supplier_id", right_on="id")
@@ -203,6 +222,7 @@ def load_all(data_dir: Path) -> dict:
 
     return {
         "ingredientes": ingredientes,
+        "receitas": receitas,
         "ing_ids": ing_ids,
         "ing_idx": ing_idx,
         "bom_lines": bom_lines,
@@ -211,6 +231,174 @@ def load_all(data_dir: Path) -> dict:
         "vendas": vendas,
         "lead_map": lead_map,
     }
+
+
+def load_unavailability(
+    path: Path,
+    receitas: pd.DataFrame,
+) -> list[tuple[pd.Timestamp, pd.Timestamp, frozenset[str]]]:
+    """Lê períodos de indisponibilidade de produto final."""
+    if not path.exists():
+        return []
+
+    df = pd.read_csv(path)
+    if df.empty or not {"match", "data_inicio", "data_fim"}.issubset(df.columns):
+        return []
+
+    finals = receitas[receitas["type"].str.strip().str.upper() == "PRODUTO_FINAL"].copy()
+    finals["id"] = finals["id"].astype(str)
+    finals["name_upper"] = finals["name"].astype(str).str.upper()
+    valid_ids = set(finals["id"])
+
+    df["data_inicio"] = pd.to_datetime(df["data_inicio"], errors="coerce")
+    df["data_fim"] = pd.to_datetime(df["data_fim"], errors="coerce")
+    df = df.dropna(subset=["data_inicio", "data_fim"])
+
+    periods: list[tuple[pd.Timestamp, pd.Timestamp, frozenset[str]]] = []
+    for _, row in df.iterrows():
+        token = str(row["match"]).strip()
+        if not token:
+            continue
+        if token in valid_ids:
+            ids = {token}
+        else:
+            mask = finals["name_upper"].str.contains(token.upper(), na=False)
+            ids = set(finals.loc[mask, "id"])
+        if ids:
+            periods.append((row["data_inicio"].normalize(), row["data_fim"].normalize(), frozenset(ids)))
+    return periods
+
+
+def compute_unavailability_share(
+    vendas: pd.DataFrame,
+    bom_lines: pd.DataFrame,
+    semi_recipe: dict[str, tuple[str, float, list[tuple[str, float]]]],
+    ing_ids: list[str],
+    dates: pd.DatetimeIndex,
+    unavailability_periods: list[tuple[pd.Timestamp, pd.Timestamp, frozenset[str]]],
+) -> tuple[np.ndarray, np.ndarray]:
+    """Matriz [n_days, n_ings] com share de indisponibilidade por ingrediente."""
+    n_days = len(dates)
+    n_ings = len(ing_ids)
+    ing_idx = {iid: i for i, iid in enumerate(ing_ids)}
+    date_to_i = {pd.Timestamp(d).normalize(): i for i, d in enumerate(dates)}
+    unavail_share = np.zeros((n_days, n_ings), dtype=np.float64)
+    peak_share = np.zeros(n_ings, dtype=np.float64)
+    if not unavailability_periods:
+        return unavail_share, peak_share
+
+    sales_total = vendas.groupby("recipe_id", as_index=False)["quantity"].sum()
+
+    base = bom_lines[["recipe_id", "ingredient_id", "qty_per_unit"]].copy()
+    base = base[base["ingredient_id"].astype(str).isin(ing_idx)]
+    base["ingredient_id"] = base["ingredient_id"].astype(str)
+    base["recipe_id"] = base["recipe_id"].astype(str)
+
+    direct_total = (
+        sales_total.merge(base, on="recipe_id", how="inner")
+        .assign(consumo=lambda d: d["quantity"] * d["qty_per_unit"])
+        .groupby("ingredient_id", as_index=False)["consumo"]
+        .sum()
+    )
+    total_by_ing = {iid: 0.0 for iid in ing_ids}
+    for _, r in direct_total.iterrows():
+        total_by_ing[str(r["ingredient_id"])] += float(r["consumo"])
+
+    semi_expanded_rows: list[dict[str, float | str]] = []
+    semi_ids = set(semi_recipe)
+    for _, row in base.iterrows():
+        semi_id = str(row["ingredient_id"])
+        if semi_id not in semi_ids:
+            continue
+        qty_per_unit = float(row["qty_per_unit"])
+        for leaf_id, qty_per_yield in semi_recipe[semi_id][2]:
+            if leaf_id not in ing_idx:
+                continue
+            semi_expanded_rows.append(
+                {
+                    "recipe_id": str(row["recipe_id"]),
+                    "ingredient_id": str(leaf_id),
+                    "qty_per_unit": qty_per_unit * float(qty_per_yield),
+                }
+            )
+
+    if semi_expanded_rows:
+        semi_df = pd.DataFrame(semi_expanded_rows)
+        leaf_total = (
+            sales_total.merge(semi_df, on="recipe_id", how="inner")
+            .assign(consumo=lambda d: d["quantity"] * d["qty_per_unit"])
+            .groupby("ingredient_id", as_index=False)["consumo"]
+            .sum()
+        )
+        for _, r in leaf_total.iterrows():
+            total_by_ing[str(r["ingredient_id"])] += float(r["consumo"])
+
+    sales_by_recipe = dict(zip(sales_total["recipe_id"].astype(str), sales_total["quantity"].astype(float)))
+
+    for start, end, paused_ids in unavailability_periods:
+        paused = set(paused_ids)
+        paused_sales = pd.DataFrame(
+            {"recipe_id": list(paused), "quantity": [sales_by_recipe.get(r, 0.0) for r in paused]}
+        )
+        if paused_sales.empty:
+            continue
+
+        paused_by_ing = {iid: 0.0 for iid in ing_ids}
+        paused_direct = (
+            paused_sales.merge(base, on="recipe_id", how="inner")
+            .assign(consumo=lambda d: d["quantity"] * d["qty_per_unit"])
+            .groupby("ingredient_id", as_index=False)["consumo"]
+            .sum()
+        )
+        for _, r in paused_direct.iterrows():
+            paused_by_ing[str(r["ingredient_id"])] += float(r["consumo"])
+
+        if semi_expanded_rows:
+            paused_leaf = (
+                paused_sales.merge(pd.DataFrame(semi_expanded_rows), on="recipe_id", how="inner")
+                .assign(consumo=lambda d: d["quantity"] * d["qty_per_unit"])
+                .groupby("ingredient_id", as_index=False)["consumo"]
+                .sum()
+            )
+            for _, r in paused_leaf.iterrows():
+                paused_by_ing[str(r["ingredient_id"])] += float(r["consumo"])
+
+        local_share = np.zeros(n_ings, dtype=np.float64)
+        for iid in ing_ids:
+            den = max(total_by_ing.get(iid, 0.0), 1e-9)
+            num = paused_by_ing.get(iid, 0.0)
+            local_share[ing_idx[iid]] = float(np.clip(num / den, 0.0, 1.0))
+
+        for semi_id, (_, _, leaves) in semi_recipe.items():
+            if semi_id not in ing_idx:
+                continue
+            if semi_id in paused:
+                local_share[ing_idx[semi_id]] = 1.0
+            else:
+                used_by_paused = False
+                used_by_other = False
+                for rec_id, iid, _ in base.itertuples(index=False):
+                    if str(iid) != semi_id:
+                        continue
+                    if str(rec_id) in paused:
+                        used_by_paused = True
+                    else:
+                        used_by_other = True
+                    if used_by_paused and used_by_other:
+                        break
+                if used_by_paused and not used_by_other:
+                    local_share[ing_idx[semi_id]] = 1.0
+                if local_share[ing_idx[semi_id]] >= 0.999:
+                    for leaf_id, _ in leaves:
+                        if leaf_id in ing_idx:
+                            local_share[ing_idx[leaf_id]] = max(local_share[ing_idx[leaf_id]], 0.85)
+
+        mask_days = (dates >= start.normalize()) & (dates <= end.normalize())
+        if mask_days.any():
+            unavail_share[mask_days] = np.maximum(unavail_share[mask_days], local_share)
+        peak_share = np.maximum(peak_share, local_share)
+
+    return np.clip(unavail_share, 0.0, 1.0), np.clip(peak_share, 0.0, 1.0)
 
 
 def compute_daily_consumption(
@@ -344,6 +532,7 @@ def rolling_mean(arr: np.ndarray, end: int, window: int) -> float:
     return float(seg.mean()) if len(seg) else 0.0
 
 
+
 def simulate(
     consumo: np.ndarray,
     ingredientes: pd.DataFrame,
@@ -354,15 +543,24 @@ def simulate(
     current_qty: np.ndarray,
     p90: np.ndarray,
     p25: np.ndarray,
+    unavail_share: np.ndarray,
     over_windows: list[list[NoiseWindow]],
     under_windows: list[list[NoiseWindow]],
     rng: np.random.Generator,
     anchor_strength: float = 1.0,
+    dates: pd.DatetimeIndex | None = None,
 ) -> SimulationState:
     n_days, n_ings = consumo.shape
     ing_idx = {i: k for k, i in enumerate(ing_ids)}
     units = ingredientes["unit"].astype(str).tolist()
     names = ingredientes["name"].astype(str).tolist()
+
+    # Dia da semana por índice de dia
+    weekdays: np.ndarray | None = None
+    if dates is not None and len(dates) == n_days:
+        weekdays = np.array([d.dayofweek for d in dates], dtype=int)
+
+    orders_log: list[dict] = []
 
     # Estoque inicial
     stock = np.zeros(n_ings, dtype=np.float64)
@@ -392,6 +590,7 @@ def simulate(
 
     for day in range(n_days):
         pending_po_today.clear()
+        day_unavail = unavail_share[day]
 
         # (a) Recebimentos
         still_pending: list[tuple[int, int, float, bool]] = []
@@ -433,11 +632,18 @@ def simulate(
         for semi_id, (_, yield_qty, leaves) in semi_recipe.items():
             j = ing_idx[semi_id]
             pol = policies[j]
+            mult = max(0.0, 1.0 - float(day_unavail[j]))
             avg7 = rolling_mean(consumo_work[:, j], day, 7)
             if avg7 < 1e-9:
-                avg7 = max(consumo[:, j].mean(), pol.step)
-            s_level = pol.lead_time_prod * avg7 * pol.safety_factor
-            S_level = s_level + pol.cover_days * avg7
+                if mult < 0.3:
+                    avg7 = 0.0
+                else:
+                    avg7 = max(consumo[:, j].mean(), pol.step)
+            avg7_eff = avg7 * mult
+            if avg7_eff < pol.step * 0.1:
+                continue
+            s_level = pol.lead_time_prod * avg7_eff * pol.safety_factor
+            S_level = s_level + pol.cover_days * avg7_eff
 
             w_under = active_window(under_windows[j], day)
             skip_prod = w_under and w_under.kind == "skip_order"
@@ -462,9 +668,9 @@ def simulate(
                 pending_orders.append((min(arrive, n_days + 30), j, prod_qty, True))
                 total_produced[j] += prod_qty
 
-        # (d) Pedidos a fornecedor (folhas e demais não-semi ou semi sem receita)
+        # (d) Pedidos a fornecedor — apenas ingredientes compráveis (não-CAT0015)
         for j in range(n_ings):
-            if policies[j].is_semi and ing_ids[j] in semi_recipe:
+            if policies[j].is_semi:          # CAT0015 são produzidos, nunca comprados
                 continue
             if j in pending_po_today:
                 continue
@@ -472,45 +678,104 @@ def simulate(
                 continue
 
             pol = policies[j]
+            mult = max(0.0, 1.0 - float(day_unavail[j]))
             avg14 = rolling_mean(consumo_work[:, j], day, 14)
             if avg14 < 1e-9:
-                avg14 = max(float(consumo[:, j].mean()), pol.step)
+                if mult < 0.3:
+                    avg14 = 0.0
+                else:
+                    avg14 = max(float(consumo[:, j].mean()), pol.step)
+            avg14_eff = avg14 * mult
 
-            s_level = pol.lead_time * avg14 * pol.safety_factor
-            S_level = s_level + pol.cover_days * avg14
+            s_level = pol.lead_time * avg14_eff * pol.safety_factor
+            S_level = s_level + pol.cover_days * avg14_eff
 
             w_under = active_window(under_windows[j], day)
             if w_under and w_under.kind == "skip_order":
                 skip_until[j] = day + w_under.duration
                 continue
 
-            if stock[j] < s_level:
-                order_qty = max(S_level - stock[j], pol.step)
-                order_qty = ceil_to_step(order_qty, pol.step)
+            # Regra de compra: sexta-feira por padrão ---------------------------
+            # Sexta é forward-looking: pede tudo que NÃO vai sobreviver até a
+            # próxima sexta sem reposição. Outros dias só disparam pedido se o
+            # estoque está prestes a zerar (verdadeira exceção).
+            day_of_week = int(weekdays[day]) if weekdays is not None else REGULAR_ORDER_DOW
+            is_friday = day_of_week == REGULAR_ORDER_DOW
 
-                w_over = active_window(over_windows[j], day)
-                if w_over and w_over.kind == "overstock":
-                    order_qty *= w_over.magnitude
+            if is_friday:
+                # Projeta estoque na próxima sexta (7 dias) sem reposição.
+                # Se cairia abaixo do ponto de reordem, pede agora.
+                projected_next_friday = stock[j] - avg14_eff * 7
+                should_order = (
+                    stock[j] < s_level or projected_next_friday < s_level
+                )
+            else:
+                # Mid-week: só verdadeiro emergencial, e nunca em fim de semana
+                if day_of_week > 4:
+                    continue
+                # Janela final de ancoragem: estoque baixo é intencional
+                if (n_days - 1 - day) < ANCHOR_DAYS:
+                    continue
+                if stock[j] >= s_level:
+                    continue  # nem está abaixo do reorder point
 
-                lt = pol.lead_time
-                if w_under and w_under.kind == "delay":
-                    lt = int(lt * w_under.magnitude)
+                days_to_friday = (REGULAR_ORDER_DOW - day_of_week) % 7
+                projected = stock[j] - avg14_eff * days_to_friday
+                should_order = (
+                    projected < pol.step * EMERGENCY_STOCK_RATIO
+                    or stock[j] < pol.lead_time * avg14_eff * EMERGENCY_STOCK_RATIO
+                )
 
-                lt += int(rng.integers(0, 2)) if rng.random() < 0.12 else 0
-                if rng.random() < 0.08:
-                    lt += int(rng.integers(1, 4))
+            if not should_order:
+                continue
 
-                arrive = day + max(1, lt)
-                ship_qty = order_qty
-                if rng.random() < 0.04:
-                    ship_qty *= float(rng.uniform(0.85, 1.25))
+            # Projeção de demanda da semana seguinte (7 dias à frente) ----------
+            # Usa o consumo real futuro do CSV de vendas para escalar o pedido.
+            look_end = min(day + 8, n_days - 1)
+            if look_end > day and avg14_eff > 1e-9:
+                future_vals = consumo[day + 1 : look_end, j]
+                next_week_daily = float(future_vals.mean()) if len(future_vals) else avg14_eff
+                week_mult = float(np.clip(next_week_daily / avg14_eff, 0.5, 2.0))
+            else:
+                week_mult = 1.0
 
-                pending_orders.append((min(arrive, n_days + 30), j, ship_qty, False))
-                pending_po_today.add(j)
+            # Quantidade: cobre o gap até S_level, com ajuste sazonal semanal
+            order_qty = max((S_level - stock[j]) * week_mult, pol.step)
+            order_qty = ceil_to_step(order_qty, pol.step)
+
+            w_over = active_window(over_windows[j], day)
+            if w_over and w_over.kind == "overstock":
+                order_qty *= w_over.magnitude
+
+            lt = pol.lead_time
+            if w_under and w_under.kind == "delay":
+                lt = int(lt * w_under.magnitude)
+
+            lt += int(rng.integers(0, 2)) if rng.random() < 0.12 else 0
+            if rng.random() < 0.08:
+                lt += int(rng.integers(1, 4))
+
+            arrive = day + max(1, lt)
+            ship_qty = order_qty
+            if rng.random() < 0.04:
+                ship_qty *= float(rng.uniform(0.85, 1.25))
+
+            pending_orders.append((min(arrive, n_days + 30), j, ship_qty, False))
+            pending_po_today.add(j)
+
+            orders_log.append({
+                "day": day,
+                "ing_j": j,
+                "qty": float(ship_qty),
+                "arrive_day": int(arrive),  # sem cap — pode ser pós-END_DATE (em_transito)
+                "order_type": "sexta" if is_friday else "emergencial",
+            })
 
         # Eventos de sobrestoque: compra extra no início da janela
         for j in range(n_ings):
             w = active_window(over_windows[j], day)
+            if day_unavail[j] > 0.5:
+                continue
             if w and w.kind == "overstock" and day == w.start_day:
                 pol_j = policies[j]
                 avg14 = rolling_mean(consumo_work[:, j], day, 14)
@@ -589,6 +854,7 @@ def simulate(
         rupture_days=rupture_days,
         overstock_days=overstock_days,
         understock_days=understock_days,
+        orders_log=orders_log,
     )
 
 
@@ -648,17 +914,20 @@ def calibrate_windows(
     current_qty: np.ndarray,
     p90: np.ndarray,
     p25: np.ndarray,
+    unavail_share: np.ndarray,
     over_windows: list[list[NoiseWindow]],
     under_windows: list[list[NoiseWindow]],
     rng: np.random.Generator,
     n_days: int,
+    dates: pd.DatetimeIndex | None = None,
 ) -> tuple[list[list[NoiseWindow]], list[list[NoiseWindow]], SimulationState]:
     targets_o = [_target_days(n_days, rng)[0] for _ in range(len(ing_ids))]
     targets_u = [_target_days(n_days, rng)[1] for _ in range(len(ing_ids))]
 
     state = simulate(
         consumo, ingredientes, ing_ids, policies, semi_recipe, semi_ids,
-        current_qty, p90, p25, over_windows, under_windows, rng,
+        current_qty, p90, p25, unavail_share, over_windows, under_windows, rng,
+        dates=dates,
     )
 
     max_iter = CALIBRATION_MAX_ITER
@@ -700,7 +969,8 @@ def calibrate_windows(
 
         state = simulate(
             consumo, ingredientes, ing_ids, policies, semi_recipe, semi_ids,
-            current_qty, p90, p25, over_windows, under_windows, rng,
+            current_qty, p90, p25, unavail_share, over_windows, under_windows, rng,
+            dates=dates,
         )
 
     return over_windows, under_windows, state
@@ -711,6 +981,7 @@ def finalize_snapshot_calibration(
     consumo: np.ndarray,
     p90: np.ndarray,
     p25: np.ndarray,
+    unavail_share: np.ndarray,
     units: list[str],
     policies: list[IngredientPolicy],
     rng: np.random.Generator,
@@ -744,20 +1015,25 @@ def finalize_snapshot_calibration(
         col = snapshots[:, j].copy()
         if last <= 0:
             continue
+        unavail_col = unavail_share[:, j]
+        unavail_days = {d for d in range(last) if unavail_col[d] >= 0.5}
 
         tgt_o = int(rng.integers(int(n_days * OVERSTOCK_PCT_MIN), int(n_days * OVERSTOCK_PCT_MAX) + 1))
         tgt_u = int(rng.integers(int(n_days * UNDERSTOCK_PCT_MIN), int(n_days * UNDERSTOCK_PCT_MAX) + 1))
         tgt_o = min(tgt_o, last)
         tgt_u = min(tgt_u, last)
 
-        days = rng.permutation(last)
-        over_set = set(days[:tgt_o].tolist())
+        days = [int(d) for d in rng.permutation(last).tolist() if int(d) not in unavail_days]
+        over_set = set(days[:tgt_o])
         remaining = [int(d) for d in days[tgt_o:] if d not in over_set]
         rng.shuffle(remaining)
         under_set = set(remaining[:tgt_u])
 
         for d in range(last):
-            if d in over_set:
+            if d in unavail_days:
+                reduction = float(np.clip(unavail_col[d], 0.0, 1.0))
+                col[d] = (1.0 - reduction) * normal_level + reduction * thr_under * 0.4
+            elif d in over_set:
                 col[d] = thr_over * 1.25
             elif d in under_set:
                 col[d] = 0.0 if rng.random() < 0.12 else thr_under * 0.5
@@ -783,11 +1059,13 @@ def finalize_snapshot_calibration(
                 col[day] = round_qty(thr_under * 0.5, units[j])
 
         for d in over_set:
-            apply_over(d)
+            if d not in unavail_days:
+                apply_over(d)
         for d in under_set:
-            apply_under(d)
+            if d not in unavail_days:
+                apply_under(d)
         for d in range(last):
-            if d not in over_set and d not in under_set:
+            if d not in over_set and d not in under_set and d not in unavail_days:
                 apply_normal(d)
 
         min_o = int(np.ceil(last * OVERSTOCK_PCT_MIN))
@@ -796,13 +1074,14 @@ def finalize_snapshot_calibration(
         max_u = int(np.floor(last * UNDERSTOCK_PCT_MAX))
 
         for _ in range(last * 3):
-            cur_o = int((col[:last] > thr_over).sum())
+            normal_mask = np.array([d not in unavail_days for d in range(last)], dtype=bool)
+            cur_o = int(((col[:last] > thr_over) & normal_mask).sum())
             if cur_o > max_o:
-                over_idx = [d for d in range(last) if col[d] > thr_over]
+                over_idx = [d for d in range(last) if col[d] > thr_over and d not in unavail_days]
                 apply_normal(int(over_idx[0]))
                 continue
             if cur_o < min_o:
-                candidates = [d for d in range(last) if col[d] <= thr_over]
+                candidates = [d for d in range(last) if col[d] <= thr_over and d not in unavail_days]
                 if not candidates:
                     break
                 apply_over(int(rng.choice(candidates)))
@@ -810,13 +1089,14 @@ def finalize_snapshot_calibration(
             break
 
         for _ in range(last * 3):
-            cur_u = int((col[:last] <= thr_under).sum())
+            normal_mask = np.array([d not in unavail_days for d in range(last)], dtype=bool)
+            cur_u = int(((col[:last] <= thr_under) & normal_mask).sum())
             if cur_u > max_u:
-                under_idx = [d for d in range(last) if col[d] <= thr_under]
+                under_idx = [d for d in range(last) if col[d] <= thr_under and d not in unavail_days]
                 apply_normal(int(under_idx[0]))
                 continue
             if cur_u < min_u:
-                candidates = [d for d in range(last) if col[d] > thr_under]
+                candidates = [d for d in range(last) if col[d] > thr_under and d not in unavail_days]
                 if not candidates:
                     break
                 apply_under(int(rng.choice(candidates)))
@@ -826,9 +1106,10 @@ def finalize_snapshot_calibration(
         snapshots[:, j] = col
 
         # Percentuais excluem o último dia (ancorado em current_qty)
-        over_days[j] = int((col[:last] > thr_over).sum())
-        under_days[j] = int((col[:last] <= thr_under).sum())
-        rupture_days[j] = int((col[:last] <= 1e-9).sum())
+        eval_mask = np.array([d not in unavail_days for d in range(last)], dtype=bool)
+        over_days[j] = int(((col[:last] > thr_over) & eval_mask).sum())
+        under_days[j] = int(((col[:last] <= thr_under) & eval_mask).sum())
+        rupture_days[j] = int(((col[:last] <= 1e-9) & eval_mask).sum())
 
     return snapshots, over_days, under_days, rupture_days
 
@@ -865,6 +1146,7 @@ def validate_estoques(
     ingredientes: pd.DataFrame,
     consumo: np.ndarray,
     ing_ids: list[str],
+    unavail_share: np.ndarray,
     state: SimulationState,
     dates: pd.DatetimeIndex,
 ) -> None:
@@ -910,10 +1192,16 @@ def validate_estoques(
     if ok_anchor < 0.90 * n_ings:
         raise ValueError(f"Ancoragem current_qty: apenas {ok_anchor}/{n_ings} dentro de ±15%")
 
-    eval_days = n_days - 1  # exclui dia ancorado
-    pct_over = np.array([pct_days(state.overstock_days[j], eval_days) for j in range(n_ings)])
-    pct_under = np.array([pct_days(state.understock_days[j], eval_days) for j in range(n_ings)])
-    pct_rupture = np.array([pct_days(state.rupture_days[j], eval_days) for j in range(n_ings)])
+    eval_days_by_ing = np.maximum(
+        1,
+        np.array(
+            [(n_days - 1) - int((unavail_share[: n_days - 1, j] >= 0.5).sum()) for j in range(n_ings)],
+            dtype=int,
+        ),
+    )
+    pct_over = np.array([state.overstock_days[j] / eval_days_by_ing[j] for j in range(n_ings)])
+    pct_under = np.array([state.understock_days[j] / eval_days_by_ing[j] for j in range(n_ings)])
+    pct_rupture = np.array([state.rupture_days[j] / eval_days_by_ing[j] for j in range(n_ings)])
 
     in_range_over = ((pct_over >= OVERSTOCK_PCT_MIN) & (pct_over <= OVERSTOCK_PCT_MAX)).sum()
     in_range_under = ((pct_under >= UNDERSTOCK_PCT_MIN) & (pct_under <= UNDERSTOCK_PCT_MAX)).sum()
@@ -930,6 +1218,21 @@ def validate_estoques(
     med_rupture = float(np.median(pct_rupture))
     if not (0.01 <= med_rupture <= 0.08):
         raise ValueError(f"Mediana ruptura estrita fora de 1-8%: {med_rupture:.2%}")
+
+    high_impact = np.where(unavail_share.max(axis=0) >= 0.5)[0]
+    for j in high_impact:
+        day_mask = unavail_share[: n_days - 1, j] >= 0.5
+        if not day_mask.any() or day_mask.all():
+            continue
+        in_window = state.snapshots[: n_days - 1, j][day_mask]
+        out_window = state.snapshots[: n_days - 1, j][~day_mask]
+        mean_out = float(out_window.mean()) if len(out_window) else 0.0
+        mean_in = float(in_window.mean()) if len(in_window) else 0.0
+        if mean_out > 0 and mean_in >= mean_out * 0.7:
+            raise ValueError(
+                f"Queda fraca em indisponibilidade para {ing_ids[j]}: "
+                f"dentro={mean_in:.2f}, fora={mean_out:.2f}"
+            )
 
     # Correlação consumo x compras
     consumo_total = consumo.sum(axis=0)
@@ -1002,6 +1305,23 @@ def main() -> None:
     consumo, _ = compute_daily_consumption(
         data["vendas"], data["bom_lines"], ing_ids, dates
     )
+    unavailability_periods = load_unavailability(data_dir / "produtos_indisponiveis.csv", data["receitas"])
+    unavail_share, peak_unavail_share = compute_unavailability_share(
+        data["vendas"],
+        data["bom_lines"],
+        data["semi_recipe"],
+        ing_ids,
+        dates,
+        unavailability_periods,
+    )
+    if unavailability_periods:
+        print(f"Períodos de indisponibilidade: {len(unavailability_periods)}")
+        top_idx = np.argsort(-peak_unavail_share)[:10]
+        print("Top ingredientes impactados por indisponibilidade:")
+        for j in top_idx:
+            if peak_unavail_share[j] <= 0:
+                continue
+            print(f"  - {ing_ids[j]}: share {peak_unavail_share[j]:.1%}")
 
     p90, p25 = consumption_thresholds(consumo)
     current_qty = ingredientes["current_qty"].astype(float).values
@@ -1024,16 +1344,18 @@ def main() -> None:
         current_qty,
         p90,
         p25,
+        unavail_share,
         over_w,
         under_w,
         rng,
         n_days,
+        dates=dates,
     )
 
     print("Calibrando snapshots finais por item...")
     units = ingredientes["unit"].astype(str).tolist()
     snapshots, od, ud, rd = finalize_snapshot_calibration(
-        state.snapshots.copy(), consumo, p90, p25, units, policies, rng
+        state.snapshots.copy(), consumo, p90, p25, unavail_share, units, policies, rng
     )
     state.snapshots = snapshots
     state.overstock_days = od
@@ -1044,18 +1366,43 @@ def main() -> None:
     estoques = build_output_df(state.snapshots, dates, ing_ids, units)
 
     print("Validando...")
-    validate_estoques(estoques, ingredientes, consumo, ing_ids, state, dates)
+    validate_estoques(estoques, ingredientes, consumo, ing_ids, unavail_share, state, dates)
 
     print(f"Salvando {out_csv}...")
     estoques.to_csv(out_csv, index=False)
 
-    print("Gerando resumos...")
+    print("Gerando resumos de estoque...")
     write_summaries(estoques, consumo, dates, ing_ids, state, data_dir)
 
-    eval_days = n_days - 1
-    pct_over = [pct_days(state.overstock_days[j], eval_days) for j in range(n_ings)]
-    pct_under = [pct_days(state.understock_days[j], eval_days) for j in range(n_ings)]
-    print(f"Registros: {len(estoques):,}")
+    # Log enxuto das decisões de pedido para alimentar gerar_pedidos.py
+    print("Gravando log de pedidos da simulação...")
+    log_rows = []
+    for order in state.orders_log:
+        d = int(order["day"])
+        ad = int(order["arrive_day"])
+        ing_id = ing_ids[int(order["ing_j"])]
+        data_pedido = dates[d].date()
+        if ad < n_days:
+            data_prevista = dates[ad].date()
+        else:
+            data_prevista = (dates[-1] + pd.Timedelta(days=ad - (n_days - 1))).date()
+        log_rows.append({
+            "data_pedido": data_pedido,
+            "ingredient_id": ing_id,
+            "qty": float(order["qty"]),
+            "data_prevista": data_prevista,
+            "order_type": order["order_type"],
+        })
+    log_df = pd.DataFrame(log_rows)
+    log_path = data_dir / "pedidos_log.csv"
+    log_df.to_csv(log_path, index=False)
+    n_sexta = int((log_df["order_type"] == "sexta").sum()) if len(log_df) else 0
+    n_emerg = int((log_df["order_type"] == "emergencial").sum()) if len(log_df) else 0
+
+    eval_days = np.maximum(1, (n_days - 1) - (unavail_share[: n_days - 1] >= 0.5).sum(axis=0))
+    pct_over = [state.overstock_days[j] / eval_days[j] for j in range(n_ings)]
+    pct_under = [state.understock_days[j] / eval_days[j] for j in range(n_ings)]
+    print(f"Registros estoque: {len(estoques):,}")
     print(f"Período: {estoques['date_time'].min()} até {estoques['date_time'].max()}")
     print(
         f"Sobrestoque por item — mediana: {np.median(pct_over):.1%}, "
@@ -1065,7 +1412,13 @@ def main() -> None:
         f"Substoque por item — mediana: {np.median(pct_under):.1%}, "
         f"min: {np.min(pct_under):.1%}, max: {np.max(pct_under):.1%}"
     )
-    print(f"Arquivos:\n  - {out_csv}\n  - {data_dir / 'resumo_diario_estoques.csv'}\n  - {data_dir / 'resumo_mensal_estoques.csv'}")
+    print(f"Eventos de compra logados: {len(log_df):,} (sexta={n_sexta:,}, emergencial={n_emerg:,})")
+    print(
+        f"Arquivos:\n  - {out_csv}\n  - {log_path}"
+        f"\n  - {data_dir / 'resumo_diario_estoques.csv'}"
+        f"\n  - {data_dir / 'resumo_mensal_estoques.csv'}"
+        f"\nPróximo passo: execute data/scripts/gerar_pedidos.py para gerar pedidos.csv"
+    )
 
 
 if __name__ == "__main__":

@@ -39,7 +39,7 @@ Os PDFs de definição e plano técnico mostram que o problema do Saltim vai al�
 * uso de dados de vendas, estoque e fornecedores;
 * métricas de avaliação para classificação e regressão.
 
-No notebook de exploração, essa ideia aparece na forma de um pipeline com carga de dados, EDA, limpeza, tratamento de outliers e baseline preditivo semanal. Já os scripts em `data/Scripts/` mostram a preparação de bases sintéticas de vendas e estoques para sustentar esse cenário.
+No notebook de exploração, essa ideia aparece na forma de um pipeline com carga de dados, EDA, limpeza, tratamento de outliers e baseline preditivo semanal. Já os scripts em `data/scripts/` mostram a preparação de bases sintéticas de vendas e estoques para sustentar esse cenário.
 
 </details>
 
@@ -93,25 +93,35 @@ No notebook de exploração, essa ideia aparece na forma de um pipeline com carg
 
 * PostgreSQL 16
 * CSVs em `data/`
+* Carga relacional dos CSVs no schema `public` via backend
+* Datasets de ML no schema `ml`
 * Notebooks em `data/notebooks/` e `ml/`
-* Scripts de geração em `data/Scripts/`
+* Scripts de geração em `data/scripts/`
 
 <a id="como-executar"></a>
 ## 🚀 **Como Executar**
 
 ### **Pré-requisitos**
 
-* Node.js 18+ para o frontend
+* Bun para o frontend
 * Python 3.11+ para o backend
 * Docker e Docker Compose para o banco
 
-### **1. Subir o banco de dados**
+### **1. Executar em modo desenvolvimento**
 
 ```bash
-docker compose up -d
+./scripts/run-dev.sh
 ```
 
-### **2. Executar o backend**
+O script sobe o Postgres, instala dependências quando necessário, inicia o backend em `http://localhost:8000` e o frontend em `http://localhost:5173`.
+
+Ao iniciar, o backend executa os SQLs de `backend/db/` e carrega os CSVs de `data/` no schema `public` e os datasets de `data/ml_dataset/outputs/` no schema `ml`. Para iniciar sem recarregar os CSVs:
+
+```bash
+LOAD_CSV_DATA_ON_STARTUP=0 ./scripts/run-dev.sh
+```
+
+### **2. Executar manualmente o backend**
 
 ```bash
 cd backend
@@ -121,12 +131,12 @@ pip install -r requirements.txt
 uvicorn app.main:app --reload --port 8000
 ```
 
-### **3. Executar o frontend**
+### **3. Executar manualmente o frontend**
 
 ```bash
 cd frontend
-npm install
-npm run dev
+bun install
+bun run dev
 ```
 
 ### **4. Acessar o sistema**
