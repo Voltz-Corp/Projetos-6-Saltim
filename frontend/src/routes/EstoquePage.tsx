@@ -18,6 +18,8 @@ import {
 import { CATEGORIES, type Category } from '../data/ingredients'
 import { StatusBadge } from '../components/StatusBadge'
 import { CategoryBadge } from '../components/CategoryBadge'
+import { AppSelect } from '../components/AppSelect'
+import { DataTable, type DataTableHeader } from '../components/DataTable'
 import { cn } from '../lib/cn'
 
 export const estoqueRoute = createRoute({
@@ -116,8 +118,6 @@ const columns = [
 const PAGE_SIZE_OPTIONS = [25, 50, 100]
 const STATUS_OPTIONS: StockStatusFilter[] = ['OK', 'Atenção', 'Crítico', 'Esgotado']
 
-const selectClass = 'h-9 px-3 text-sm border border-stone-200 rounded-lg bg-white outline-none focus:ring-2 focus:ring-brand-600/20 focus:border-brand-600 transition text-stone-700 cursor-pointer'
-
 export function EstoquePage() {
   const navigate = useNavigate()
   const { counted } = useSearch({ from: '/estoque' })
@@ -211,27 +211,25 @@ export function EstoquePage() {
       <div className="bg-white border-b border-stone-100 px-8 py-3 flex items-center gap-3 flex-shrink-0">
         <span className="text-xs font-medium text-stone-400 uppercase tracking-wide flex-shrink-0">Filtrar por</span>
 
-        <select
+        <AppSelect
           value={category}
-          onChange={e => handleFilterChange(() => setCategory(e.target.value as Category | ''))}
-          className={selectClass}
-        >
-          <option value="">Todas as categorias</option>
-          {CATEGORIES.map(cat => (
-            <option key={cat} value={cat}>{cat}</option>
-          ))}
-        </select>
+          onChange={value => handleFilterChange(() => setCategory(value as Category | ''))}
+          options={[
+            { value: '', label: 'Todas as categorias' },
+            ...CATEGORIES.map(cat => ({ value: cat, label: cat })),
+          ]}
+          className="w-56"
+        />
 
-        <select
+        <AppSelect
           value={status}
-          onChange={e => handleFilterChange(() => setStatus(e.target.value as StockStatusFilter | ''))}
-          className={selectClass}
-        >
-          <option value="">Todos os status</option>
-          {STATUS_OPTIONS.map(s => (
-            <option key={s} value={s}>{s}</option>
-          ))}
-        </select>
+          onChange={value => handleFilterChange(() => setStatus(value as StockStatusFilter | ''))}
+          options={[
+            { value: '', label: 'Todos os status' },
+            ...STATUS_OPTIONS.map(s => ({ value: s, label: s })),
+          ]}
+          className="w-44"
+        />
 
         {(category || status || q) && (
           <button
@@ -245,126 +243,78 @@ export function EstoquePage() {
 
       {/* Table card */}
       <div className="flex-1 overflow-auto p-6">
-        <div className="bg-white rounded-xl border border-stone-200 shadow-sm overflow-hidden flex flex-col">
-
-          <div className="overflow-auto">
-            <table className="w-full text-sm border-collapse">
-              <thead>
-                <tr className="bg-stone-50 border-b border-stone-200">
-                  {table.getHeaderGroups().flatMap(hg =>
-                    hg.headers.map(header => {
-                      const align = (header.column.columnDef.meta as { align?: string } | undefined)?.align
-                      const sorted = header.column.getIsSorted()
-                      return (
-                        <th
-                          key={header.id}
-                          className={cn(
-                            'px-4 py-3 text-xs font-semibold text-stone-400 uppercase tracking-wide whitespace-nowrap select-none',
-                            align === 'right' ? 'text-right' : 'text-left',
-                            header.column.getCanSort() && 'cursor-pointer hover:text-stone-700 transition-colors',
-                          )}
-                          onClick={header.column.getToggleSortingHandler()}
-                        >
-                          <span className="inline-flex items-center gap-1">
-                            {flexRender(header.column.columnDef.header, header.getContext())}
-                            {header.column.getCanSort() && (
-                              <span className={cn('transition-opacity', sorted ? 'opacity-100' : 'opacity-40')}>
-                                {sorted === 'asc' ? '↑' : sorted === 'desc' ? '↓' : '↕'}
-                              </span>
-                            )}
-                          </span>
-                        </th>
-                      )
-                    })
-                  )}
-                </tr>
-              </thead>
-              <tbody>
-                {table.getRowModel().rows.length === 0 ? (
-                  <tr>
-                    <td colSpan={columns.length} className="py-20 text-center text-stone-400 text-sm">
-                      {isFetching ? 'Carregando…' : 'Nenhum insumo encontrado.'}
-                    </td>
-                  </tr>
-                ) : (
-                  table.getRowModel().rows.map(row => {
-                    const s = getStockStatus(row.original)
-                    return (
-                      <tr
-                        key={row.id}
-                        className={cn(
-                          'border-b border-stone-100 hover:bg-stone-50 transition-colors',
-                          s === 'Crítico'  && 'border-l-2 border-l-red-400',
-                          s === 'Atenção'  && 'border-l-2 border-l-amber-400',
-                          s === 'Esgotado' && 'opacity-60',
-                        )}
-                      >
-                        {row.getVisibleCells().map(cell => {
-                          const align = (cell.column.columnDef.meta as { align?: string } | undefined)?.align
-                          return (
-                            <td
-                              key={cell.id}
-                              className={cn('px-4 py-3', align === 'right' ? 'text-right' : '')}
-                            >
-                              {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                            </td>
-                          )
-                        })}
-                      </tr>
-                    )
-                  })
+        <DataTable
+          headers={stockHeaders(table)}
+          colSpan={columns.length}
+          minWidth="920px"
+          isEmpty={table.getRowModel().rows.length === 0}
+          isLoading={isFetching}
+          emptyMessage="Nenhum insumo encontrado."
+          loadingMessage="Carregando..."
+          pagination={{
+            page,
+            pageSize,
+            total,
+            totalPages,
+            pageSizeOptions: PAGE_SIZE_OPTIONS,
+            onPageChange: setPage,
+            onPageSizeChange: value => { setPageSize(value); setPage(1) },
+          }}
+        >
+          {table.getRowModel().rows.map(row => {
+            const s = getStockStatus(row.original)
+            return (
+              <tr
+                key={row.id}
+                className={cn(
+                  'border-b border-stone-100 hover:bg-stone-50 transition-colors',
+                  s === 'Crítico'  && 'border-l-2 border-l-red-400',
+                  s === 'Atenção'  && 'border-l-2 border-l-amber-400',
+                  s === 'Esgotado' && 'opacity-60',
                 )}
-              </tbody>
-            </table>
-          </div>
-
-          {/* Pagination — inside the card */}
-          <div className="border-t border-stone-100 px-4 py-2.5 flex items-center justify-between flex-shrink-0">
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-stone-400">Itens por página</span>
-              <select
-                value={pageSize}
-                onChange={e => { setPageSize(Number(e.target.value)); setPage(1) }}
-                className="h-7 px-2 text-xs border border-stone-200 rounded-lg bg-white outline-none focus:ring-2 focus:ring-brand-600/20 cursor-pointer"
               >
-                {PAGE_SIZE_OPTIONS.map(n => (
-                  <option key={n} value={n}>{n}</option>
-                ))}
-              </select>
-            </div>
-
-            <span className="text-xs text-stone-400 tabular-nums">
-              {total === 0 ? '0' : `${(page - 1) * pageSize + 1}–${Math.min(page * pageSize, total)}`} de {total}
-            </span>
-
-            <div className="flex items-center gap-0.5">
-              <PaginationBtn onClick={() => setPage(1)} disabled={page === 1} title="Primeira">«</PaginationBtn>
-              <PaginationBtn onClick={() => setPage(p => p - 1)} disabled={page === 1} title="Anterior">‹</PaginationBtn>
-              <span className="px-2 py-1 text-xs font-medium text-stone-600 tabular-nums">
-                {page} / {totalPages}
-              </span>
-              <PaginationBtn onClick={() => setPage(p => p + 1)} disabled={page === totalPages} title="Próxima">›</PaginationBtn>
-              <PaginationBtn onClick={() => setPage(totalPages)} disabled={page === totalPages} title="Última">»</PaginationBtn>
-            </div>
-          </div>
-
-        </div>
+                {row.getVisibleCells().map(cell => {
+                  const align = (cell.column.columnDef.meta as { align?: string } | undefined)?.align
+                  return (
+                    <td
+                      key={cell.id}
+                      className={cn('px-4 py-3', align === 'right' ? 'text-right' : '')}
+                    >
+                      {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                    </td>
+                  )
+                })}
+              </tr>
+            )
+          })}
+        </DataTable>
       </div>
     </div>
   )
 }
 
-function PaginationBtn({ onClick, disabled, title, children }: {
-  onClick: () => void; disabled: boolean; title: string; children: React.ReactNode
-}) {
-  return (
-    <button
-      onClick={onClick}
-      disabled={disabled}
-      title={title}
-      className="size-7 flex items-center justify-center rounded-lg text-sm text-stone-500 hover:bg-stone-100 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-    >
-      {children}
-    </button>
+function stockHeaders(table: ReturnType<typeof useReactTable<StockItem>>): DataTableHeader[] {
+  return table.getHeaderGroups().flatMap(hg =>
+    hg.headers.map(header => {
+      const align = (header.column.columnDef.meta as { align?: string } | undefined)?.align
+      const sorted = header.column.getIsSorted()
+      const canSort = header.column.getCanSort()
+
+      return {
+        key: header.id,
+        align: align === 'right' ? 'right' : 'left',
+        onClick: canSort ? () => header.column.toggleSorting() : undefined,
+        content: (
+          <span className="inline-flex items-center gap-1">
+            {flexRender(header.column.columnDef.header, header.getContext())}
+            {canSort && (
+              <span className={cn('transition-opacity', sorted ? 'opacity-100' : 'opacity-40')}>
+                {sorted === 'asc' ? '↑' : sorted === 'desc' ? '↓' : '↕'}
+              </span>
+            )}
+          </span>
+        ),
+      }
+    })
   )
 }

@@ -3,6 +3,7 @@ import { createRoute, useNavigate } from '@tanstack/react-router'
 import { rootRoute } from './Root'
 import { useEstoque, useAtualizarIngrediente } from '../hooks/useEstoque'
 import { CATEGORIES } from '../data/ingredients'
+import { AppSelect } from '../components/AppSelect'
 
 export const ingredienteEditRoute = createRoute({
   getParentRoute: () => rootRoute,
@@ -119,16 +120,11 @@ export function IngredienteEditPage() {
 
           <div>
             <label className={labelClass}>Categoria</label>
-            <select
+            <AppSelect
               value={category}
-              onChange={e => setCategory(e.target.value)}
-              required
-              className={inputClass}
-            >
-              {CATEGORIES.map(cat => (
-                <option key={cat} value={cat}>{cat}</option>
-              ))}
-            </select>
+              onChange={setCategory}
+              options={CATEGORIES.map(cat => ({ value: cat, label: cat }))}
+            />
           </div>
 
           <div>

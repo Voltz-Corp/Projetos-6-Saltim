@@ -1,61 +1,61 @@
-import { Link } from '@tanstack/react-router'
-
-function HomeIcon() {
-  return (
-    <svg viewBox="0 0 20 20" className="size-5 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M3 9.5L10 3l7 6.5V17a1 1 0 01-1 1H4a1 1 0 01-1-1V9.5z" />
-      <path d="M7 18v-6h6v6" />
-    </svg>
-  )
-}
-
-function PackageIcon() {
-  return (
-    <svg viewBox="0 0 20 20" className="size-5 flex-shrink-0" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <rect x="2" y="7" width="16" height="11" rx="1" />
-      <path d="M5 7V5a5 5 0 0110 0v2" />
-    </svg>
-  )
-}
-
+import { Link } from '@tanstack/react-router';
+import { ClipboardList, LayoutDashboard, Package, PackageCheck, Truck } from 'lucide-react';
+import type { ComponentType } from 'react';
 
 interface NavItemProps {
-  to: string
-  icon: React.ReactNode
-  label: string
+  to: string;
+  icon: ComponentType<{ className?: string; strokeWidth?: number }>;
+  label: string;
+  exact?: boolean;
 }
 
-function NavItem({ to, icon, label }: NavItemProps) {
+function SaltimLogo() {
+  return (
+    <img
+      src="/images/saltim_logo.jpg"
+      alt="Saltim"
+      className="size-11 rounded-xl object-cover"
+    />
+  );
+}
+
+function NavItem({ to, icon: Icon, label, exact }: NavItemProps) {
   return (
     <Link
       to={to}
-      className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-colors"
-      activeProps={{ className: 'text-brand-600 bg-brand-50' }}
-      inactiveProps={{ className: 'text-stone-400 hover:text-stone-900 hover:bg-stone-100' }}
-      activeOptions={{ exact: to === '/' }}
+      className="group/item relative flex size-11 items-center justify-center rounded-xl text-sm font-semibold transition-colors"
+      activeProps={{ className: 'text-brand-700 bg-brand-50' }}
+      inactiveProps={{
+        className: 'text-stone-500 hover:text-brand-700 hover:bg-brand-50',
+      }}
+      activeOptions={{ exact }}
+      aria-label={label}
     >
-      {icon}
-      {label}
+      <span className="flex size-6 flex-shrink-0 items-center justify-center">
+        <Icon className="size-5 shrink-0" strokeWidth={1.9} />
+      </span>
+      <span className="pointer-events-none absolute left-[calc(100%+10px)] top-1/2 z-50 -translate-y-1/2 whitespace-nowrap rounded-lg bg-saltim-dark px-3 py-2 text-xs font-bold text-white opacity-0 shadow-lg transition-opacity group-hover/item:opacity-100">
+        {label}
+      </span>
     </Link>
-  )
+  );
 }
 
 export function Sidebar() {
   return (
-    <aside className="w-56 bg-white border-r border-stone-200 flex flex-col flex-shrink-0">
-      {/* Brand */}
-      <div className="px-5 py-5 border-b border-stone-100">
-        <div className="flex items-center gap-2.5">
-          <div className="size-7 rounded-lg bg-brand-600 flex items-center justify-center flex-shrink-0">
-            <span className="text-white text-xs font-black leading-none">S</span>
-          </div>
-          <span className="text-base font-bold text-stone-900 tracking-tight">Saltim Café</span>
-        </div>
+    <aside className="h-screen w-[72px] bg-white border-r border-stone-200 flex flex-col flex-shrink-0 overflow-visible">
+      {/* Hover expansion intentionally disabled for now.
+          Previous classes: group/sidebar hover:w-56 transition-[width] duration-200 */}
+      <div className="h-[73px] border-b border-stone-100 bg-[#232323] flex items-center justify-center">
+        <SaltimLogo />
       </div>
-      <nav className="flex flex-col gap-1 p-3 pt-4">
-        <NavItem to="/"        icon={<HomeIcon />}    label="Início" />
-        <NavItem to="/estoque" icon={<PackageIcon />} label="Estoque" />
+      <nav className="flex flex-col items-center gap-2 p-3 pt-5">
+        <NavItem to="/" icon={LayoutDashboard} label="Dashboard" exact />
+        <NavItem to="/estoque" icon={Package} label="Estoque" />
+        <NavItem to="/fornecedores" icon={Truck} label="Fornecedores" />
+        <NavItem to="/pedidos" icon={PackageCheck} label="Pedidos" />
+        <NavItem to="/estoque/contagem" icon={ClipboardList} label="Contagem" />
       </nav>
     </aside>
-  )
+  );
 }

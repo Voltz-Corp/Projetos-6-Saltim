@@ -60,6 +60,87 @@ class AtualizacaoIngrediente(BaseModel):
     min_qty: Optional[float] = None
 
 
+class FornecedorOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    name: str
+    cnpj: Optional[str] = None
+    email: Optional[str] = None
+    phone: Optional[str] = None
+    avg_delivery_time: Optional[int] = None
+
+
+class FornecedorListItem(FornecedorOut):
+    item_count: int = 0
+    avg_price: Optional[float] = None
+
+
+class FornecedorKpis(BaseModel):
+    supplier_count: int
+    avg_delivery_time: float
+    avg_items_per_supplier: float
+    best_value_supplier_id: Optional[str] = None
+    best_value_supplier_name: Optional[str] = None
+    best_value_detail: str
+
+
+class FornecedorListResponse(BaseModel):
+    kpis: FornecedorKpis
+    items: List[FornecedorListItem]
+
+
+class FornecedorProductOut(BaseModel):
+    ingredient_id: str
+    name: str
+    category: str
+    current_qty: float
+    unit: str
+    unit_price: float
+
+
+class FornecedorOrderOut(BaseModel):
+    id: str
+    order_date: date
+    items_qty: float
+    total_value: float
+    status: str
+
+
+class FornecedorProfileKpis(BaseModel):
+    avg_lead_time: float
+    orders_count: int
+    delivery_rate: float
+
+
+class FornecedorProfileResponse(BaseModel):
+    supplier: FornecedorOut
+    kpis: FornecedorProfileKpis
+    products: List[FornecedorProductOut]
+    orders: List[FornecedorOrderOut]
+
+
+class PedidoOut(BaseModel):
+    id: str
+    supplier_id: str
+    supplier_name: str
+    ingredient_id: str
+    ingredient_name: str
+    order_date: date
+    items_qty: float
+    total_value: float
+    status: str
+    expected_date: date
+
+
+class PedidoPaginado(BaseModel):
+    items: List[PedidoOut]
+    total: int
+    page: int
+    page_size: int
+    total_pages: int
+
+
 class DashboardRankItem(BaseModel):
     id: str
     name: str
@@ -85,13 +166,18 @@ class DashboardUnitCategoryGroup(BaseModel):
     items: List[DashboardCategoryItem]
 
 
+class DashboardKpi(BaseModel):
+    id: str
+    label: str
+    value: str
+    detail: str
+    trend_value: Optional[float] = None
+    trend_label: str
+    trend_direction: str
+
+
 class DashboardCards(BaseModel):
-    total_items: int
-    total_stock_qty: float
-    top_categories_by_unit: List[DashboardCategoryItem]
-    bottom_categories_by_unit: List[DashboardCategoryItem]
-    top_products_by_unit: List[DashboardRankItem]
-    bottom_products_by_unit: List[DashboardRankItem]
+    items: List[DashboardKpi]
 
 
 class DashboardIngredientFilter(BaseModel):
@@ -101,9 +187,22 @@ class DashboardIngredientFilter(BaseModel):
     category: str
 
 
+class DashboardHolidayFilter(BaseModel):
+    date: date
+    name: str
+    type: str
+
+
+class DashboardMonthFilter(BaseModel):
+    key: str
+    label: str
+
+
 class DashboardFilters(BaseModel):
     categories: List[DashboardCategoryItem]
     ingredients: List[DashboardIngredientFilter]
+    holidays: List[DashboardHolidayFilter]
+    months: List[DashboardMonthFilter]
 
 
 class DashboardAlert(BaseModel):
@@ -123,10 +222,11 @@ class DashboardResponse(BaseModel):
     top_stock_products_by_unit: List[DashboardUnitRankGroup]
     bottom_stock_products_by_unit: List[DashboardUnitRankGroup]
     top_stock_categories_by_unit: List[DashboardUnitCategoryGroup]
-    top_output_products: List[DashboardRankItem]
-    bottom_output_products: List[DashboardRankItem]
-    top_output_categories: List[DashboardCategoryItem]
-    bottom_output_categories: List[DashboardCategoryItem]
+    bottom_stock_categories_by_unit: List[DashboardUnitCategoryGroup]
+    top_output_products_by_unit: List[DashboardUnitRankGroup]
+    bottom_output_products_by_unit: List[DashboardUnitRankGroup]
+    top_output_categories_by_unit: List[DashboardUnitCategoryGroup]
+    bottom_output_categories_by_unit: List[DashboardUnitCategoryGroup]
     alerts: List[DashboardAlert]
     filters: DashboardFilters
 
@@ -134,6 +234,17 @@ class DashboardResponse(BaseModel):
 class DashboardHistoryPoint(BaseModel):
     date: date
     value: float
+
+
+class DashboardNamedMetric(BaseModel):
+    key: str
+    label: str
+    value: float
+
+
+class DashboardRevenueSummary(BaseModel):
+    monthly: List[DashboardNamedMetric]
+    quarterly: List[DashboardNamedMetric]
 
 
 class DashboardRecipeItem(BaseModel):
