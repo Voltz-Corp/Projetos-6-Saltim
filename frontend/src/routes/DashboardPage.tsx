@@ -1081,7 +1081,7 @@ function CombinedHistoryChart({
           <Tooltip
             formatter={(value, name) => [
               fmt.number(Number(value), 2),
-              name === 'stock' ? 'Estoque' : 'Vendas',
+              name === 'stock' || name === 'Estoque' ? 'Estoque' : 'Vendas',
             ]}
             labelFormatter={(label) =>
               new Date(`${label}T00:00:00`).toLocaleDateString('pt-BR')

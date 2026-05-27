@@ -1,4 +1,0 @@
-notebook,family,stage,model,artifact_path,prediction_path,rmse,mae,r2,warnings
-01_knn,Distancia,regression,KNN Regressor,ml/artifacts/two_stage/01_knn_knn_regressor_regressor.pkl,ml/artifacts/two_stage/metrics/01_knn_knn_regressor_regression_predictions.csv,98.5818443876249,14.787691365584815,0.8049097312122906,
-01_knn,Distancia,regression,XGBoost Regressor,ml/artifacts/two_stage/01_knn_xgboost_regressor_regressor.pkl,ml/artifacts/two_stage/metrics/01_knn_xgboost_regressor_regression_predictions.csv,84.36932268926955,11.155199571946648,0.8571070329886517,
-01_knn,Distancia,regression,Gradient Boosting Regressor,ml/artifacts/two_stage/01_knn_gradient_boosting_regressor_regressor.pkl,ml/artifacts/two_stage/metrics/01_knn_gradient_boosting_regressor_regression_predictions.csv,70.55490126495012,10.866621935357427,0.9000699498015922,
