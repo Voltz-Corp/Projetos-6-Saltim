@@ -125,10 +125,15 @@ export function useAtualizarIngrediente() {
 export function useAtualizarEstoque() {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: async (updates: Map<number, number>) => {
+    mutationFn: async (
+      payload: Map<number, number> | { updates: Map<number, number>; contagemId?: number | null },
+    ) => {
+      const updates = payload instanceof Map ? payload : payload.updates
+      const contagemId = payload instanceof Map ? undefined : payload.contagemId
       const body = {
         updates: Array.from(updates.entries()).map(([id, new_qty]) => ({ id, new_qty })),
         session_label: 'contagem',
+        contagem_id: contagemId ?? undefined,
       }
       const res = await fetch(`${API_URL}/api/estoque`, {
         method: 'PATCH',

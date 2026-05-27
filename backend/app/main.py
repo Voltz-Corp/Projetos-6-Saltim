@@ -11,6 +11,8 @@ from sqlalchemy.orm import Session
 from .database import engine, Base, get_db, run_sql_loaders
 from .models import (
     Categoria,
+    Contagem,
+    ContagemLog,
     Estoque,
     EstoqueAtual,
     FeriadoRecife,
@@ -26,7 +28,10 @@ from .models import (
 )
 from .schemas import (
     IngredienteOut,
+    ContagemCreate,
+    ContagemOut,
     EstoquePaginado,
+    FornecedorCreate,
     FornecedorKpis,
     FornecedorListItem,
     FornecedorListResponse,
@@ -35,6 +40,8 @@ from .schemas import (
     FornecedorProductOut,
     FornecedorProfileKpis,
     FornecedorProfileResponse,
+    PedidoDetailItem,
+    PedidoDetailResponse,
     PedidoOut,
     PedidoPaginado,
     AtualizacaoLote,
@@ -85,6 +92,37 @@ app.add_middleware(
 # ---------------------------------------------------------------------------
 # Estoque
 # ---------------------------------------------------------------------------
+
+
+@app.post("/api/contagens", response_model=ContagemOut)
+def create_contagem(payload: ContagemCreate, db: Session = Depends(get_db)):
+    today = date.today().strftime("%d/%m/%Y")
+    label = payload.label or f"Contagem {today}"
+    existing = (
+        db.query(Contagem)
+        .filter(Contagem.label == label, Contagem.status == "em_andamento")
+        .order_by(Contagem.id.asc())
+        .first()
+    )
+    if existing is not None:
+        return existing
+
+    contagem = Contagem(
+        label=label,
+        status="em_andamento",
+    )
+    db.add(contagem)
+    db.commit()
+    db.refresh(contagem)
+    return contagem
+
+
+@app.get("/api/contagens/{contagem_id}", response_model=ContagemOut)
+def get_contagem(contagem_id: int, db: Session = Depends(get_db)):
+    contagem = db.query(Contagem).filter(Contagem.id == contagem_id).first()
+    if contagem is None:
+        raise HTTPException(status_code=404, detail="Contagem não encontrada")
+    return contagem
 
 def _compute_status(item: Ingrediente) -> str:
     qty = float(item.current_qty)
@@ -1470,6 +1508,7 @@ def get_estoque(
     query = (
         db.query(Ingrediente)
         .outerjoin(Categoria)
+        .filter(Ingrediente.category_id != PRODUCTION_CATEGORY_ID)
         .order_by(Categoria.name, Ingrediente.name)
     )
     if category:
@@ -1494,6 +1533,7 @@ def get_estoque_paginado(
     query = (
         db.query(Ingrediente)
         .outerjoin(Categoria)
+        .filter(Ingrediente.category_id != PRODUCTION_CATEGORY_ID)
         .order_by(Categoria.name, Ingrediente.name)
     )
     if category:
@@ -1520,10 +1560,19 @@ def get_estoque_paginado(
 
 @app.patch("/api/estoque", response_model=ResultadoLote)
 def update_estoque(lote: AtualizacaoLote, db: Session = Depends(get_db)):
+    contagem = None
+    if lote.contagem_id is not None:
+        contagem = db.query(Contagem).filter(Contagem.id == lote.contagem_id).first()
+        if contagem is None:
+            raise HTTPException(status_code=404, detail="Contagem não encontrada")
+
     ids = [u.id for u in lote.updates]
     por_id = {
         i.id: i
-        for i in db.query(Ingrediente).filter(Ingrediente.id.in_(ids)).all()
+        for i in db.query(Ingrediente)
+        .filter(Ingrediente.id.in_(ids))
+        .filter(Ingrediente.category_id != PRODUCTION_CATEGORY_ID)
+        .all()
     }
 
     count = 0
@@ -1533,6 +1582,18 @@ def update_estoque(lote: AtualizacaoLote, db: Session = Depends(get_db)):
             continue
 
         anterior = float(ingrediente.current_qty)
+        if contagem is not None:
+            db.add(
+                ContagemLog(
+                    contagem_id=contagem.id,
+                    ingrediente_id=ingrediente.id,
+                    category_id=ingrediente.category_id,
+                    categoria=ingrediente.category,
+                    quantidade_anterior=anterior,
+                    quantidade_nova=atualizacao.new_qty,
+                    delta=round(atualizacao.new_qty - anterior, 3),
+                )
+            )
         if round(atualizacao.new_qty, 3) == round(anterior, 3):
             continue
         db.add(LogContagem(
@@ -1554,7 +1615,11 @@ def update_estoque(lote: AtualizacaoLote, db: Session = Depends(get_db)):
         count += 1
 
     db.commit()
-    return ResultadoLote(ok=True, atualizados=count)
+    return ResultadoLote(
+        ok=True,
+        atualizados=count,
+        contagem_id=contagem.id if contagem is not None else None,
+    )
 
 
 @app.patch("/api/ingredientes/{ingrediente_id}", response_model=IngredienteOut)
@@ -1677,13 +1742,78 @@ def get_fornecedores(db: Session = Depends(get_db)):
             best_value_supplier_name=best_supplier.name if best_supplier else None,
             best_value_detail=(
                 f"R$ {best_supplier.avg_price:.2f} médio, "
-                f"{best_supplier.avg_delivery_time} dias"
+                f"{best_supplier.avg_delivery_time} "
+                f"{'dia' if best_supplier.avg_delivery_time == 1 else 'dias'}"
                 if best_supplier
                 else "Sem dados suficientes"
             ),
         ),
         items=items,
     )
+
+
+@app.post("/api/fornecedores", response_model=FornecedorOut)
+def create_fornecedor(payload: FornecedorCreate, db: Session = Depends(get_db)):
+    name = payload.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Nome do fornecedor é obrigatório")
+
+    last_id = (
+        db.query(Fornecedor.id)
+        .filter(Fornecedor.id.like("FOR%"))
+        .order_by(Fornecedor.id.desc())
+        .first()
+    )
+    next_number = 1
+    if last_id:
+        try:
+            next_number = int(last_id[0].replace("FOR", "")) + 1
+        except ValueError:
+            next_number = db.query(func.count(Fornecedor.id)).scalar() + 1
+
+    supplier_id = f"FOR{next_number:04d}"
+    while db.query(Fornecedor).filter(Fornecedor.id == supplier_id).first():
+        next_number += 1
+        supplier_id = f"FOR{next_number:04d}"
+
+    ingredient_ids = [item.ingredient_id for item in payload.ingredients]
+    existing_ingredients = {
+        ingredient.id
+        for ingredient in db.query(Ingrediente)
+        .filter(Ingrediente.id.in_(ingredient_ids))
+        .filter(Ingrediente.category_id != PRODUCTION_CATEGORY_ID)
+        .all()
+    }
+    missing = sorted(set(ingredient_ids) - existing_ingredients)
+    if missing:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Ingredientes inválidos para fornecedor: {', '.join(missing)}",
+        )
+
+    fornecedor = Fornecedor(
+        id=supplier_id,
+        name=name,
+        cnpj=payload.cnpj,
+        email=payload.email,
+        phone=payload.phone,
+        avg_delivery_time=payload.avg_delivery_time,
+    )
+    db.add(fornecedor)
+    for item in payload.ingredients:
+        db.add(
+            FornecedorIngrediente(
+                supplier_id=supplier_id,
+                ingredient_id=item.ingredient_id,
+                price=item.price,
+                discount_percent=item.discount_percent,
+                min_to_discount=item.min_to_discount,
+            )
+        )
+
+    db.commit()
+    db.refresh(fornecedor)
+    return fornecedor
 
 
 @app.get("/api/fornecedores/{fornecedor_id}", response_model=FornecedorProfileResponse)
@@ -1705,6 +1835,7 @@ def get_fornecedor_profile(fornecedor_id: str, db: Session = Depends(get_db)):
         .join(Categoria, Categoria.id == Ingrediente.category_id)
         .outerjoin(EstoqueAtual, EstoqueAtual.ingrediente == Ingrediente.id)
         .filter(FornecedorIngrediente.supplier_id == fornecedor_id)
+        .filter(Ingrediente.category_id != PRODUCTION_CATEGORY_ID)
         .order_by(Ingrediente.name.asc())
         .all()
     )
@@ -1728,7 +1859,9 @@ def get_fornecedor_profile(fornecedor_id: str, db: Session = Depends(get_db)):
             func.sum(Pedido.valor).label("total_value"),
             Pedido.status,
         )
+        .join(Ingrediente, Ingrediente.id == Pedido.ingredient_id)
         .filter(Pedido.supplier_id == fornecedor_id)
+        .filter(Ingrediente.category_id != PRODUCTION_CATEGORY_ID)
         .group_by(Pedido.id, Pedido.data_pedido, Pedido.status)
         .order_by(Pedido.data_pedido.desc(), Pedido.id.desc())
         .all()
@@ -1746,7 +1879,9 @@ def get_fornecedor_profile(fornecedor_id: str, db: Session = Depends(get_db)):
 
     lead_time = (
         db.query(func.avg(Pedido.data_prevista - Pedido.data_pedido))
+        .join(Ingrediente, Ingrediente.id == Pedido.ingredient_id)
         .filter(Pedido.supplier_id == fornecedor_id)
+        .filter(Ingrediente.category_id != PRODUCTION_CATEGORY_ID)
         .scalar()
     )
     orders_count = len(orders)
@@ -1788,6 +1923,7 @@ def _pedido_base_query(db: Session):
         )
         .join(Fornecedor, Fornecedor.id == Pedido.supplier_id)
         .join(Ingrediente, Ingrediente.id == Pedido.ingredient_id)
+        .filter(Ingrediente.category_id != PRODUCTION_CATEGORY_ID)
     )
 
 
@@ -1841,6 +1977,7 @@ def get_pedidos(
         date_from,
         date_to,
     )
+    query = query.filter(Pedido.status != "em_transito")
     total = query.count()
     total_pages = max(1, math.ceil(total / page_size))
     rows = (
@@ -1878,6 +2015,65 @@ def get_pedidos_em_transito(
         .all()
     )
     return [_serialize_pedido(row) for row in rows]
+
+
+@app.get("/api/pedidos/{pedido_id}", response_model=PedidoDetailResponse)
+def get_pedido_detail(pedido_id: str, db: Session = Depends(get_db)):
+    rows = (
+        db.query(
+            Pedido.id,
+            Pedido.supplier_id,
+            Fornecedor.name.label("supplier_name"),
+            Pedido.data_pedido,
+            Pedido.data_prevista,
+            Pedido.status,
+            Pedido.ingredient_id,
+            Ingrediente.name.label("ingredient_name"),
+            Categoria.name.label("category"),
+            Ingrediente.unit,
+            Pedido.qty,
+            Pedido.valor,
+        )
+        .join(Fornecedor, Fornecedor.id == Pedido.supplier_id)
+        .join(Ingrediente, Ingrediente.id == Pedido.ingredient_id)
+        .join(Categoria, Categoria.id == Ingrediente.category_id)
+        .filter(Pedido.id == pedido_id)
+        .filter(Ingrediente.category_id != PRODUCTION_CATEGORY_ID)
+        .order_by(Ingrediente.name.asc())
+        .all()
+    )
+    if not rows:
+        raise HTTPException(status_code=404, detail="Pedido não encontrado")
+
+    items = [
+        PedidoDetailItem(
+            ingredient_id=row.ingredient_id,
+            ingredient_name=row.ingredient_name,
+            category=row.category,
+            unit=row.unit,
+            qty=_as_float(row.qty),
+            unit_price=(
+                _as_float(row.valor) / _as_float(row.qty)
+                if _as_float(row.qty) > 0
+                else 0
+            ),
+            total_value=_as_float(row.valor),
+        )
+        for row in rows
+    ]
+    first = rows[0]
+
+    return PedidoDetailResponse(
+        id=first.id,
+        supplier_id=first.supplier_id,
+        supplier_name=first.supplier_name,
+        order_date=first.data_pedido,
+        expected_date=first.data_prevista,
+        status=first.status,
+        items_qty=sum(item.qty for item in items),
+        total_value=sum(item.total_value for item in items),
+        items=items,
+    )
 
 
 # ---------------------------------------------------------------------------

@@ -1,8 +1,9 @@
+import { useEffect } from 'react'
 import { createRoute, useNavigate } from '@tanstack/react-router'
 import { rootRoute } from './Root'
 import { useEstoque, getStockStatus } from '../hooks/useEstoque'
 import { CATEGORIES, type Category } from '../data/ingredients'
-import { getGlobalProgress, isCategoryComplete, initializeAll } from '../hooks/useContagem'
+import { getGlobalProgress, isCategoryComplete, initializeAll, useContagemSession } from '../hooks/useContagem'
 import { cn } from '../lib/cn'
 
 export const contagemRoute = createRoute({
@@ -14,6 +15,11 @@ export const contagemRoute = createRoute({
 export function ContagemPage() {
   const navigate = useNavigate()
   const { data: stock = [] } = useEstoque()
+  const contagem = useContagemSession()
+
+  useEffect(() => {
+    contagem.ensure()
+  }, [])
 
   // Pré-inicializa todos os itens para que as categorias mostrem o estado correto
   // antes do usuário entrar em cada uma.
@@ -44,7 +50,9 @@ export function ContagemPage() {
         </button>
         <div className="flex-1">
           <h1 className="text-xl font-semibold text-stone-900">Nova contagem</h1>
-          <p className="text-xs text-stone-400 mt-0.5">Selecione a categoria para começar</p>
+          <p className="text-xs text-stone-400 mt-0.5">
+            {contagem.label || 'Criando contagem...'} · selecione a categoria para começar
+          </p>
         </div>
       </div>
 

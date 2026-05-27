@@ -32,6 +32,28 @@ export interface PedidosPaginados {
   total_pages: number
 }
 
+export interface PedidoDetailItem {
+  ingredient_id: string
+  ingredient_name: string
+  category: string
+  unit: string
+  qty: number
+  unit_price: number
+  total_value: number
+}
+
+export interface PedidoDetail {
+  id: string
+  supplier_id: string
+  supplier_name: string
+  order_date: string
+  expected_date: string
+  status: string
+  items_qty: number
+  total_value: number
+  items: PedidoDetailItem[]
+}
+
 function paramsFromFilters(filters: PedidoFilters, includePagination = true) {
   const params = new URLSearchParams()
   if (filters.status) params.set('status', filters.status)
@@ -72,5 +94,18 @@ export function usePedidosEmTransito(filters: PedidoFilters) {
     },
     staleTime: 15_000,
     placeholderData: previous => previous,
+  })
+}
+
+export function usePedidoDetail(id: string) {
+  return useQuery({
+    queryKey: ['pedido', id],
+    queryFn: async (): Promise<PedidoDetail> => {
+      const response = await fetch(`${API_URL}/api/pedidos/${id}`)
+      if (!response.ok) throw new Error('Falha ao carregar pedido')
+      return response.json()
+    },
+    enabled: Boolean(id),
+    staleTime: 30_000,
   })
 }

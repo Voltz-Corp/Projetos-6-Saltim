@@ -10,6 +10,7 @@
   --color-brand-300: #F5A565;
   --color-brand-600: #F07820;
   --color-brand-700: #C5621A;
+  --color-white: #F7F7F7;
 
   /* Paleta completa do logo Saltim */
   --color-saltim-dark:   #1A1918;
@@ -30,6 +31,7 @@
 @layer base {
   html { font-family: var(--font-sans); }
   body { background-color: var(--color-surface); color: var(--color-ink); }
+  * { box-shadow: none !important; }
 }
 
 button {
@@ -38,4 +40,16 @@ button {
 
 svg {
   overflow: visible;
+}
+
+.saltim-day-picker {
+  --rdp-accent-color: #F07820;
+  --rdp-accent-background-color: #FEF4E8;
+  --rdp-day_button-border-radius: 8px;
+  --rdp-selected-border: 0;
+  font-size: 13px;
+}
+
+.saltim-day-picker .rdp-day_button {
+  cursor: pointer;
 }

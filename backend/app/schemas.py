@@ -1,4 +1,6 @@
-from pydantic import BaseModel, ConfigDict
+import re
+
+from pydantic import BaseModel, ConfigDict, field_validator
 from datetime import date, datetime
 from typing import Optional, List
 
@@ -24,6 +26,7 @@ class AtualizacaoItem(BaseModel):
 class AtualizacaoLote(BaseModel):
     updates: list[AtualizacaoItem]
     session_label: Optional[str] = None
+    contagem_id: Optional[int] = None
 
 
 class LogContagemOut(BaseModel):
@@ -41,6 +44,21 @@ class LogContagemOut(BaseModel):
 class ResultadoLote(BaseModel):
     ok: bool
     atualizados: int
+    contagem_id: Optional[int] = None
+
+
+class ContagemCreate(BaseModel):
+    label: Optional[str] = None
+
+
+class ContagemOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    label: str
+    status: str
+    criada_em: datetime
+    finalizada_em: Optional[datetime] = None
 
 
 class EstoquePaginado(BaseModel):
@@ -88,6 +106,42 @@ class FornecedorKpis(BaseModel):
 class FornecedorListResponse(BaseModel):
     kpis: FornecedorKpis
     items: List[FornecedorListItem]
+
+
+class FornecedorIngredientCreate(BaseModel):
+    ingredient_id: str
+    price: float
+    discount_percent: float = 0
+    min_to_discount: float = 0
+
+
+class FornecedorCreate(BaseModel):
+    name: str
+    cnpj: Optional[str] = None
+    email: Optional[str] = None
+    phone: Optional[str] = None
+    avg_delivery_time: Optional[int] = None
+    ingredients: List[FornecedorIngredientCreate] = []
+
+    @field_validator("cnpj")
+    @classmethod
+    def validate_cnpj(cls, value: Optional[str]) -> Optional[str]:
+        if value is None or value == "":
+            return None
+        digits = re.sub(r"\D", "", value)
+        if len(digits) != 14:
+            raise ValueError("CNPJ deve conter 14 dígitos")
+        return digits
+
+    @field_validator("phone")
+    @classmethod
+    def validate_phone(cls, value: Optional[str]) -> Optional[str]:
+        if value is None or value == "":
+            return None
+        digits = re.sub(r"\D", "", value)
+        if len(digits) not in (10, 11):
+            raise ValueError("Telefone deve conter 10 ou 11 dígitos")
+        return digits
 
 
 class FornecedorProductOut(BaseModel):
@@ -139,6 +193,28 @@ class PedidoPaginado(BaseModel):
     page: int
     page_size: int
     total_pages: int
+
+
+class PedidoDetailItem(BaseModel):
+    ingredient_id: str
+    ingredient_name: str
+    category: str
+    unit: str
+    qty: float
+    unit_price: float
+    total_value: float
+
+
+class PedidoDetailResponse(BaseModel):
+    id: str
+    supplier_id: str
+    supplier_name: str
+    order_date: date
+    expected_date: date
+    status: str
+    items_qty: float
+    total_value: float
+    items: List[PedidoDetailItem]
 
 
 class DashboardRankItem(BaseModel):

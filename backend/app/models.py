@@ -321,3 +321,40 @@ class LogContagem(Base):
     )
 
     ingrediente = relationship("Ingrediente", back_populates="historico")
+
+
+class Contagem(Base):
+    __tablename__ = "contagens"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    label = Column(String, nullable=False)
+    status = Column(String, nullable=False, default="em_andamento", index=True)
+    criada_em = Column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False, index=True
+    )
+    finalizada_em = Column(DateTime(timezone=True))
+
+    logs = relationship("ContagemLog", back_populates="contagem")
+
+
+class ContagemLog(Base):
+    __tablename__ = "contagem_log"
+    __table_args__ = (
+        Index("idx_contagem_log_contagem_categoria", "contagem_id", "category_id"),
+        Index("idx_contagem_log_ingredient", "ingrediente_id"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    contagem_id = Column(Integer, ForeignKey("contagens.id"), nullable=False)
+    ingrediente_id = Column(String, ForeignKey("ingredientes.id"), nullable=False)
+    category_id = Column(String, ForeignKey("categorias.id"), nullable=False)
+    categoria = Column(String, nullable=False)
+    quantidade_anterior = Column(Numeric(14, 4), nullable=False)
+    quantidade_nova = Column(Numeric(14, 4), nullable=False)
+    delta = Column(Numeric(14, 4), nullable=False)
+    criado_em = Column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False, index=True
+    )
+
+    contagem = relationship("Contagem", back_populates="logs")
+    ingrediente = relationship("Ingrediente")

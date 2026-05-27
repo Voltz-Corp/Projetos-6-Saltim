@@ -22,9 +22,10 @@ export function CoffeeLoading({ show }: { show: boolean }) {
                 className="absolute left-8 top-12 h-14 w-20 rounded-b-2xl rounded-t-md border-4 border-brand-600 bg-saltim-cream"
                 animate={{ y: [0, 3, 0] }}
                 transition={{ duration: 0.7, repeat: Infinity }}
-              />
-              <div className="absolute left-[100px] top-16 h-8 w-8 rounded-r-full border-4 border-brand-600 border-l-0" />
-              <motion.div
+              >
+                <div className="absolute left-[75px] top-[10px] top-16 h-8 w-6 rounded-r-full border-4 border-brand-600 border-l-0" />
+              </motion.div>
+              {/* <motion.div
                 className="absolute left-5 top-0 h-10 w-24 rounded-full border border-brand-200/30"
                 animate={{ rotate: [0, 360] }}
                 transition={{ duration: 1.1, repeat: Infinity, ease: 'linear' }}
@@ -32,7 +33,7 @@ export function CoffeeLoading({ show }: { show: boolean }) {
                 <span className="absolute left-3 top-4 size-2 rounded-full bg-brand-600" />
                 <span className="absolute left-11 top-1 size-2 rounded-full bg-saltim-blue" />
                 <span className="absolute right-3 top-5 size-2 rounded-full bg-saltim-green" />
-              </motion.div>
+              </motion.div> */}
               {[0, 1, 2].map((index) => (
                 <motion.span
                   key={index}

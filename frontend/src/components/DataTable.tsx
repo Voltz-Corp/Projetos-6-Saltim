@@ -30,6 +30,7 @@ export function DataTable({
   isEmpty = false,
   isLoading = false,
   pagination,
+  embedded = false,
 }: {
   headers: DataTableHeader[]
   children: ReactNode
@@ -40,11 +41,17 @@ export function DataTable({
   isEmpty?: boolean
   isLoading?: boolean
   pagination?: DataTablePagination
+  embedded?: boolean
 }) {
   const span = colSpan ?? headers.length
 
   return (
-    <div className="overflow-hidden rounded-xl border border-stone-200 bg-white shadow-sm">
+    <div
+      className={cn(
+        'overflow-hidden bg-white',
+        embedded ? 'rounded-none border-0' : 'rounded-xl border border-stone-200',
+      )}
+    >
       <div className="overflow-auto">
         <table className="w-full border-collapse text-sm" style={{ minWidth }}>
           <thead>

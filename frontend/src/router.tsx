@@ -5,8 +5,9 @@ import { estoqueRoute } from './routes/EstoquePage'
 import { contagemRoute } from './routes/ContagemPage'
 import { contagemCategoriaRoute } from './routes/ContagemCategoriaPage'
 import { ingredienteEditRoute } from './routes/IngredienteEditPage'
+import { fornecedorNewRoute } from './routes/FornecedorNewPage'
 import { fornecedorProfileRoute, fornecedoresRoute } from './routes/FornecedoresPage'
-import { pedidosRoute } from './routes/PedidosPage'
+import { pedidoDetailRoute, pedidosRoute } from './routes/PedidosPage'
 
 const routeTree = rootRoute.addChildren([
   dashboardRoute,
@@ -15,8 +16,10 @@ const routeTree = rootRoute.addChildren([
   contagemCategoriaRoute,
   ingredienteEditRoute,
   fornecedoresRoute,
+  fornecedorNewRoute,
   fornecedorProfileRoute,
   pedidosRoute,
+  pedidoDetailRoute,
 ])
 
 export const router = createRouter({ routeTree })

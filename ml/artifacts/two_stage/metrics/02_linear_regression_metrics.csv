@@ -1,0 +1,4 @@
+notebook,family,stage,model,artifact_path,prediction_path,rmse,mae,r2,warnings
+02_linear,Linear,regression,Linear Regression,ml/artifacts/two_stage/02_linear_linear_regression_regressor.pkl,ml/artifacts/two_stage/metrics/02_linear_linear_regression_regression_predictions.csv,91.84995991253587,16.470480210498774,0.8306443574737178,
+02_linear,Linear,regression,XGBoost Regressor,ml/artifacts/two_stage/02_linear_xgboost_regressor_regressor.pkl,ml/artifacts/two_stage/metrics/02_linear_xgboost_regressor_regression_predictions.csv,84.36932268926955,11.155199571946648,0.8571070329886517,
+02_linear,Linear,regression,Gradient Boosting Regressor,ml/artifacts/two_stage/02_linear_gradient_boosting_regressor_regressor.pkl,ml/artifacts/two_stage/metrics/02_linear_gradient_boosting_regressor_regression_predictions.csv,71.2215239861105,10.884353386814439,0.8981726941175778,

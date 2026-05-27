@@ -7,6 +7,7 @@ import {
   getGlobalProgress,
   buildAllUpdates,
   initializeAll,
+  useContagemSession,
 } from '../hooks/useContagem';
 import { CATEGORIES, type Category } from '../data/ingredients';
 import { cn } from '../lib/cn';
@@ -151,6 +152,7 @@ export function ContagemCategoriaPage() {
 
   const { data: stock = [] } = useEstoque();
   const atualizar = useAtualizarEstoque();
+  const contagem = useContagemSession();
 
   // Garante que o progresso global esteja correto mesmo entrando direto na categoria
   initializeAll(stock);
@@ -199,7 +201,10 @@ export function ContagemCategoriaPage() {
 
   async function handleNext() {
     const updates = buildUpdates();
-    if (updates.size > 0) await atualizar.mutateAsync(updates);
+    if (updates.size > 0) {
+      const contagemId = contagem.contagemId ?? await contagem.ensure();
+      await atualizar.mutateAsync({ updates, contagemId });
+    }
     if (isGlobalDone || isLastCategory) {
       navigate({ to: '/estoque', search: { counted: 'Contagem finalizada' } });
     } else {
@@ -212,7 +217,10 @@ export function ContagemCategoriaPage() {
 
   async function handleSairESalvar() {
     const updates = buildAllUpdates(stock);
-    if (updates.size > 0) await atualizar.mutateAsync(updates);
+    if (updates.size > 0) {
+      const contagemId = contagem.contagemId ?? await contagem.ensure();
+      await atualizar.mutateAsync({ updates, contagemId });
+    }
     navigate({ to: '/estoque', search: {} });
   }
 
@@ -262,6 +270,9 @@ export function ContagemCategoriaPage() {
           <h1 className="text-lg font-semibold text-stone-900 leading-tight">
             Contagem de insumos
           </h1>
+          <p className="mt-0.5 text-xs text-stone-400">
+            {contagem.label || 'Contagem em criação'}
+          </p>
         </div>
         <div className="flex items-center gap-4 flex-shrink-0">
           <span className="text-xs text-stone-500 tabular-nums">

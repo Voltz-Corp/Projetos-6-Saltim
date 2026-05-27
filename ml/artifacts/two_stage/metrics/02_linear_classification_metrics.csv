@@ -1,0 +1,11 @@
+notebook,family,stage,model,artifact_path,prediction_path,f1_score,precision,recall,accuracy,roc_auc,warnings
+02_linear,Linear,classification,Logistic Regression,ml/artifacts/two_stage/02_linear_logistic_regression_classifier.pkl,ml/artifacts/two_stage/metrics/02_linear_logistic_regression_classification_predictions.csv,0.8640776699029126,0.9162663006177076,0.8175137783221066,0.9399571122230165,0.9834415734959193,"ConvergenceWarning: lbfgs failed to converge after 100 iteration(s) (status=1):
+STOP: TOTAL NO. OF ITERATIONS REACHED LIMIT
+
+Increase the number of iterations to improve the convergence (max_iter=100).
+You might also want to scale the data as shown in:
+    https://scikit-learn.org/stable/modules/preprocessing.html
+Please also refer to the documentation for alternative solver options:
+    https://scikit-learn.org/stable/modules/linear_model.html#logistic-regression"
+02_linear,Linear,classification,XGBoost Classifier,ml/artifacts/two_stage/02_linear_xgboost_classifier_classifier.pkl,ml/artifacts/two_stage/metrics/02_linear_xgboost_classifier_classification_predictions.csv,0.9478758662247665,0.9329774614472124,0.9632578077158603,0.9752680486061472,0.996240697676809,
+02_linear,Linear,classification,Gradient Boosting Classifier,ml/artifacts/two_stage/02_linear_gradient_boosting_classifier_classifier.pkl,ml/artifacts/two_stage/metrics/02_linear_gradient_boosting_classifier_classification_predictions.csv,0.95551492992078,0.9508793208004851,0.9601959583588487,0.9791279485346677,0.996365809798055,

@@ -1,4 +1,4 @@
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
 const API_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:8000'
 
@@ -55,6 +55,22 @@ export interface FornecedorProfile {
   orders: FornecedorOrder[]
 }
 
+export interface FornecedorIngredientPayload {
+  ingredient_id: string
+  price: number
+  discount_percent?: number
+  min_to_discount?: number
+}
+
+export interface FornecedorCreatePayload {
+  name: string
+  cnpj?: string
+  email?: string
+  phone?: string
+  avg_delivery_time?: number
+  ingredients: FornecedorIngredientPayload[]
+}
+
 export function useFornecedores() {
   return useQuery({
     queryKey: ['fornecedores'],
@@ -64,6 +80,25 @@ export function useFornecedores() {
       return response.json() as Promise<FornecedoresResponse>
     },
     staleTime: 30_000,
+  })
+}
+
+export function useCreateFornecedor() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async (payload: FornecedorCreatePayload) => {
+      const response = await fetch(`${API_URL}/api/fornecedores`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+      if (!response.ok) throw new Error('Falha ao cadastrar fornecedor')
+      return response.json() as Promise<Fornecedor>
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['fornecedores'] })
+    },
   })
 }
 

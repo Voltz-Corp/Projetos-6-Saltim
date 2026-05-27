@@ -19,7 +19,7 @@ const styles: StylesConfig<SelectOption, boolean> = {
     borderRadius: 8,
     borderColor: state.isFocused ? '#F07820' : '#DCDAD4',
     boxShadow: state.isFocused ? '0 0 0 3px rgba(240, 120, 32, 0.14)' : 'none',
-    backgroundColor: '#FFFFFF',
+    backgroundColor: '#F7F7F7',
     color: '#1A1918',
     fontSize: 13,
     cursor: 'pointer',
@@ -109,7 +109,7 @@ const styles: StylesConfig<SelectOption, boolean> = {
       ? '#FEF4E8'
       : state.isFocused
         ? '#F5F4F1'
-        : '#FFFFFF',
+        : '#F7F7F7',
     fontSize: 13,
     fontWeight: state.isSelected ? 700 : 500,
     cursor: 'pointer',

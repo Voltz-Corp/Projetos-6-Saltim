@@ -20,6 +20,7 @@ import { StatusBadge } from '../components/StatusBadge'
 import { CategoryBadge } from '../components/CategoryBadge'
 import { AppSelect } from '../components/AppSelect'
 import { DataTable, type DataTableHeader } from '../components/DataTable'
+import { FilterDrawer, FilterField, FilterSection } from '../components/FilterPanel'
 import { cn } from '../lib/cn'
 
 export const estoqueRoute = createRoute({
@@ -95,6 +96,7 @@ const columns = [
     header: 'Status',
     cell: i => <StatusBadge item={i.row.original} />,
     enableSorting: false,
+    meta: { align: 'center' },
   }),
   col.display({
     id: 'actions',
@@ -126,6 +128,9 @@ export function EstoquePage() {
   const [category, setCategory] = useState<Category | ''>('')
   const [status, setStatus] = useState<StockStatusFilter | ''>('')
   const [q, setQ] = useState('')
+  const [draftCategory, setDraftCategory] = useState<Category | ''>('')
+  const [draftStatus, setDraftStatus] = useState<StockStatusFilter | ''>('')
+  const [filtersOpen, setFiltersOpen] = useState(false)
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(50)
 
@@ -151,9 +156,23 @@ export function EstoquePage() {
     manualPagination: true,
   })
 
-  function handleFilterChange(fn: () => void) {
-    fn()
+  const appliedFilterCount = [category, status].filter(Boolean).length
+
+  function applyFilters() {
+    setCategory(draftCategory)
+    setStatus(draftStatus)
     setPage(1)
+    setFiltersOpen(false)
+  }
+
+  function clearFilters() {
+    setCategory('')
+    setStatus('')
+    setQ('')
+    setDraftCategory('')
+    setDraftStatus('')
+    setPage(1)
+    setFiltersOpen(false)
   }
 
   return (
@@ -183,16 +202,15 @@ export function EstoquePage() {
           </p>
         </div>
 
-        {/* Search */}
         <div className="relative">
           <svg viewBox="0 0 20 20" className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-stone-400 pointer-events-none" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <circle cx="9" cy="9" r="6" /><line x1="13.5" y1="13.5" x2="18" y2="18" />
           </svg>
           <input
             value={q}
-            onChange={e => handleFilterChange(() => setQ(e.target.value))}
-            placeholder="Buscar insumo…"
-            className="pl-9 pr-4 py-2 text-sm border border-stone-200 rounded-lg bg-stone-50 outline-none focus:ring-2 focus:ring-brand-600/20 focus:border-brand-600 w-52 transition"
+            onChange={e => { setQ(e.target.value); setPage(1) }}
+            placeholder="Buscar insumo..."
+            className="pl-9 pr-4 py-2 text-sm border border-stone-200 rounded-lg bg-white outline-none focus:border-brand-600 w-52 transition"
           />
         </div>
 
@@ -207,39 +225,42 @@ export function EstoquePage() {
         </button>
       </div>
 
-      {/* Filters */}
-      <div className="bg-white border-b border-stone-100 px-8 py-3 flex items-center gap-3 flex-shrink-0">
-        <span className="text-xs font-medium text-stone-400 uppercase tracking-wide flex-shrink-0">Filtrar por</span>
+      <FilterDrawer
+        title="Filtros de estoque"
+        subtitle="Aplicados à listagem de insumos"
+        open={filtersOpen}
+        onOpen={() => setFiltersOpen(true)}
+        onClose={() => setFiltersOpen(false)}
+        onApply={applyFilters}
+        onClear={clearFilters}
+        appliedCount={appliedFilterCount}
+      >
+        <FilterSection title="Classificação">
+          <FilterField label="Categoria">
+            <AppSelect
+              value={draftCategory}
+              onChange={value => setDraftCategory(value as Category | '')}
+              options={[
+                { value: '', label: 'Todas as categorias' },
+                ...CATEGORIES.map(cat => ({ value: cat, label: cat })),
+              ]}
+              className="w-full"
+            />
+          </FilterField>
 
-        <AppSelect
-          value={category}
-          onChange={value => handleFilterChange(() => setCategory(value as Category | ''))}
-          options={[
-            { value: '', label: 'Todas as categorias' },
-            ...CATEGORIES.map(cat => ({ value: cat, label: cat })),
-          ]}
-          className="w-56"
-        />
-
-        <AppSelect
-          value={status}
-          onChange={value => handleFilterChange(() => setStatus(value as StockStatusFilter | ''))}
-          options={[
-            { value: '', label: 'Todos os status' },
-            ...STATUS_OPTIONS.map(s => ({ value: s, label: s })),
-          ]}
-          className="w-44"
-        />
-
-        {(category || status || q) && (
-          <button
-            onClick={() => { setCategory(''); setStatus(''); setQ(''); setPage(1) }}
-            className="text-xs text-stone-400 hover:text-stone-700 transition-colors ml-1"
-          >
-            Limpar filtros
-          </button>
-        )}
-      </div>
+          <FilterField label="Status">
+            <AppSelect
+              value={draftStatus}
+              onChange={value => setDraftStatus(value as StockStatusFilter | '')}
+              options={[
+                { value: '', label: 'Todos os status' },
+                ...STATUS_OPTIONS.map(s => ({ value: s, label: s })),
+              ]}
+              className="w-full"
+            />
+          </FilterField>
+        </FilterSection>
+      </FilterDrawer>
 
       {/* Table card */}
       <div className="flex-1 overflow-auto p-6">

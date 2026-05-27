@@ -1,13 +1,60 @@
 import { useState } from 'react'
+import { useMutation } from '@tanstack/react-query'
 import type { StockItem } from './useEstoque'
 
 // Module-level state persists across category route changes
 const globalCounts = new Map<number, number>()
 const globalTouched = new Set<number>()
+let globalContagemId: number | null = null
+let globalContagemLabel = ''
+let globalContagemPromise: Promise<{ id: number; label: string }> | null = null
+const API_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:8000'
 
 export function resetContagem() {
   globalCounts.clear()
   globalTouched.clear()
+  globalContagemId = null
+  globalContagemLabel = ''
+  globalContagemPromise = null
+}
+
+export function useContagemSession() {
+  const [, forceRender] = useState(0)
+
+  const mutation = useMutation({
+    mutationFn: async () => {
+      const response = await fetch(`${API_URL}/api/contagens`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      })
+      if (!response.ok) throw new Error('Falha ao criar contagem')
+      return response.json() as Promise<{ id: number; label: string }>
+    },
+    onSuccess: (contagem) => {
+      globalContagemId = contagem.id
+      globalContagemLabel = contagem.label
+      forceRender(value => value + 1)
+    },
+  })
+
+  async function ensure() {
+    if (globalContagemId) return globalContagemId
+    if (!globalContagemPromise) {
+      globalContagemPromise = mutation.mutateAsync().finally(() => {
+        globalContagemPromise = null
+      })
+    }
+    const contagem = await globalContagemPromise
+    return contagem.id
+  }
+
+  return {
+    contagemId: globalContagemId,
+    label: globalContagemLabel,
+    isCreating: mutation.isPending,
+    ensure,
+  }
 }
 
 // Pré-inicializa todos os itens: preenche contagens e marca os que já atingem o mínimo.

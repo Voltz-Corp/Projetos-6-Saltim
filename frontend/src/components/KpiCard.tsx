@@ -12,6 +12,8 @@ export interface KpiCardProps {
   showComparisonBadge?: boolean
   comparisonLabel?: string
   comparisonDirection?: 'up' | 'down' | 'neutral'
+  badgeValue?: boolean
+  badgeTone?: 'green' | 'amber' | 'red'
 }
 
 const toneClasses: Record<KpiTone, string> = {
@@ -38,9 +40,17 @@ export function KpiCard({
   showComparisonBadge = false,
   comparisonLabel = '',
   comparisonDirection = 'neutral',
+  badgeValue = false,
+  badgeTone = 'green',
 }: KpiCardProps) {
+  const valueBadgeClasses = {
+    green: 'border-emerald-100 bg-emerald-50 text-emerald-700',
+    amber: 'border-amber-100 bg-amber-50 text-amber-700',
+    red: 'border-red-100 bg-red-50 text-red-700',
+  }
+
   return (
-    <section className="relative min-w-0 rounded-xl border border-stone-100 bg-white p-4 shadow-[0_14px_34px_rgba(26,25,24,0.04)]">
+    <section className="relative min-w-0 rounded-xl border border-stone-200 bg-white p-4">
       {showComparisonBadge && comparisonLabel && (
         <span
           className={[
@@ -67,15 +77,21 @@ export function KpiCard({
           <div className="text-[11px] font-bold uppercase tracking-wide text-stone-500">
             {label}
           </div>
-          <div
-            className={[
-              'mt-1 text-base font-black leading-tight text-stone-900 tabular-nums',
-              truncateValue ? 'truncate' : 'break-words',
-            ].join(' ')}
-            title={truncateValue ? value : undefined}
-          >
-            {value}
-          </div>
+          {badgeValue ? (
+            <span className={`mt-1 inline-flex rounded-full border px-2.5 py-1 text-xs font-black capitalize ${valueBadgeClasses[badgeTone]}`}>
+              {value}
+            </span>
+          ) : (
+            <div
+              className={[
+                'mt-1 text-base font-black leading-tight text-stone-900 tabular-nums',
+                truncateValue ? 'truncate' : 'break-words',
+              ].join(' ')}
+              title={truncateValue ? value : undefined}
+            >
+              {value}
+            </div>
+          )}
           {detail && (
             <div className="mt-1 truncate text-xs leading-snug text-stone-500" title={detail}>
               {detail}

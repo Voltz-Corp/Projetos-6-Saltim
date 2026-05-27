@@ -2,10 +2,6 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { createRoute } from '@tanstack/react-router';
 import { AnimatePresence, motion } from 'motion/react';
-import dayjs, { type Dayjs } from 'dayjs';
-import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
-import { AdapterDayjs } from '@mui/x-date-pickers/AdapterDayjs';
-import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import {
   Filter,
   Flag,
@@ -36,6 +32,11 @@ import {
   type SelectOption,
 } from '../components/AppSelect';
 import { CoffeeLoading } from '../components/CoffeeLoading';
+import {
+  DateFilterControl,
+  type DateFilterMode,
+} from '../components/DateFilterControl';
+import { FilterField } from '../components/FilterPanel';
 import { KpiCard, type KpiTone } from '../components/KpiCard';
 import {
   useDashboard,
@@ -89,7 +90,7 @@ interface DashboardGlobalFilterState {
   eventTypes: string[];
   selectedYears: string[];
   selectedMonths: string[];
-  exactDate: string;
+  dateMode: DateFilterMode;
   rangeStart: string;
   rangeEnd: string;
 }
@@ -101,7 +102,7 @@ const DEFAULT_GLOBAL_FILTERS: DashboardGlobalFilterState = {
   eventTypes: [],
   selectedYears: [],
   selectedMonths: [],
-  exactDate: '',
+  dateMode: 'all',
   rangeStart: '',
   rangeEnd: '',
 };
@@ -284,23 +285,6 @@ function FilterPopover({ children }: { children: ReactNode }) {
   );
 }
 
-function FilterField({
-  label,
-  children,
-}: {
-  label: string;
-  children: ReactNode;
-}) {
-  return (
-    <label className="grid gap-1.5">
-      <span className="text-[11px] font-bold uppercase tracking-wide text-stone-500">
-        {label}
-      </span>
-      {children}
-    </label>
-  );
-}
-
 function ToggleSwitch({
   checked,
   label,
@@ -382,34 +366,8 @@ function activeFilterCount(filters: DashboardGlobalFilterState) {
   if (filters.eventTypes.length) count += 1;
   if (filters.selectedYears.length) count += 1;
   if (filters.selectedMonths.length) count += 1;
-  if (filters.exactDate) count += 1;
-  if (filters.rangeStart || filters.rangeEnd) count += 1;
+  if (filters.dateMode !== 'all' && (filters.rangeStart || filters.rangeEnd)) count += 1;
   return count;
-}
-
-function toIsoDate(value: Dayjs | null) {
-  return value?.isValid() ? value.format('YYYY-MM-DD') : '';
-}
-
-function fromIsoDate(value: string) {
-  return value ? dayjs(value) : null;
-}
-
-function muiDateFieldStyles() {
-  return {
-    '& .MuiOutlinedInput-root': {
-      borderRadius: '8px',
-      backgroundColor: '#FFFFFF',
-      fontSize: '13px',
-      '& fieldset': { borderColor: '#DCDAD4' },
-      '&:hover fieldset': { borderColor: '#CFCBC2' },
-      '&.Mui-focused fieldset': { borderColor: '#F07820' },
-    },
-    '& .MuiInputBase-input': {
-      padding: '8.5px 10px',
-      cursor: 'pointer',
-    },
-  };
 }
 
 function DashboardFilterDrawer({
@@ -518,8 +476,7 @@ function DashboardFilterDrawer({
           </button>
         </div>
 
-        <LocalizationProvider dateAdapter={AdapterDayjs}>
-          <div className="flex h-[calc(100vh-73px)] flex-col overflow-y-auto p-5">
+        <div className="flex h-[calc(100vh-73px)] flex-col overflow-y-auto p-5">
             <CollapsibleSection title="Tempo">
               <FilterField label="Período">
                 <DaysSelect
@@ -545,52 +502,20 @@ function DashboardFilterDrawer({
                   placeholder="Selecionar meses"
                 />
               </FilterField>
-              <FilterField label="Data específica">
-                <DatePicker
-                  value={fromIsoDate(filters.exactDate)}
-                  onChange={(value) => update({ exactDate: toIsoDate(value) })}
-                  format="DD/MM/YYYY"
-                  slotProps={{
-                    textField: {
-                      size: 'small',
-                      fullWidth: true,
-                      sx: muiDateFieldStyles(),
-                    },
-                  }}
+              <FilterField label="Data">
+                <DateFilterControl
+                  mode={filters.dateMode}
+                  dateFrom={filters.rangeStart}
+                  dateTo={filters.rangeEnd}
+                  onChange={(value) =>
+                    update({
+                      dateMode: value.mode,
+                      rangeStart: value.dateFrom,
+                      rangeEnd: value.dateTo,
+                    })
+                  }
                 />
               </FilterField>
-              <div className="grid grid-cols-2 gap-2">
-                <FilterField label="Início">
-                  <DatePicker
-                    value={fromIsoDate(filters.rangeStart)}
-                    onChange={(value) =>
-                      update({ rangeStart: toIsoDate(value) })
-                    }
-                    format="DD/MM/YYYY"
-                    slotProps={{
-                      textField: {
-                        size: 'small',
-                        fullWidth: true,
-                        sx: muiDateFieldStyles(),
-                      },
-                    }}
-                  />
-                </FilterField>
-                <FilterField label="Fim">
-                  <DatePicker
-                    value={fromIsoDate(filters.rangeEnd)}
-                    onChange={(value) => update({ rangeEnd: toIsoDate(value) })}
-                    format="DD/MM/YYYY"
-                    slotProps={{
-                      textField: {
-                        size: 'small',
-                        fullWidth: true,
-                        sx: muiDateFieldStyles(),
-                      },
-                    }}
-                  />
-                </FilterField>
-              </div>
             </CollapsibleSection>
 
             <CollapsibleSection title="Categorias" defaultOpen={false}>
@@ -638,8 +563,7 @@ function DashboardFilterDrawer({
                 Aplicar
               </button>
             </div>
-          </div>
-        </LocalizationProvider>
+        </div>
       </aside>
     </>
   );
@@ -1244,8 +1168,9 @@ export function DashboardPage() {
       years: globalFilters.selectedYears,
       months: globalFilters.selectedMonths,
       dateFrom:
-        globalFilters.exactDate || globalFilters.rangeStart || undefined,
-      dateTo: globalFilters.exactDate || globalFilters.rangeEnd || undefined,
+        globalFilters.dateMode === 'all' ? undefined : globalFilters.rangeStart || undefined,
+      dateTo:
+        globalFilters.dateMode === 'all' ? undefined : globalFilters.rangeEnd || undefined,
     }),
     [globalFilters],
   );
