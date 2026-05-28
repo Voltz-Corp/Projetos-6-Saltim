@@ -53,3 +53,11 @@ svg {
 .saltim-day-picker .rdp-day_button {
   cursor: pointer;
 }
+
+/* VLibras: alinha o botão logo abaixo do gatilho de filtros (direita, centro vertical) */
+.saltim-vlibras [vw-access-button],
+.saltim-vlibras .vw-access-button {
+  top: calc(50% + 48px) !important;
+  right: 0 !important;
+  z-index: 40;
+}
