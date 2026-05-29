@@ -102,3 +102,11 @@ Cada notebook gera e envia ao MLflow:
 - Analise de residuos: dispersao dos residuos contra previsoes e distribuicao dos residuos.
 
 Para regressao nao foi usada matriz de confusao como diagnostico principal. A matriz de confusao e mais adequada para classificacao; aqui a avaliacao central e o erro do limiar previsto. Ainda assim, o pipeline calcula metricas operacionais de criticidade derivadas desse limiar.
+
+## 7. Dataset completo nos modelos finais
+
+Os notebooks em `02_modelos_finais` usam `load_abt_full()` por meio de `use_full_dataset=True` no `RegressorTuningConfig`.
+
+Essa escolha separa explicitamente os experimentos rapidos, que podem usar `load_abt_sample()`, dos modelos finais, que precisam aproveitar 100% das linhas disponiveis nos splits `train`, `validation` e `test`.
+
+O notebook `07_modelos_finais_comparison.ipynb` compara os champions finais registrados no MLflow. Alem de RMSE, MAE, R2 e ganho contra baseline, ele calcula `model_size_mb` baixando o artefato `model` de cada run e somando o tamanho dos arquivos serializados.

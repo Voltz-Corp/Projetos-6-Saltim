@@ -5,6 +5,7 @@ import math
 import warnings
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 import matplotlib.pyplot as plt
@@ -26,10 +27,15 @@ from two_stage_common import (
     VALIDATION_SPLIT,
     SPLIT_COLUMN,
     _criticality_metric_row,
+    _mlflow_experiment_name,
+    _mlflow_notebook_folder,
+    _mlflow_notebook_path,
     _mlflow_registered_model_name,
+    _mlflow_tracking_uri,
     _safe_mlflow_param_value,
     _setup_mlflow_experiment,
     _threshold_prediction_frame,
+    load_abt_full,
     load_abt_sample,
     mlflow,
     pipeline_for,
@@ -51,6 +57,11 @@ WEIGHT_PROFILE_DESCRIPTIONS = {
     "threshold_extreme_focus": "Aumenta peso de limiares de alerta mais distantes da mediana.",
 }
 
+FINAL_MODEL_NOTEBOOK_IDS = (
+    "05_random_forest_regressor_threshold_tuning",
+    "06_xgboost_regressor_threshold_tuning",
+)
+
 
 @dataclass(frozen=True)
 class RegressorTuningConfig:
@@ -64,6 +75,8 @@ class RegressorTuningConfig:
     cv_splits: int = 4
     random_state: int = 42
     n_jobs: int = -1
+    sample_frac: float = 0.25
+    use_full_dataset: bool = False
     weight_profiles: tuple[str, ...] = (
         "uniform",
         "alert_focus",
@@ -73,8 +86,11 @@ class RegressorTuningConfig:
     learning_curve_train_sizes: tuple[float, ...] = (0.35, 0.55, 0.75, 1.0)
 
 
-def prepare_threshold_regression_data() -> dict[str, object]:
-    df = load_abt_sample()
+def prepare_threshold_regression_data(
+    sample_frac: float = 0.25,
+    use_full_dataset: bool = False,
+) -> dict[str, object]:
+    df = load_abt_full() if use_full_dataset else load_abt_sample(sample_frac=sample_frac)
     df["date"] = pd.to_datetime(df["date"])
     feature_columns = select_feature_columns(df)
     search_mask = df[SPLIT_COLUMN].isin([TRAIN_SPLIT, VALIDATION_SPLIT])
@@ -263,6 +279,9 @@ def _log_candidate_runs(config: RegressorTuningConfig, cv_table: pd.DataFrame) -
                     "problem": "stock_criticality",
                     "stage": "threshold_regression_tuning_candidate",
                     "notebook": config.notebook_id,
+                    "notebook_folder": _mlflow_notebook_folder(config.notebook_id),
+                    "notebook_path": _mlflow_notebook_path(config.notebook_id),
+                    "experiment_path": _mlflow_experiment_name(config.notebook_id, "threshold_regression"),
                     "model": config.model_name,
                     "weight_profile": row["weight_profile"],
                 }
@@ -314,6 +333,9 @@ def random_search_for_weight_profile(
                 "problem": "stock_criticality",
                 "stage": "threshold_regression_random_search",
                 "notebook": config.notebook_id,
+                "notebook_folder": _mlflow_notebook_folder(config.notebook_id),
+                "notebook_path": _mlflow_notebook_path(config.notebook_id),
+                "experiment_path": _mlflow_experiment_name(config.notebook_id, "threshold_regression"),
                 "model": config.model_name,
                 "weight_profile": weight_profile,
             }
@@ -377,6 +399,9 @@ def evaluate_baseline(config: RegressorTuningConfig, data: Mapping[str, object])
                 "problem": "stock_criticality",
                 "stage": "threshold_regression_baseline",
                 "notebook": config.notebook_id,
+                "notebook_folder": _mlflow_notebook_folder(config.notebook_id),
+                "notebook_path": _mlflow_notebook_path(config.notebook_id),
+                "experiment_path": _mlflow_experiment_name(config.notebook_id, "threshold_regression"),
                 "model": config.model_name,
             }
         )
@@ -552,6 +577,9 @@ def _log_final_model_run(
                 "stage": "threshold_regression",
                 "family": config.family,
                 "notebook": config.notebook_id,
+                "notebook_folder": _mlflow_notebook_folder(config.notebook_id),
+                "notebook_path": _mlflow_notebook_path(config.notebook_id),
+                "experiment_path": _mlflow_experiment_name(config.notebook_id, "threshold_regression"),
                 "model": config.model_name,
                 "registered_model_name": registered_model_name,
                 "metric_artifact_path": metric_artifact_path,
@@ -567,6 +595,8 @@ def _log_final_model_run(
                 "model": config.model_name,
                 "registered_model_name": registered_model_name,
                 "run_source": "random_search_tuning",
+                "dataset_mode": summary.get("dataset_mode", ""),
+                "sample_frac": summary.get("sample_frac", ""),
                 "metric_artifact_path": metric_artifact_path,
                 "prediction_artifact_path": prediction_artifact_path,
                 "summary_artifact_path": summary_artifact_path,
@@ -604,12 +634,159 @@ def _log_final_model_run(
         }
 
 
+def _artifact_size_bytes(model_uri: str) -> int | None:
+    try:
+        local_path = mlflow.artifacts.download_artifacts(model_uri)
+    except Exception:
+        return None
+
+    root = Path(local_path)
+    if root.is_file():
+        return root.stat().st_size
+
+    return sum(path.stat().st_size for path in root.rglob("*") if path.is_file())
+
+
+def _final_model_experiments() -> list[object]:
+    if mlflow is None:
+        raise RuntimeError("MLflow nao esta instalado no ambiente do notebook.")
+
+    mlflow.set_tracking_uri(_mlflow_tracking_uri())
+    client = mlflow.tracking.MlflowClient()
+    experiments = client.search_experiments()
+    return [
+        experiment
+        for experiment in experiments
+        if experiment.name.startswith("notebooks/02_modelos_finais/")
+        and experiment.name.endswith("/threshold_regression")
+    ]
+
+
+def _latest_final_champion_run(client: object, experiment_id: str) -> object | None:
+    runs = client.search_runs(
+        [experiment_id],
+        order_by=["attributes.start_time DESC"],
+        max_results=1000,
+    )
+    for run in runs:
+        if (
+            run.data.tags.get("stage") == "threshold_regression"
+            and run.data.tags.get("notebook") in FINAL_MODEL_NOTEBOOK_IDS
+            and run.data.params.get("registered_model_name")
+        ):
+            return run
+    return None
+
+
+def compare_final_model_runs() -> pd.DataFrame:
+    if mlflow is None:
+        raise RuntimeError("MLflow nao esta instalado no ambiente do notebook.")
+
+    mlflow.set_tracking_uri(_mlflow_tracking_uri())
+    client = mlflow.tracking.MlflowClient()
+    rows: list[dict[str, object]] = []
+
+    for experiment in _final_model_experiments():
+        run = _latest_final_champion_run(client, experiment.experiment_id)
+        if run is None:
+            continue
+
+        params = run.data.params
+        metrics = run.data.metrics
+        tags = run.data.tags
+        model_uri = f"runs:/{run.info.run_id}/model"
+        size_bytes = _artifact_size_bytes(model_uri)
+        rows.append(
+            {
+                "notebook": params.get("notebook", tags.get("notebook", "")),
+                "experiment": experiment.name,
+                "run_id": run.info.run_id,
+                "model": params.get("model", ""),
+                "registered_model_name": params.get("registered_model_name", ""),
+                "dataset_mode": params.get("dataset_mode", ""),
+                "sample_frac": params.get("sample_frac", ""),
+                "test_rmse": metrics.get("test_rmse", metrics.get("rmse")),
+                "test_mae": metrics.get("test_mae", metrics.get("mae")),
+                "test_r2": metrics.get("test_r2", metrics.get("r2")),
+                "best_cv_rmse": metrics.get("best_cv_rmse"),
+                "baseline_test_rmse": metrics.get("baseline_test_rmse"),
+                "test_rmse_gain_vs_baseline": metrics.get("test_rmse_gain_vs_baseline"),
+                "model_size_bytes": size_bytes,
+                "model_size_mb": None if size_bytes is None else size_bytes / (1024 * 1024),
+                "model_uri": model_uri,
+            }
+        )
+
+    if not rows:
+        return pd.DataFrame()
+
+    return pd.DataFrame(rows).sort_values(["test_rmse", "model_size_bytes"], ascending=[True, True]).reset_index(drop=True)
+
+
+def plot_final_model_comparison(comparison: pd.DataFrame) -> plt.Figure:
+    fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+    if comparison.empty:
+        axes[0].text(0.5, 0.5, "Nenhum run champion encontrado", ha="center", va="center")
+        axes[1].axis("off")
+        return fig
+
+    plot_df = comparison.copy()
+    sns.barplot(data=plot_df, y="model", x="test_rmse", color="#4C78A8", ax=axes[0])
+    axes[0].set_title("Erro no teste")
+    axes[0].set_xlabel("RMSE")
+    axes[0].set_ylabel("")
+    axes[0].grid(axis="x", alpha=0.25)
+
+    sns.barplot(data=plot_df, y="model", x="model_size_mb", color="#F58518", ax=axes[1])
+    axes[1].set_title("Tamanho do modelo")
+    axes[1].set_xlabel("MB")
+    axes[1].set_ylabel("")
+    axes[1].grid(axis="x", alpha=0.25)
+
+    fig.tight_layout()
+    return fig
+
+
+def log_final_model_comparison(comparison: pd.DataFrame, figure: plt.Figure | None = None) -> dict[str, str]:
+    if mlflow is None:
+        raise RuntimeError("MLflow nao esta instalado no ambiente do notebook.")
+
+    _setup_mlflow_experiment("07_modelos_finais_comparison", "analysis")
+    with mlflow.start_run(run_name="07_modelos_finais_comparison - analysis", nested=mlflow.active_run() is not None) as run:
+        mlflow.set_tags(
+            {
+                "project": "saltim",
+                "problem": "stock_criticality_final_model_comparison",
+                "stage": "analysis",
+                "notebook": "07_modelos_finais_comparison",
+                "notebook_folder": _mlflow_notebook_folder("07_modelos_finais_comparison"),
+                "notebook_path": _mlflow_notebook_path("07_modelos_finais_comparison"),
+                "experiment_path": _mlflow_experiment_name("07_modelos_finais_comparison", "analysis"),
+            }
+        )
+        mlflow.log_text(comparison.to_csv(index=False), "comparison/final_model_comparison.csv")
+        if not comparison.empty:
+            mlflow.log_metric("best_test_rmse", float(comparison["test_rmse"].min()))
+            if comparison["model_size_mb"].notna().any():
+                mlflow.log_metric("smallest_model_size_mb", float(comparison["model_size_mb"].min()))
+        if figure is not None:
+            mlflow.log_figure(figure, "comparison/final_model_comparison.png")
+
+        return {
+            "run_id": run.info.run_id,
+            "comparison_artifact_path": "comparison/final_model_comparison.csv",
+        }
+
+
 def run_regressor_tuning(config: RegressorTuningConfig) -> dict[str, object]:
     if mlflow is None:
         raise RuntimeError("MLflow nao esta instalado no ambiente do notebook.")
 
     _setup_mlflow_experiment(config.notebook_id, "threshold_regression")
-    data = prepare_threshold_regression_data()
+    data = prepare_threshold_regression_data(
+        sample_frac=config.sample_frac,
+        use_full_dataset=config.use_full_dataset,
+    )
     all_candidate_tables = []
     search_outputs = []
 
@@ -620,6 +797,9 @@ def run_regressor_tuning(config: RegressorTuningConfig) -> dict[str, object]:
                 "problem": "stock_criticality",
                 "stage": "threshold_regression_tuning",
                 "notebook": config.notebook_id,
+                "notebook_folder": _mlflow_notebook_folder(config.notebook_id),
+                "notebook_path": _mlflow_notebook_path(config.notebook_id),
+                "experiment_path": _mlflow_experiment_name(config.notebook_id, "threshold_regression"),
                 "model": config.model_name,
             }
         )
@@ -629,6 +809,8 @@ def run_regressor_tuning(config: RegressorTuningConfig) -> dict[str, object]:
                 "cv_splits": config.cv_splits,
                 "search_method": "RandomizedSearchCV",
                 "n_iter_per_weight_profile": config.n_iter,
+                "dataset_mode": "full" if config.use_full_dataset else "sample",
+                "sample_frac": 1.0 if config.use_full_dataset else config.sample_frac,
                 "weight_profiles": ",".join(config.weight_profiles),
                 "feature_count": len(data["feature_columns"]),
             }
@@ -707,6 +889,8 @@ def run_regressor_tuning(config: RegressorTuningConfig) -> dict[str, object]:
         summary = {
             "validation_strategy": "TimeSeriesSplit",
             "search_method": "RandomizedSearchCV",
+            "dataset_mode": "full" if config.use_full_dataset else "sample",
+            "sample_frac": 1.0 if config.use_full_dataset else config.sample_frac,
             "best_params": best_params,
             "best_weight_profile": best_weight_profile,
             "fit_diagnosis": fit_diagnosis,
@@ -736,6 +920,8 @@ def run_regressor_tuning(config: RegressorTuningConfig) -> dict[str, object]:
         "data_summary": pd.DataFrame(
             [
                 {
+                    "dataset_mode": "full" if config.use_full_dataset else "sample",
+                    "sample_frac": 1.0 if config.use_full_dataset else config.sample_frac,
                     "sample_shape": data["sample_shape"],
                     "split_counts": data["split_counts"],
                     "criticality_rates": data["criticality_rates"],

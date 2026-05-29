@@ -1,4 +1,4 @@
-# Ambiente para notebooks em data/notebooks/
+# Ambiente para notebooks em ml/notebooks/
 pandas>=2.2
 numpy>=2.0
 matplotlib>=3.8

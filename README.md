@@ -95,7 +95,7 @@ No notebook de exploração, essa ideia aparece na forma de um pipeline com carg
 * CSVs em `data/`
 * Carga relacional dos CSVs no schema `public` via backend
 * Datasets de ML no schema `ml`
-* Notebooks em `data/notebooks/` e `ml/`
+* Notebooks em `ml/notebooks/`
 * Scripts de geração em `data/scripts/`
 
 <a id="como-executar"></a>
@@ -158,6 +158,8 @@ Depois acesse:
 * MLflow: `http://localhost:5000`
 
 Por padrão os notebooks usam `MLFLOW_TRACKING_URI=http://localhost:5000`. Os modelos não são salvos como `.pkl` em `ml/artifacts/`; o artefato serializado fica dentro do próprio MLflow.
+Os experimentos ficam organizados por caminho, seguindo `ml/notebooks/`: `notebooks/01_modelos_teste/...` e `notebooks/02_modelos_finais/...`.
+Os modelos finais usam o dataset completo, e o notebook `07_modelos_finais_comparison.ipynb` compara os champions finais incluindo o tamanho do artefato do modelo.
 
 <a id="api"></a>
 ## 🧪 **API**

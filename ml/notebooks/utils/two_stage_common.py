@@ -41,7 +41,7 @@ except ImportError:
     mlflow = None
 
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
 DATASET_PATHS = [
     PROJECT_ROOT / "data" / "ml_dataset" / "outputs" / "abt_reposicao_part1.csv",
     PROJECT_ROOT / "data" / "ml_dataset" / "outputs" / "abt_reposicao_part2.csv",
@@ -49,6 +49,15 @@ DATASET_PATHS = [
 MLFLOW_TRACKING_URI = "http://localhost:5000"
 SAMPLE_FRAC = 0.25
 SAMPLE_RANDOM_STATE = 42
+MLFLOW_NOTEBOOK_GROUPS = {
+    "01_two_stage_knn": "01_modelos_teste",
+    "02_two_stage_linear": "01_modelos_teste",
+    "03_two_stage_tree_ensembles": "01_modelos_teste",
+    "04_two_stage_model_comparison": "01_modelos_teste",
+    "05_random_forest_regressor_threshold_tuning": "02_modelos_finais",
+    "06_xgboost_regressor_threshold_tuning": "02_modelos_finais",
+    "07_modelos_finais_comparison": "02_modelos_finais",
+}
 
 TARGET_ALERT_THRESHOLD = "y_alert_threshold_pct"
 TARGET_CRITICAL_THRESHOLD = "y_critical_threshold_pct"
@@ -98,10 +107,18 @@ def _mlflow_tracking_uri() -> str:
     return os.environ.get("MLFLOW_TRACKING_URI", MLFLOW_TRACKING_URI)
 
 
+def _mlflow_notebook_folder(notebook_id: str) -> str:
+    return MLFLOW_NOTEBOOK_GROUPS.get(slugify(notebook_id), "deprecated")
+
+
+def _mlflow_notebook_path(notebook_id: str) -> str:
+    return f"notebooks/{_mlflow_notebook_folder(notebook_id)}/{slugify(notebook_id)}"
+
+
 def _mlflow_experiment_name(notebook_id: str, stage: str) -> str:
     return os.environ.get(
         "MLFLOW_EXPERIMENT_NAME",
-        f"saltim_two_stage_{slugify(notebook_id)}_{slugify(stage)}",
+        f"{_mlflow_notebook_path(notebook_id)}/{slugify(stage)}",
     )
 
 
@@ -116,7 +133,7 @@ def _mlflow_registered_model_name(metric_row: Mapping[str, object]) -> str:
 def _setup_mlflow_experiment(notebook_id: str, stage: str) -> None:
     if mlflow is None:
         raise RuntimeError(
-            "MLflow nao esta instalado. Instale as dependencias de data/requirements.txt "
+            "MLflow nao esta instalado. Instale as dependencias de ml/requirements.txt "
             "para registrar os experimentos."
         )
     mlflow.set_tracking_uri(_mlflow_tracking_uri())
@@ -257,6 +274,9 @@ def _log_two_stage_run_to_mlflow(
         "stage": stage,
         "family": str(metric_row.get("family", "")),
         "notebook": notebook_id,
+        "notebook_folder": _mlflow_notebook_folder(notebook_id),
+        "notebook_path": _mlflow_notebook_path(notebook_id),
+        "experiment_path": _mlflow_experiment_name(notebook_id, stage),
         "registered_model_name": _mlflow_registered_model_name(metric_row),
         "metric_artifact_path": metric_artifact_path,
         "prediction_artifact_path": prediction_artifact_path,
@@ -374,12 +394,21 @@ def add_criticality_targets(df: pd.DataFrame) -> pd.DataFrame:
     return adjusted.sort_index()
 
 
-def load_abt_sample() -> pd.DataFrame:
+def load_abt_full() -> pd.DataFrame:
     frames = [pd.read_csv(path, low_memory=False) for path in DATASET_PATHS]
     df = pd.concat(frames, ignore_index=True)
     df = df[df[SPLIT_COLUMN].isin([TRAIN_SPLIT, VALIDATION_SPLIT, TEST_SPLIT])]
     df = add_criticality_targets(df)
-    df = df.sample(frac=SAMPLE_FRAC, random_state=SAMPLE_RANDOM_STATE)
+    return df.reset_index(drop=True)
+
+
+def load_abt_sample(sample_frac: float = SAMPLE_FRAC) -> pd.DataFrame:
+    if sample_frac <= 0 or sample_frac > 1:
+        raise ValueError("sample_frac deve estar no intervalo (0, 1].")
+    df = load_abt_full()
+    if sample_frac == 1:
+        return df.reset_index(drop=True)
+    df = df.sample(frac=sample_frac, random_state=SAMPLE_RANDOM_STATE)
     return df.reset_index(drop=True)
 
 
@@ -748,7 +777,11 @@ def _two_stage_experiments() -> list[object]:
             "Nao foi possivel buscar experimentos no MLflow. "
             "Suba o servico com: docker compose up -d --build db mlflow"
         ) from exc
-    return [experiment for experiment in experiments if experiment.name.startswith("saltim_two_stage_")]
+    return [
+        experiment
+        for experiment in experiments
+        if experiment.name.startswith("notebooks/") or experiment.name.startswith("saltim_two_stage_")
+    ]
 
 
 def _metric_row_from_mlflow_run(run: object) -> dict[str, object]:
@@ -1224,6 +1257,9 @@ def run_comparison_notebook() -> dict[str, object]:
                 "problem": "stock_criticality_comparison",
                 "stage": "analysis",
                 "notebook": "04_two_stage_model_comparison",
+                "notebook_folder": _mlflow_notebook_folder("04_two_stage_model_comparison"),
+                "notebook_path": _mlflow_notebook_path("04_two_stage_model_comparison"),
+                "experiment_path": _mlflow_experiment_name("04_two_stage_model_comparison", "analysis"),
             }
         )
         models = load_all_models()
