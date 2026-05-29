@@ -23,6 +23,7 @@ BACKEND_PORT="${BACKEND_PORT:-8000}"
 FRONTEND_HOST="${FRONTEND_HOST:-0.0.0.0}"
 FRONTEND_PORT="${FRONTEND_PORT:-5173}"
 START_DB="${START_DB:-1}"
+START_MLFLOW="${START_MLFLOW:-1}"
 LOAD_CSV_DATA_ON_STARTUP="${LOAD_CSV_DATA_ON_STARTUP:-1}"
 BUN_BIN="${BUN_BIN:-bun}"
 
@@ -58,6 +59,11 @@ trap cleanup EXIT INT TERM
 if [[ "$START_DB" != "0" ]]; then
   echo "Starting Postgres..."
   (cd "$ROOT_DIR" && docker compose up -d db)
+fi
+
+if [[ "$START_MLFLOW" != "0" ]]; then
+  echo "Starting MLflow..."
+  (cd "$ROOT_DIR" && docker compose up -d mlflow)
 fi
 
 if [[ ! -x "$BACKEND_DIR/.venv/bin/python" ]]; then

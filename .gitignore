@@ -5,3 +5,8 @@ node_modules/
 **/__pycache__/
 .env
 TODO.md
+ml/artifacts/
+ml/mlruns/
+ml/mlartifacts/
+mlflow.db
+ml/mlflow.db

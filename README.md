@@ -145,6 +145,20 @@ bun run dev
 * Backend: `http://localhost:8000`
 * Health check: `http://localhost:8000/health`
 
+### **5. MLflow para os notebooks**
+
+Os notebooks two-stage registram modelos, métricas, predições e gráficos diretamente no MLflow. Para subir o tracking server com backend em PostgreSQL:
+
+```bash
+docker compose up -d --build db mlflow
+```
+
+Depois acesse:
+
+* MLflow: `http://localhost:5000`
+
+Por padrão os notebooks usam `MLFLOW_TRACKING_URI=http://localhost:5000`. Os modelos não são salvos como `.pkl` em `ml/artifacts/`; o artefato serializado fica dentro do próprio MLflow.
+
 <a id="api"></a>
 ## 🧪 **API**
 

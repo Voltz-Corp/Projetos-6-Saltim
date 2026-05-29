@@ -1,15 +1,15 @@
 from __future__ import annotations
 
-import json
 import math
 import os
 import re
 import warnings
+from io import StringIO
+from collections.abc import Mapping
 from pathlib import Path
 
 os.environ.setdefault("MPLCONFIGDIR", "/tmp/matplotlib-saltim")
 
-import joblib
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -34,15 +34,19 @@ from sklearn.metrics import (
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
 
+try:
+    import mlflow
+    import mlflow.sklearn
+except ImportError:
+    mlflow = None
+
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DATASET_PATHS = [
     PROJECT_ROOT / "data" / "ml_dataset" / "outputs" / "abt_reposicao_part1.csv",
     PROJECT_ROOT / "data" / "ml_dataset" / "outputs" / "abt_reposicao_part2.csv",
 ]
-ARTIFACT_DIR = PROJECT_ROOT / "ml" / "artifacts" / "two_stage"
-METRICS_DIR = ARTIFACT_DIR / "metrics"
-PLOTS_DIR = ARTIFACT_DIR / "plots"
+MLFLOW_TRACKING_URI = "http://localhost:5000"
 SAMPLE_FRAC = 0.25
 SAMPLE_RANDOM_STATE = 42
 
@@ -80,15 +84,209 @@ EXPLICIT_FEATURE_EXCLUSIONS = {
 
 
 def ensure_artifact_dirs() -> None:
-    ARTIFACT_DIR.mkdir(parents=True, exist_ok=True)
-    METRICS_DIR.mkdir(parents=True, exist_ok=True)
-    PLOTS_DIR.mkdir(parents=True, exist_ok=True)
+    """Compat shim: artifacts are stored by MLflow, not in the repository."""
+    return None
 
 
 def slugify(value: str) -> str:
     value = value.lower().strip()
     value = re.sub(r"[^a-z0-9]+", "_", value)
     return value.strip("_")
+
+
+def _mlflow_tracking_uri() -> str:
+    return os.environ.get("MLFLOW_TRACKING_URI", MLFLOW_TRACKING_URI)
+
+
+def _mlflow_experiment_name(notebook_id: str, stage: str) -> str:
+    return os.environ.get(
+        "MLFLOW_EXPERIMENT_NAME",
+        f"saltim_two_stage_{slugify(notebook_id)}_{slugify(stage)}",
+    )
+
+
+def _mlflow_registered_model_name(metric_row: Mapping[str, object]) -> str:
+    return "saltim_two_stage_{notebook}_{stage}_{model}".format(
+        notebook=slugify(str(metric_row["notebook"])),
+        stage=slugify(str(metric_row["stage"])),
+        model=slugify(str(metric_row["model"])),
+    )
+
+
+def _setup_mlflow_experiment(notebook_id: str, stage: str) -> None:
+    if mlflow is None:
+        raise RuntimeError(
+            "MLflow nao esta instalado. Instale as dependencias de data/requirements.txt "
+            "para registrar os experimentos."
+        )
+    mlflow.set_tracking_uri(_mlflow_tracking_uri())
+    experiment_name = _mlflow_experiment_name(notebook_id, stage)
+    client = mlflow.tracking.MlflowClient()
+    try:
+        experiment = client.get_experiment_by_name(experiment_name)
+        if experiment is None:
+            client.create_experiment(experiment_name)
+    except Exception as exc:
+        raise RuntimeError(
+            "Nao foi possivel conectar ao MLflow em "
+            f"{_mlflow_tracking_uri()}. Suba o servico com: docker compose up -d --build db mlflow"
+        ) from exc
+    mlflow.set_experiment(experiment_name)
+
+
+def _safe_mlflow_param_value(value: object) -> str:
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        text = str(value)
+    else:
+        text = repr(value)
+    return text[:500]
+
+
+def _flatten_summary_params(summary: Mapping[str, object] | None) -> dict[str, object]:
+    if not summary:
+        return {}
+
+    params: dict[str, object] = {}
+    split_counts = summary.get("split_counts", {})
+    criticality_rates = summary.get("criticality_rates", {})
+    if isinstance(split_counts, Mapping):
+        for split_name, count in split_counts.items():
+            params[f"split_count_{slugify(str(split_name))}"] = count
+    if isinstance(criticality_rates, Mapping):
+        for label, rate in criticality_rates.items():
+            params[f"criticality_rate_{slugify(str(label))}"] = rate
+
+    for key in [
+        "sample_shape",
+        "base_alert_threshold_pct",
+        "critical_threshold_gap_pct",
+        "history_window_days",
+        "feature_count",
+    ]:
+        if key in summary:
+            params[key] = summary[key]
+    return params
+
+
+def _model_hyperparams_for_mlflow(model: object) -> dict[str, object]:
+    estimator = model
+    if isinstance(model, Pipeline) and "model" in model.named_steps:
+        estimator = model.named_steps["model"]
+
+    params = {
+        "model_class": estimator.__class__.__name__,
+        "pipeline_class": model.__class__.__name__,
+    }
+    if hasattr(estimator, "get_params"):
+        for key, value in estimator.get_params(deep=False).items():
+            params[f"hyperparam_{key}"] = value
+    return params
+
+
+def _metrics_for_mlflow(metric_row: Mapping[str, object]) -> dict[str, float]:
+    metrics = {}
+    metric_columns = [
+        "accuracy",
+        "balanced_accuracy",
+        "f1_macro",
+        "precision_macro",
+        "recall_macro",
+        "taxa_ok",
+        "taxa_alerta_compra",
+        "taxa_necessita_compra",
+        "roc_auc",
+        "average_precision",
+        "rmse",
+        "mae",
+        "r2",
+    ]
+    for column in metric_columns:
+        value = metric_row.get(column)
+        if value is None or pd.isna(value):
+            continue
+        metrics[column] = float(value)
+    return metrics
+
+
+def _log_two_stage_run_to_mlflow(
+    model: object,
+    metric_row: Mapping[str, object],
+    predictions: pd.DataFrame,
+    summary: Mapping[str, object] | None = None,
+    run_source: str = "training",
+) -> dict[str, str]:
+    if mlflow is None:
+        _setup_mlflow_experiment(str(metric_row["notebook"]), str(metric_row["stage"]))
+
+    notebook_id = str(metric_row["notebook"])
+    stage = str(metric_row["stage"])
+    model_name = str(metric_row["model"])
+    model_slug = slugify(model_name)
+    stage_slug = slugify(stage)
+    metric_artifact_path = f"evaluation/{notebook_id}_{model_slug}_{stage_slug}_metrics.csv"
+    prediction_artifact_path = f"evaluation/{notebook_id}_{model_slug}_{stage_slug}_predictions.csv"
+    summary_artifact_path = f"evaluation/{notebook_id}_run_summary.json"
+    _setup_mlflow_experiment(notebook_id, stage)
+
+    params = {
+        "notebook": notebook_id,
+        "family": metric_row.get("family", ""),
+        "stage": stage,
+        "model": model_name,
+        "registered_model_name": _mlflow_registered_model_name(metric_row),
+        "run_source": run_source,
+        "sample_frac": SAMPLE_FRAC,
+        "sample_random_state": SAMPLE_RANDOM_STATE,
+        "target_alert_threshold": TARGET_ALERT_THRESHOLD,
+        "target_critical_threshold": TARGET_CRITICAL_THRESHOLD,
+        "target_criticality": TARGET_CRITICALITY,
+        "purchase_alert_label": PURCHASE_ALERT_LABEL,
+        "min_alert_threshold_pct": MIN_ALERT_THRESHOLD_PCT,
+        "max_alert_threshold_pct": MAX_ALERT_THRESHOLD_PCT,
+        "metric_artifact_path": metric_artifact_path,
+        "prediction_artifact_path": prediction_artifact_path,
+        "summary_artifact_path": summary_artifact_path,
+    }
+    params.update(_flatten_summary_params(summary))
+    params.update(_model_hyperparams_for_mlflow(model))
+    params = {key[:250]: _safe_mlflow_param_value(value) for key, value in params.items()}
+
+    tags = {
+        "project": "saltim",
+        "problem": "stock_criticality",
+        "stage": stage,
+        "family": str(metric_row.get("family", "")),
+        "notebook": notebook_id,
+        "registered_model_name": _mlflow_registered_model_name(metric_row),
+        "metric_artifact_path": metric_artifact_path,
+        "prediction_artifact_path": prediction_artifact_path,
+        "summary_artifact_path": summary_artifact_path,
+    }
+    run_name = f"{notebook_id} - {stage} - {model_name}"
+
+    with mlflow.start_run(run_name=run_name, nested=mlflow.active_run() is not None) as run:
+        mlflow.log_params(params)
+        mlflow.log_metrics(_metrics_for_mlflow(metric_row))
+        mlflow.set_tags(tags)
+        mlflow.log_text(pd.DataFrame([metric_row]).to_csv(index=False), metric_artifact_path)
+        mlflow.log_text(predictions.to_csv(index=False), prediction_artifact_path)
+        if summary:
+            mlflow.log_dict(dict(summary), summary_artifact_path)
+
+        mlflow.sklearn.log_model(
+            model,
+            name="model",
+            registered_model_name=_mlflow_registered_model_name(metric_row),
+            await_registration_for=120,
+        )
+        return {
+            "run_id": run.info.run_id,
+            "model_uri": f"runs:/{run.info.run_id}/model",
+            "metric_artifact_path": metric_artifact_path,
+            "prediction_artifact_path": prediction_artifact_path,
+            "summary_artifact_path": summary_artifact_path,
+            "registered_model_name": _mlflow_registered_model_name(metric_row),
+        }
 
 
 def _stock_coverage_pct(df: pd.DataFrame) -> pd.Series:
@@ -360,8 +558,6 @@ def _criticality_metric_row(
     family: str,
     stage: str,
     model_name: str,
-    artifact_path: Path,
-    prediction_path: Path,
     predictions: pd.DataFrame,
     fit_warnings: list[str],
 ) -> dict[str, object]:
@@ -377,8 +573,6 @@ def _criticality_metric_row(
         "family": family,
         "stage": stage,
         "model": model_name,
-        "artifact_path": str(artifact_path.relative_to(PROJECT_ROOT)),
-        "prediction_path": str(prediction_path.relative_to(PROJECT_ROOT)),
         "accuracy": float(accuracy_score(y_true_class, y_pred_class)),
         "balanced_accuracy": float(balanced_accuracy_score(y_true_class, y_pred_class)),
         "f1_macro": float(f1_score(y_true_class, y_pred_class, labels=CLASS_LABELS, average="macro", zero_division=0)),
@@ -417,6 +611,7 @@ def train_threshold_models(
     family: str,
     models: dict[str, object],
     splits: dict[str, object],
+    summary: Mapping[str, object] | None = None,
 ) -> pd.DataFrame:
     rows = []
     X_train = splits["X_train"]
@@ -426,14 +621,9 @@ def train_threshold_models(
     context_test = splits["context_test"]
 
     for model_name, model in models.items():
-        model_slug = slugify(model_name)
         pipeline = pipeline_for(model, X_train)
         fit_warnings = _fit_with_warnings(pipeline, X_train, y_train)
         y_pred = pipeline.predict(X_test)
-
-        artifact_path = ARTIFACT_DIR / f"{notebook_id}_{model_slug}_threshold_model.pkl"
-        prediction_path = METRICS_DIR / f"{notebook_id}_{model_slug}_threshold_predictions.csv"
-        metrics_path = METRICS_DIR / f"{notebook_id}_{model_slug}_threshold_metrics.csv"
 
         predictions = _threshold_prediction_frame(notebook_id, family, model_name, context_test, y_test, y_pred)
         metrics = _criticality_metric_row(
@@ -441,16 +631,18 @@ def train_threshold_models(
             family,
             "threshold_regression",
             model_name,
-            artifact_path,
-            prediction_path,
             predictions,
             fit_warnings,
         )
+        mlflow_info = _log_two_stage_run_to_mlflow(
+            pipeline,
+            metrics,
+            predictions,
+            summary=summary,
+            run_source="training",
+        )
+        metrics.update(mlflow_info)
         rows.append(metrics)
-
-        predictions.to_csv(prediction_path, index=False)
-        pd.DataFrame([metrics]).to_csv(metrics_path, index=False)
-        joblib.dump(pipeline, artifact_path)
 
     return pd.DataFrame(rows)
 
@@ -460,6 +652,7 @@ def train_purchase_alert_classifiers(
     family: str,
     models: dict[str, object],
     splits: dict[str, object],
+    summary: Mapping[str, object] | None = None,
 ) -> pd.DataFrame:
     rows = []
     X_train = splits["X_train"]
@@ -468,15 +661,10 @@ def train_purchase_alert_classifiers(
     context_test = splits["context_test"]
 
     for model_name, model in models.items():
-        model_slug = slugify(model_name)
         pipeline = pipeline_for(model, X_train)
         fit_warnings = _fit_with_warnings(pipeline, X_train, y_train)
         y_pred = pipeline.predict(X_test).astype(int)
         y_proba = _prediction_probability(pipeline, X_test)
-
-        artifact_path = ARTIFACT_DIR / f"{notebook_id}_{model_slug}_purchase_alert_classifier.pkl"
-        prediction_path = METRICS_DIR / f"{notebook_id}_{model_slug}_purchase_alert_predictions.csv"
-        metrics_path = METRICS_DIR / f"{notebook_id}_{model_slug}_purchase_alert_metrics.csv"
 
         predictions = _classifier_prediction_frame(
             notebook_id,
@@ -491,16 +679,18 @@ def train_purchase_alert_classifiers(
             family,
             "purchase_alert_classification",
             model_name,
-            artifact_path,
-            prediction_path,
             predictions,
             fit_warnings,
         )
+        mlflow_info = _log_two_stage_run_to_mlflow(
+            pipeline,
+            metrics,
+            predictions,
+            summary=summary,
+            run_source="training",
+        )
+        metrics.update(mlflow_info)
         rows.append(metrics)
-
-        predictions.to_csv(prediction_path, index=False)
-        pd.DataFrame([metrics]).to_csv(metrics_path, index=False)
-        joblib.dump(pipeline, artifact_path)
 
     return pd.DataFrame(rows)
 
@@ -514,10 +704,6 @@ def run_training_notebook(
     ensure_artifact_dirs()
     df = load_abt_sample()
     splits = build_splits(df)
-    threshold_metrics = train_threshold_models(notebook_id, family, threshold_models, splits)
-    purchase_alert_metrics = train_purchase_alert_classifiers(notebook_id, family, purchase_alert_models, splits)
-    criticality_metrics = pd.concat([threshold_metrics, purchase_alert_metrics], ignore_index=True)
-
     summary = {
         "notebook": notebook_id,
         "family": family,
@@ -530,8 +716,16 @@ def run_training_notebook(
         "feature_count": len(splits["feature_columns"]),
         "feature_columns": splits["feature_columns"],
     }
-    with open(METRICS_DIR / f"{notebook_id}_run_summary.json", "w", encoding="utf-8") as fp:
-        json.dump(summary, fp, indent=2, ensure_ascii=False)
+
+    threshold_metrics = train_threshold_models(notebook_id, family, threshold_models, splits, summary=summary)
+    purchase_alert_metrics = train_purchase_alert_classifiers(
+        notebook_id,
+        family,
+        purchase_alert_models,
+        splits,
+        summary=summary,
+    )
+    criticality_metrics = pd.concat([threshold_metrics, purchase_alert_metrics], ignore_index=True)
 
     return {
         "threshold_metrics": threshold_metrics,
@@ -541,11 +735,69 @@ def run_training_notebook(
     }
 
 
-def _read_metric_files(pattern: str) -> pd.DataFrame:
-    files = sorted(METRICS_DIR.glob(pattern))
-    if not files:
-        return pd.DataFrame()
-    return pd.concat([pd.read_csv(path) for path in files], ignore_index=True)
+def _two_stage_experiments() -> list[object]:
+    if mlflow is None:
+        _setup_mlflow_experiment("two_stage", "missing_mlflow")
+
+    mlflow.set_tracking_uri(_mlflow_tracking_uri())
+    client = mlflow.tracking.MlflowClient()
+    try:
+        experiments = client.search_experiments()
+    except Exception as exc:
+        raise RuntimeError(
+            "Nao foi possivel buscar experimentos no MLflow. "
+            "Suba o servico com: docker compose up -d --build db mlflow"
+        ) from exc
+    return [experiment for experiment in experiments if experiment.name.startswith("saltim_two_stage_")]
+
+
+def _metric_row_from_mlflow_run(run: object) -> dict[str, object]:
+    params = run.data.params
+    metrics = run.data.metrics
+    row: dict[str, object] = {
+        "notebook": params.get("notebook", ""),
+        "family": params.get("family", ""),
+        "stage": params.get("stage", ""),
+        "model": params.get("model", ""),
+        "warnings": "",
+        "run_id": run.info.run_id,
+        "model_uri": f"runs:/{run.info.run_id}/model",
+        "registered_model_name": params.get("registered_model_name", ""),
+        "metric_artifact_path": params.get("metric_artifact_path", run.data.tags.get("metric_artifact_path", "")),
+        "prediction_artifact_path": params.get(
+            "prediction_artifact_path",
+            run.data.tags.get("prediction_artifact_path", ""),
+        ),
+        "summary_artifact_path": params.get("summary_artifact_path", run.data.tags.get("summary_artifact_path", "")),
+    }
+    row.update({key: float(value) for key, value in metrics.items()})
+    return row
+
+
+def _load_metric_artifact_from_run(run: object) -> pd.DataFrame:
+    metric_artifact_path = run.data.params.get("metric_artifact_path") or run.data.tags.get("metric_artifact_path")
+    if not metric_artifact_path:
+        return pd.DataFrame([_metric_row_from_mlflow_run(run)])
+
+    try:
+        text = mlflow.artifacts.load_text(f"runs:/{run.info.run_id}/{metric_artifact_path}")
+        metrics = pd.read_csv(StringIO(text))
+    except Exception:
+        metrics = pd.DataFrame([_metric_row_from_mlflow_run(run)])
+
+    metrics["run_id"] = run.info.run_id
+    metrics["model_uri"] = f"runs:/{run.info.run_id}/model"
+    metrics["registered_model_name"] = run.data.params.get("registered_model_name", "")
+    metrics["metric_artifact_path"] = metric_artifact_path
+    metrics["prediction_artifact_path"] = run.data.params.get("prediction_artifact_path") or run.data.tags.get(
+        "prediction_artifact_path",
+        "",
+    )
+    metrics["summary_artifact_path"] = run.data.params.get("summary_artifact_path") or run.data.tags.get(
+        "summary_artifact_path",
+        "",
+    )
+    return metrics
 
 
 def _add_analysis_metrics(metrics: pd.DataFrame) -> pd.DataFrame:
@@ -555,14 +807,11 @@ def _add_analysis_metrics(metrics: pd.DataFrame) -> pd.DataFrame:
             metrics[column] = np.nan
 
     for index, row in metrics.iterrows():
-        prediction_path = row.get("prediction_path")
-        if not isinstance(prediction_path, str) or not prediction_path:
-            continue
-        path = PROJECT_ROOT / prediction_path
-        if not path.exists():
+        try:
+            predictions = _load_predictions(row)
+        except Exception:
             continue
 
-        predictions = pd.read_csv(path)
         if {"criticidade_real", "criticidade_predita"}.issubset(predictions.columns):
             y_true = predictions["criticidade_real"]
             y_pred = predictions["criticidade_predita"]
@@ -584,17 +833,33 @@ def _add_analysis_metrics(metrics: pd.DataFrame) -> pd.DataFrame:
 
 
 def load_all_metrics() -> pd.DataFrame:
-    threshold = _read_metric_files("*_threshold_metrics.csv")
-    purchase_alert = _read_metric_files("*_purchase_alert_metrics.csv")
-    return _add_analysis_metrics(pd.concat([threshold, purchase_alert], ignore_index=True))
+    experiments = _two_stage_experiments()
+    if not experiments:
+        return pd.DataFrame()
+
+    client = mlflow.tracking.MlflowClient()
+    runs = client.search_runs(
+        [experiment.experiment_id for experiment in experiments],
+        filter_string="tags.project = 'saltim' and tags.problem = 'stock_criticality'",
+        max_results=5000,
+        order_by=["attributes.start_time ASC"],
+    )
+    frames = [_load_metric_artifact_from_run(run) for run in runs]
+    frames = [frame for frame in frames if not frame.empty]
+    if not frames:
+        return pd.DataFrame()
+    return _add_analysis_metrics(pd.concat(frames, ignore_index=True))
 
 
 def load_all_models() -> dict[str, object]:
+    metrics = load_all_metrics()
+    if metrics.empty:
+        return {}
+    metrics = metrics.drop_duplicates(subset=["stage", "notebook", "family", "model"], keep="last")
     models = {}
-    artifact_patterns = ["*_threshold_model.pkl", "*_purchase_alert_classifier.pkl"]
-    for pattern in artifact_patterns:
-        for path in sorted(ARTIFACT_DIR.glob(pattern)):
-            models[path.name] = joblib.load(path)
+    for _, row in metrics.iterrows():
+        key = f"{row['notebook']}_{slugify(str(row['stage']))}_{slugify(str(row['model']))}"
+        models[key] = mlflow.sklearn.load_model(str(row["model_uri"]))
     return models
 
 
@@ -608,13 +873,16 @@ def build_decision_table() -> pd.DataFrame:
         ascending=[True, False, False, False, False, True, True],
     ).reset_index(drop=True)
     rank.insert(0, "rank", range(1, len(rank) + 1))
-    rank.to_csv(METRICS_DIR / "criticality_decision_table.csv", index=False)
-    rank.to_csv(METRICS_DIR / "model_decision_table.csv", index=False)
     return rank
 
 
 def _load_predictions(metric_row: pd.Series) -> pd.DataFrame:
-    return pd.read_csv(PROJECT_ROOT / metric_row["prediction_path"])
+    artifact_path = metric_row.get("prediction_artifact_path")
+    run_id = metric_row.get("run_id")
+    if not isinstance(artifact_path, str) or not artifact_path or not isinstance(run_id, str) or not run_id:
+        raise ValueError("Linha de metrica sem run_id/prediction_artifact_path do MLflow.")
+    text = mlflow.artifacts.load_text(f"runs:/{run_id}/{artifact_path}")
+    return pd.read_csv(StringIO(text))
 
 
 def _criticality_model_key(model_name: str) -> str:
@@ -656,7 +924,7 @@ def _load_test_context_and_features() -> tuple[pd.DataFrame, pd.DataFrame]:
 
 
 def _evaluate_operational_model(metric_row: pd.Series, context: pd.DataFrame, X_test: pd.DataFrame) -> pd.DataFrame:
-    model = joblib.load(PROJECT_ROOT / str(metric_row["artifact_path"]))
+    model = mlflow.sklearn.load_model(str(metric_row["model_uri"]))
     if metric_row["stage"] == "threshold_regression":
         y_pred = model.predict(X_test)
         predictions = _threshold_prediction_frame(
@@ -758,9 +1026,6 @@ def build_operational_recommendations(
         ascending=[False, False, True],
     ).reset_index(drop=True)
 
-    all_recommendations.to_csv(METRICS_DIR / "criticality_operational_recommendations.csv", index=False)
-    metrics.to_csv(METRICS_DIR / "criticality_operational_metrics.csv", index=False)
-    by_ingredient.to_csv(METRICS_DIR / "criticality_operational_by_ingredient.csv", index=False)
     return metrics, all_recommendations, by_ingredient
 
 
@@ -778,7 +1043,6 @@ def plot_criticality_distribution(operational_metrics: pd.DataFrame) -> plt.Figu
     ax.set_ylabel("")
     ax.grid(axis="x", alpha=0.25)
     fig.tight_layout()
-    fig.savefig(PLOTS_DIR / "criticality_distribution_by_model.png", dpi=160, bbox_inches="tight")
     return fig
 
 
@@ -796,7 +1060,6 @@ def plot_threshold_metric_bars(criticality_rank: pd.DataFrame) -> plt.Figure:
         ax.grid(axis="x", alpha=0.25)
 
     fig.tight_layout()
-    fig.savefig(PLOTS_DIR / "criticality_metric_bars.png", dpi=160, bbox_inches="tight")
     return fig
 
 
@@ -815,7 +1078,6 @@ def plot_classifier_metric_bars(criticality_rank: pd.DataFrame) -> plt.Figure:
         ax.grid(axis="x", alpha=0.25)
 
     fig.tight_layout()
-    fig.savefig(PLOTS_DIR / "purchase_alert_classifier_metric_bars.png", dpi=160, bbox_inches="tight")
     return fig
 
 
@@ -842,7 +1104,6 @@ def plot_purchase_alert_roc_curves(criticality_rank: pd.DataFrame) -> plt.Figure
     ax.legend(loc="lower right", fontsize=8)
     ax.grid(alpha=0.25)
     fig.tight_layout()
-    fig.savefig(PLOTS_DIR / "purchase_alert_roc_curves.png", dpi=160, bbox_inches="tight")
     return fig
 
 
@@ -868,7 +1129,6 @@ def plot_purchase_alert_precision_recall_curves(criticality_rank: pd.DataFrame) 
     ax.legend(loc="lower left", fontsize=8)
     ax.grid(alpha=0.25)
     fig.tight_layout()
-    fig.savefig(PLOTS_DIR / "purchase_alert_precision_recall_curves.png", dpi=160, bbox_inches="tight")
     return fig
 
 
@@ -902,7 +1162,6 @@ def plot_threshold_scatter(
         ax.grid(alpha=0.25)
 
     fig.tight_layout()
-    fig.savefig(PLOTS_DIR / "criticality_threshold_scatter.png", dpi=160, bbox_inches="tight")
     return fig
 
 
@@ -934,7 +1193,6 @@ def plot_confusion_matrices(criticality_rank: pd.DataFrame) -> plt.Figure:
         ax.axis("off")
 
     fig.tight_layout()
-    fig.savefig(PLOTS_DIR / "criticality_confusion_matrices.png", dpi=160, bbox_inches="tight")
     return fig
 
 
@@ -953,29 +1211,54 @@ def plot_best_model_top_critical_ingredients(by_ingredient: pd.DataFrame, top_n:
     ax.set_ylabel("")
     ax.grid(axis="x", alpha=0.25)
     fig.tight_layout()
-    fig.savefig(PLOTS_DIR / "criticality_top_critical_ingredients.png", dpi=160, bbox_inches="tight")
     return fig
 
 
 def run_comparison_notebook() -> dict[str, object]:
     ensure_artifact_dirs()
-    models = load_all_models()
-    criticality_rank = build_decision_table()
-    operational_metrics, operational_recommendations, operational_by_ingredient = build_operational_recommendations(
-        criticality_rank
-    )
-    figures = {}
-    if not criticality_rank.empty:
-        figures = {
-            "criticality_distribution": plot_criticality_distribution(operational_metrics),
-            "threshold_metric_bars": plot_threshold_metric_bars(criticality_rank),
-            "classifier_metric_bars": plot_classifier_metric_bars(criticality_rank),
-            "purchase_alert_roc_curves": plot_purchase_alert_roc_curves(criticality_rank),
-            "purchase_alert_precision_recall_curves": plot_purchase_alert_precision_recall_curves(criticality_rank),
-            "threshold_scatter": plot_threshold_scatter(operational_metrics, operational_recommendations),
-            "confusion_matrices": plot_confusion_matrices(criticality_rank),
-            "top_critical_ingredients": plot_best_model_top_critical_ingredients(operational_by_ingredient),
-        }
+    _setup_mlflow_experiment("04_two_stage_model_comparison", "analysis")
+    with mlflow.start_run(run_name="04_two_stage_model_comparison - analysis", nested=mlflow.active_run() is not None):
+        mlflow.set_tags(
+            {
+                "project": "saltim",
+                "problem": "stock_criticality_comparison",
+                "stage": "analysis",
+                "notebook": "04_two_stage_model_comparison",
+            }
+        )
+        models = load_all_models()
+        criticality_rank = build_decision_table()
+        operational_metrics, operational_recommendations, operational_by_ingredient = build_operational_recommendations(
+            criticality_rank
+        )
+        figures = {}
+        if not criticality_rank.empty:
+            figures = {
+                "criticality_distribution": plot_criticality_distribution(operational_metrics),
+                "threshold_metric_bars": plot_threshold_metric_bars(criticality_rank),
+                "classifier_metric_bars": plot_classifier_metric_bars(criticality_rank),
+                "purchase_alert_roc_curves": plot_purchase_alert_roc_curves(criticality_rank),
+                "purchase_alert_precision_recall_curves": plot_purchase_alert_precision_recall_curves(criticality_rank),
+                "threshold_scatter": plot_threshold_scatter(operational_metrics, operational_recommendations),
+                "confusion_matrices": plot_confusion_matrices(criticality_rank),
+                "top_critical_ingredients": plot_best_model_top_critical_ingredients(operational_by_ingredient),
+            }
+            mlflow.log_text(criticality_rank.to_csv(index=False), "comparison/criticality_decision_table.csv")
+            mlflow.log_text(criticality_rank.to_csv(index=False), "comparison/model_decision_table.csv")
+            mlflow.log_text(
+                operational_metrics.to_csv(index=False),
+                "comparison/criticality_operational_metrics.csv",
+            )
+            mlflow.log_text(
+                operational_recommendations.to_csv(index=False),
+                "comparison/criticality_operational_recommendations.csv",
+            )
+            mlflow.log_text(
+                operational_by_ingredient.to_csv(index=False),
+                "comparison/criticality_operational_by_ingredient.csv",
+            )
+            for name, figure in figures.items():
+                mlflow.log_figure(figure, f"plots/{name}.png")
     return {
         "models_loaded": len(models),
         "operational_metrics": operational_metrics,
@@ -988,9 +1271,7 @@ def run_comparison_notebook() -> dict[str, object]:
 
 
 def list_expected_artifacts() -> pd.DataFrame:
-    rows = []
-    artifact_patterns = ["*_threshold_model.pkl", "*_purchase_alert_classifier.pkl"]
-    for pattern in artifact_patterns:
-        for path in sorted(ARTIFACT_DIR.glob(pattern)):
-            rows.append({"artifact": path.name, "size_mb": path.stat().st_size / 1024 / 1024})
-    return pd.DataFrame(rows)
+    metrics = load_all_metrics()
+    if metrics.empty:
+        return pd.DataFrame(columns=["model_uri", "registered_model_name", "run_id"])
+    return metrics[["model_uri", "registered_model_name", "run_id"]].drop_duplicates().reset_index(drop=True)
