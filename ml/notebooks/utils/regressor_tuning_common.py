@@ -94,6 +94,18 @@ def prepare_threshold_regression_data(
         if use_full_dataset
         else load_abt_sample(sample_frac=sample_frac)
     )
+
+    # Compatibilidade: Cast de colunas StringDtype para object para evitar BrokenProcessPool
+    # no joblib durante o processamento paralelo (comum em Python 3.13 + Pandas 2.2+).
+    # O Index de colunas também deve ser convertido se for do tipo 'string'.
+    for col in df.select_dtypes(include=["string"]).columns:
+        df[col] = df[col].astype(object)
+    
+    if hasattr(df.columns, "dtype") and df.columns.dtype == "string" or str(df.columns.dtype) == "str":
+        df.columns = df.columns.astype(object)
+    if hasattr(df.index, "dtype") and df.index.dtype == "string" or str(df.index.dtype) == "str":
+        df.index = df.index.astype(object)
+
     df["date"] = pd.to_datetime(df["date"])
     feature_columns = select_feature_columns(df)
     search_mask = df[SPLIT_COLUMN].isin([TRAIN_SPLIT, VALIDATION_SPLIT])
