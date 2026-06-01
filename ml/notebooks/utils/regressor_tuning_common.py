@@ -43,7 +43,6 @@ from two_stage_common import (
     slugify,
 )
 
-
 SCORING = {
     "neg_rmse": "neg_root_mean_squared_error",
     "neg_mae": "neg_mean_absolute_error",
@@ -90,12 +89,24 @@ def prepare_threshold_regression_data(
     sample_frac: float = 0.25,
     use_full_dataset: bool = False,
 ) -> dict[str, object]:
-    df = load_abt_full() if use_full_dataset else load_abt_sample(sample_frac=sample_frac)
+    df = (
+        load_abt_full()
+        if use_full_dataset
+        else load_abt_sample(sample_frac=sample_frac)
+    )
     df["date"] = pd.to_datetime(df["date"])
     feature_columns = select_feature_columns(df)
     search_mask = df[SPLIT_COLUMN].isin([TRAIN_SPLIT, VALIDATION_SPLIT])
-    search_frame = df.loc[search_mask].sort_values(["date", "ingredient_id"]).reset_index(drop=True)
-    test_frame = df.loc[df[SPLIT_COLUMN].eq(TEST_SPLIT)].sort_values(["date", "ingredient_id"]).reset_index(drop=True)
+    search_frame = (
+        df.loc[search_mask]
+        .sort_values(["date", "ingredient_id"])
+        .reset_index(drop=True)
+    )
+    test_frame = (
+        df.loc[df[SPLIT_COLUMN].eq(TEST_SPLIT)]
+        .sort_values(["date", "ingredient_id"])
+        .reset_index(drop=True)
+    )
 
     return {
         "df": df,
@@ -160,7 +171,9 @@ def _rmse(y_true: pd.Series | np.ndarray, y_pred: np.ndarray) -> float:
     return float(math.sqrt(mean_squared_error(y_true, y_pred)))
 
 
-def _regression_metrics(prefix: str, y_true: pd.Series | np.ndarray, y_pred: np.ndarray) -> dict[str, float]:
+def _regression_metrics(
+    prefix: str, y_true: pd.Series | np.ndarray, y_pred: np.ndarray
+) -> dict[str, float]:
     return {
         f"{prefix}_rmse": _rmse(y_true, y_pred),
         f"{prefix}_mae": float(mean_absolute_error(y_true, y_pred)),
@@ -168,7 +181,9 @@ def _regression_metrics(prefix: str, y_true: pd.Series | np.ndarray, y_pred: np.
     }
 
 
-def _fit_pipeline(pipeline, X: pd.DataFrame, y: pd.Series, weights: np.ndarray | None = None) -> list[str]:
+def _fit_pipeline(
+    pipeline, X: pd.DataFrame, y: pd.Series, weights: np.ndarray | None = None
+) -> list[str]:
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
         if weights is None:
@@ -193,8 +208,12 @@ def cross_validate_estimator(
 
     for fold, (train_idx, validation_idx) in enumerate(cv.split(X), start=1):
         pipeline = clone(pipeline_template)
-        train_weights = sample_weights(frame.iloc[train_idx], y.iloc[train_idx], weight_profile)
-        warnings_list = _fit_pipeline(pipeline, X.iloc[train_idx], y.iloc[train_idx], train_weights)
+        train_weights = sample_weights(
+            frame.iloc[train_idx], y.iloc[train_idx], weight_profile
+        )
+        warnings_list = _fit_pipeline(
+            pipeline, X.iloc[train_idx], y.iloc[train_idx], train_weights
+        )
         y_train_pred = pipeline.predict(X.iloc[train_idx])
         y_validation_pred = pipeline.predict(X.iloc[validation_idx])
         rows.append(
@@ -205,19 +224,27 @@ def cross_validate_estimator(
                 "validation_size": len(validation_idx),
                 "warnings": " | ".join(warnings_list),
                 **_regression_metrics("train", y.iloc[train_idx], y_train_pred),
-                **_regression_metrics("validation", y.iloc[validation_idx], y_validation_pred),
+                **_regression_metrics(
+                    "validation", y.iloc[validation_idx], y_validation_pred
+                ),
             }
         )
     return pd.DataFrame(rows)
 
 
-def summarize_cv_metrics(fold_metrics: pd.DataFrame, prefix: str = "cv") -> dict[str, float]:
+def summarize_cv_metrics(
+    fold_metrics: pd.DataFrame, prefix: str = "cv"
+) -> dict[str, float]:
     return {
         f"{prefix}_train_rmse_mean": float(fold_metrics["train_rmse"].mean()),
         f"{prefix}_train_rmse_std": float(fold_metrics["train_rmse"].std(ddof=0)),
         f"{prefix}_validation_rmse_mean": float(fold_metrics["validation_rmse"].mean()),
-        f"{prefix}_validation_rmse_std": float(fold_metrics["validation_rmse"].std(ddof=0)),
-        f"{prefix}_validation_rmse_var": float(fold_metrics["validation_rmse"].var(ddof=0)),
+        f"{prefix}_validation_rmse_std": float(
+            fold_metrics["validation_rmse"].std(ddof=0)
+        ),
+        f"{prefix}_validation_rmse_var": float(
+            fold_metrics["validation_rmse"].var(ddof=0)
+        ),
         f"{prefix}_validation_mae_mean": float(fold_metrics["validation_mae"].mean()),
         f"{prefix}_validation_r2_mean": float(fold_metrics["validation_r2"].mean()),
     }
@@ -248,7 +275,9 @@ def _tidy_cv_results(search: RandomizedSearchCV, weight_profile: str) -> pd.Data
     return pd.DataFrame(rows).sort_values("rank_validation_rmse").reset_index(drop=True)
 
 
-def _best_fold_metrics_from_search(search: RandomizedSearchCV, weight_profile: str) -> pd.DataFrame:
+def _best_fold_metrics_from_search(
+    search: RandomizedSearchCV, weight_profile: str
+) -> pd.DataFrame:
     row = pd.DataFrame(search.cv_results_).iloc[search.best_index_]
     rows = []
     for fold in range(search.cv.n_splits):
@@ -269,6 +298,7 @@ def _best_fold_metrics_from_search(search: RandomizedSearchCV, weight_profile: s
 
 def _log_candidate_runs(config: RegressorTuningConfig, cv_table: pd.DataFrame) -> None:
     for _, row in cv_table.iterrows():
+        mlflow.autolog()
         with mlflow.start_run(
             run_name=f"{config.model_name} candidate {row['weight_profile']} #{row['candidate_index']}",
             nested=True,
@@ -281,7 +311,9 @@ def _log_candidate_runs(config: RegressorTuningConfig, cv_table: pd.DataFrame) -
                     "notebook": config.notebook_id,
                     "notebook_folder": _mlflow_notebook_folder(config.notebook_id),
                     "notebook_path": _mlflow_notebook_path(config.notebook_id),
-                    "experiment_path": _mlflow_experiment_name(config.notebook_id, "threshold_regression"),
+                    "experiment_path": _mlflow_experiment_name(
+                        config.notebook_id, "threshold_regression"
+                    ),
                     "model": config.model_name,
                     "weight_profile": row["weight_profile"],
                 }
@@ -289,7 +321,9 @@ def _log_candidate_runs(config: RegressorTuningConfig, cv_table: pd.DataFrame) -
             mlflow.log_param("candidate_index", int(row["candidate_index"]))
             mlflow.log_param("weight_profile", row["weight_profile"])
             for key, value in json.loads(row["params_json"]).items():
-                mlflow.log_param(key.replace("model__", ""), _safe_mlflow_param_value(value))
+                mlflow.log_param(
+                    key.replace("model__", ""), _safe_mlflow_param_value(value)
+                )
             mlflow.log_metrics(
                 {
                     "mean_validation_rmse": float(row["mean_validation_rmse"]),
@@ -326,7 +360,10 @@ def random_search_for_weight_profile(
         verbose=1,
     )
 
-    with mlflow.start_run(run_name=f"{config.model_name} random search - {weight_profile}", nested=True):
+    mlflow.autolog()
+    with mlflow.start_run(
+        run_name=f"{config.model_name} random search - {weight_profile}", nested=True
+    ):
         mlflow.set_tags(
             {
                 "project": "saltim",
@@ -335,7 +372,9 @@ def random_search_for_weight_profile(
                 "notebook": config.notebook_id,
                 "notebook_folder": _mlflow_notebook_folder(config.notebook_id),
                 "notebook_path": _mlflow_notebook_path(config.notebook_id),
-                "experiment_path": _mlflow_experiment_name(config.notebook_id, "threshold_regression"),
+                "experiment_path": _mlflow_experiment_name(
+                    config.notebook_id, "threshold_regression"
+                ),
                 "model": config.model_name,
                 "weight_profile": weight_profile,
             }
@@ -353,7 +392,10 @@ def random_search_for_weight_profile(
         fold_summary = summarize_cv_metrics(best_fold_metrics, prefix="best_cv")
 
         mlflow.log_text(cv_table.to_csv(index=False), "tuning/cv_results.csv")
-        mlflow.log_text(best_fold_metrics.to_csv(index=False), "tuning/best_candidate_fold_metrics.csv")
+        mlflow.log_text(
+            best_fold_metrics.to_csv(index=False),
+            "tuning/best_candidate_fold_metrics.csv",
+        )
         mlflow.log_params(
             {
                 key.replace("model__", ""): _safe_mlflow_param_value(value)
@@ -379,7 +421,9 @@ def random_search_for_weight_profile(
     }
 
 
-def evaluate_baseline(config: RegressorTuningConfig, data: Mapping[str, object]) -> dict[str, object]:
+def evaluate_baseline(
+    config: RegressorTuningConfig, data: Mapping[str, object]
+) -> dict[str, object]:
     fold_metrics = cross_validate_estimator(
         config.baseline_factory(),
         data,
@@ -392,6 +436,7 @@ def evaluate_baseline(config: RegressorTuningConfig, data: Mapping[str, object])
     y_test_pred = pipeline.predict(data["X_test"])
     test_metrics = _regression_metrics("baseline_test", data["y_test"], y_test_pred)
 
+    mlflow.autolog()
     with mlflow.start_run(run_name=f"{config.model_name} baseline", nested=True):
         mlflow.set_tags(
             {
@@ -401,7 +446,9 @@ def evaluate_baseline(config: RegressorTuningConfig, data: Mapping[str, object])
                 "notebook": config.notebook_id,
                 "notebook_folder": _mlflow_notebook_folder(config.notebook_id),
                 "notebook_path": _mlflow_notebook_path(config.notebook_id),
-                "experiment_path": _mlflow_experiment_name(config.notebook_id, "threshold_regression"),
+                "experiment_path": _mlflow_experiment_name(
+                    config.notebook_id, "threshold_regression"
+                ),
                 "model": config.model_name,
             }
         )
@@ -425,22 +472,33 @@ def diagnose_fit(
     train_rmse = float(final_metrics["train_rmse"])
     validation_rmse = float(best_cv_summary["best_cv_validation_rmse_mean"])
     validation_std = float(best_cv_summary["best_cv_validation_rmse_std"])
-    baseline_validation_rmse = float(baseline_summary["baseline_cv_validation_rmse_mean"])
+    baseline_validation_rmse = float(
+        baseline_summary["baseline_cv_validation_rmse_mean"]
+    )
     gap = validation_rmse - train_rmse
     gap_ratio = gap / max(train_rmse, 1e-9)
 
     if gap_ratio > 0.30 and gap > 0.015:
         label = "overfitting"
-        explanation = "RMSE de validacao ficou muito acima do RMSE de treino nas dobras."
-    elif validation_rmse >= baseline_validation_rmse * 0.98 and train_rmse >= baseline_validation_rmse * 0.90:
+        explanation = (
+            "RMSE de validacao ficou muito acima do RMSE de treino nas dobras."
+        )
+    elif (
+        validation_rmse >= baseline_validation_rmse * 0.98
+        and train_rmse >= baseline_validation_rmse * 0.90
+    ):
         label = "underfitting"
-        explanation = "O tuning nao melhorou o baseline e o erro de treino permanece alto."
+        explanation = (
+            "O tuning nao melhorou o baseline e o erro de treino permanece alto."
+        )
     elif validation_std > validation_rmse * 0.20:
         label = "unstable"
         explanation = "A media e boa, mas a variancia entre dobras e alta."
     else:
         label = "adequate"
-        explanation = "Nao ha sinal forte de sobreajuste/subajuste nos criterios adotados."
+        explanation = (
+            "Nao ha sinal forte de sobreajuste/subajuste nos criterios adotados."
+        )
 
     return {
         "fit_status": label,
@@ -452,7 +510,9 @@ def diagnose_fit(
 
 
 def build_residual_plot(predictions: pd.DataFrame) -> plt.Figure:
-    residuals = predictions["limiar_alerta_real_pct"] - predictions["limiar_alerta_predito_pct"]
+    residuals = (
+        predictions["limiar_alerta_real_pct"] - predictions["limiar_alerta_predito_pct"]
+    )
     fig, axes = plt.subplots(1, 2, figsize=(14, 5))
     sns.scatterplot(
         x=predictions["limiar_alerta_predito_pct"],
@@ -492,8 +552,17 @@ def learning_curve_frame(
             size = min(size, len(train_idx))
             selected_train_idx = train_idx[:size]
             pipeline = clone(final_pipeline)
-            weights = sample_weights(frame.iloc[selected_train_idx], y.iloc[selected_train_idx], weight_profile)
-            _fit_pipeline(pipeline, X.iloc[selected_train_idx], y.iloc[selected_train_idx], weights)
+            weights = sample_weights(
+                frame.iloc[selected_train_idx],
+                y.iloc[selected_train_idx],
+                weight_profile,
+            )
+            _fit_pipeline(
+                pipeline,
+                X.iloc[selected_train_idx],
+                y.iloc[selected_train_idx],
+                weights,
+            )
             train_pred = pipeline.predict(X.iloc[selected_train_idx])
             validation_pred = pipeline.predict(X.iloc[validation_idx])
             rows.append(
@@ -520,14 +589,21 @@ def build_learning_curve_plot(learning_curve: pd.DataFrame) -> plt.Figure:
         .fillna(0.0)
     )
     fig, ax = plt.subplots(figsize=(10, 6))
-    ax.plot(plot_df["train_size"], plot_df["train_rmse_mean"], marker="o", label="Treino")
+    ax.plot(
+        plot_df["train_size"], plot_df["train_rmse_mean"], marker="o", label="Treino"
+    )
     ax.fill_between(
         plot_df["train_size"],
         plot_df["train_rmse_mean"] - plot_df["train_rmse_std"],
         plot_df["train_rmse_mean"] + plot_df["train_rmse_std"],
         alpha=0.15,
     )
-    ax.plot(plot_df["train_size"], plot_df["validation_rmse_mean"], marker="o", label="Validacao")
+    ax.plot(
+        plot_df["train_size"],
+        plot_df["validation_rmse_mean"],
+        marker="o",
+        label="Validacao",
+    )
     ax.fill_between(
         plot_df["train_size"],
         plot_df["validation_rmse_mean"] - plot_df["validation_rmse_std"],
@@ -569,6 +645,7 @@ def _log_final_model_run(
         }
     )
 
+    mlflow.autolog()
     with mlflow.start_run(run_name=f"{config.model_name} champion", nested=True) as run:
         mlflow.set_tags(
             {
@@ -579,7 +656,9 @@ def _log_final_model_run(
                 "notebook": config.notebook_id,
                 "notebook_folder": _mlflow_notebook_folder(config.notebook_id),
                 "notebook_path": _mlflow_notebook_path(config.notebook_id),
-                "experiment_path": _mlflow_experiment_name(config.notebook_id, "threshold_regression"),
+                "experiment_path": _mlflow_experiment_name(
+                    config.notebook_id, "threshold_regression"
+                ),
                 "model": config.model_name,
                 "registered_model_name": registered_model_name,
                 "metric_artifact_path": metric_artifact_path,
@@ -609,13 +688,18 @@ def _log_final_model_run(
         numeric_metrics = {
             key: float(value)
             for key, value in metric_row.items()
-            if isinstance(value, (int, float, np.integer, np.floating)) and not pd.isna(value)
+            if isinstance(value, (int, float, np.integer, np.floating))
+            and not pd.isna(value)
         }
         mlflow.log_metrics(numeric_metrics)
-        mlflow.log_text(pd.DataFrame([metric_row]).to_csv(index=False), metric_artifact_path)
+        mlflow.log_text(
+            pd.DataFrame([metric_row]).to_csv(index=False), metric_artifact_path
+        )
         mlflow.log_text(predictions.to_csv(index=False), prediction_artifact_path)
         mlflow.log_dict(summary, summary_artifact_path)
-        mlflow.log_text(learning_curve.to_csv(index=False), "diagnostics/learning_curve.csv")
+        mlflow.log_text(
+            learning_curve.to_csv(index=False), "diagnostics/learning_curve.csv"
+        )
         mlflow.log_figure(residual_figure, "diagnostics/residual_analysis.png")
         mlflow.log_figure(learning_figure, "diagnostics/learning_curve.png")
         mlflow.sklearn.log_model(
@@ -712,7 +796,9 @@ def compare_final_model_runs() -> pd.DataFrame:
                 "baseline_test_rmse": metrics.get("baseline_test_rmse"),
                 "test_rmse_gain_vs_baseline": metrics.get("test_rmse_gain_vs_baseline"),
                 "model_size_bytes": size_bytes,
-                "model_size_mb": None if size_bytes is None else size_bytes / (1024 * 1024),
+                "model_size_mb": (
+                    None if size_bytes is None else size_bytes / (1024 * 1024)
+                ),
                 "model_uri": model_uri,
             }
         )
@@ -720,13 +806,19 @@ def compare_final_model_runs() -> pd.DataFrame:
     if not rows:
         return pd.DataFrame()
 
-    return pd.DataFrame(rows).sort_values(["test_rmse", "model_size_bytes"], ascending=[True, True]).reset_index(drop=True)
+    return (
+        pd.DataFrame(rows)
+        .sort_values(["test_rmse", "model_size_bytes"], ascending=[True, True])
+        .reset_index(drop=True)
+    )
 
 
 def plot_final_model_comparison(comparison: pd.DataFrame) -> plt.Figure:
     fig, axes = plt.subplots(1, 2, figsize=(14, 5))
     if comparison.empty:
-        axes[0].text(0.5, 0.5, "Nenhum run champion encontrado", ha="center", va="center")
+        axes[0].text(
+            0.5, 0.5, "Nenhum run champion encontrado", ha="center", va="center"
+        )
         axes[1].axis("off")
         return fig
 
@@ -747,28 +839,42 @@ def plot_final_model_comparison(comparison: pd.DataFrame) -> plt.Figure:
     return fig
 
 
-def log_final_model_comparison(comparison: pd.DataFrame, figure: plt.Figure | None = None) -> dict[str, str]:
+def log_final_model_comparison(
+    comparison: pd.DataFrame, figure: plt.Figure | None = None
+) -> dict[str, str]:
     if mlflow is None:
         raise RuntimeError("MLflow nao esta instalado no ambiente do notebook.")
 
     _setup_mlflow_experiment("07_modelos_finais_comparison", "analysis")
-    with mlflow.start_run(run_name="07_modelos_finais_comparison - analysis", nested=mlflow.active_run() is not None) as run:
+    mlflow.autolog()
+    with mlflow.start_run(
+        run_name="07_modelos_finais_comparison - analysis",
+        nested=mlflow.active_run() is not None,
+    ) as run:
         mlflow.set_tags(
             {
                 "project": "saltim",
                 "problem": "stock_criticality_final_model_comparison",
                 "stage": "analysis",
                 "notebook": "07_modelos_finais_comparison",
-                "notebook_folder": _mlflow_notebook_folder("07_modelos_finais_comparison"),
+                "notebook_folder": _mlflow_notebook_folder(
+                    "07_modelos_finais_comparison"
+                ),
                 "notebook_path": _mlflow_notebook_path("07_modelos_finais_comparison"),
-                "experiment_path": _mlflow_experiment_name("07_modelos_finais_comparison", "analysis"),
+                "experiment_path": _mlflow_experiment_name(
+                    "07_modelos_finais_comparison", "analysis"
+                ),
             }
         )
-        mlflow.log_text(comparison.to_csv(index=False), "comparison/final_model_comparison.csv")
+        mlflow.log_text(
+            comparison.to_csv(index=False), "comparison/final_model_comparison.csv"
+        )
         if not comparison.empty:
             mlflow.log_metric("best_test_rmse", float(comparison["test_rmse"].min()))
             if comparison["model_size_mb"].notna().any():
-                mlflow.log_metric("smallest_model_size_mb", float(comparison["model_size_mb"].min()))
+                mlflow.log_metric(
+                    "smallest_model_size_mb", float(comparison["model_size_mb"].min())
+                )
         if figure is not None:
             mlflow.log_figure(figure, "comparison/final_model_comparison.png")
 
@@ -789,8 +895,11 @@ def run_regressor_tuning(config: RegressorTuningConfig) -> dict[str, object]:
     )
     all_candidate_tables = []
     search_outputs = []
-
-    with mlflow.start_run(run_name=f"{config.model_name} tuning parent", nested=mlflow.active_run() is not None):
+    mlflow.autolog()
+    with mlflow.start_run(
+        run_name=f"{config.model_name} tuning parent",
+        nested=mlflow.active_run() is not None,
+    ):
         mlflow.set_tags(
             {
                 "project": "saltim",
@@ -799,7 +908,9 @@ def run_regressor_tuning(config: RegressorTuningConfig) -> dict[str, object]:
                 "notebook": config.notebook_id,
                 "notebook_folder": _mlflow_notebook_folder(config.notebook_id),
                 "notebook_path": _mlflow_notebook_path(config.notebook_id),
-                "experiment_path": _mlflow_experiment_name(config.notebook_id, "threshold_regression"),
+                "experiment_path": _mlflow_experiment_name(
+                    config.notebook_id, "threshold_regression"
+                ),
                 "model": config.model_name,
             }
         )
@@ -832,7 +943,9 @@ def run_regressor_tuning(config: RegressorTuningConfig) -> dict[str, object]:
             search_outputs.append(output)
             all_candidate_tables.append(output["cv_table"])
 
-        candidate_results = pd.concat(all_candidate_tables, ignore_index=True).sort_values(
+        candidate_results = pd.concat(
+            all_candidate_tables, ignore_index=True
+        ).sort_values(
             ["mean_validation_rmse", "std_validation_rmse"],
             ascending=[True, True],
         )
@@ -842,8 +955,12 @@ def run_regressor_tuning(config: RegressorTuningConfig) -> dict[str, object]:
 
         final_pipeline = pipeline_for(config.model_factory(), data["X_search"])
         final_pipeline.set_params(**best_params)
-        final_weights = sample_weights(data["search_frame"], data["y_search"], best_weight_profile)
-        fit_warnings = _fit_pipeline(final_pipeline, data["X_search"], data["y_search"], final_weights)
+        final_weights = sample_weights(
+            data["search_frame"], data["y_search"], best_weight_profile
+        )
+        fit_warnings = _fit_pipeline(
+            final_pipeline, data["X_search"], data["y_search"], final_weights
+        )
 
         y_train_pred = final_pipeline.predict(data["X_search"])
         y_test_pred = final_pipeline.predict(data["X_test"])
@@ -872,9 +989,12 @@ def run_regressor_tuning(config: RegressorTuningConfig) -> dict[str, object]:
             "best_weight_profile": best_weight_profile,
             "baseline_cv_rmse": baseline["summary"]["baseline_cv_validation_rmse_mean"],
             "baseline_test_rmse": baseline["test_metrics"]["baseline_test_rmse"],
-            "test_rmse_gain_vs_baseline": baseline["test_metrics"]["baseline_test_rmse"] - _rmse(data["y_test"], y_test_pred),
+            "test_rmse_gain_vs_baseline": baseline["test_metrics"]["baseline_test_rmse"]
+            - _rmse(data["y_test"], y_test_pred),
         }
-        fit_diagnosis = diagnose_fit(final_metrics, champion_output["fold_summary"], baseline["summary"])
+        fit_diagnosis = diagnose_fit(
+            final_metrics, champion_output["fold_summary"], baseline["summary"]
+        )
         final_metrics.update(fit_diagnosis)
 
         learning_curve = learning_curve_frame(
@@ -914,14 +1034,18 @@ def run_regressor_tuning(config: RegressorTuningConfig) -> dict[str, object]:
             learning_figure,
         )
         final_metrics.update(final_mlflow_info)
-        mlflow.log_text(candidate_results.to_csv(index=False), "tuning/all_candidate_results.csv")
+        mlflow.log_text(
+            candidate_results.to_csv(index=False), "tuning/all_candidate_results.csv"
+        )
 
     return {
         "data_summary": pd.DataFrame(
             [
                 {
                     "dataset_mode": "full" if config.use_full_dataset else "sample",
-                    "sample_frac": 1.0 if config.use_full_dataset else config.sample_frac,
+                    "sample_frac": (
+                        1.0 if config.use_full_dataset else config.sample_frac
+                    ),
                     "sample_shape": data["sample_shape"],
                     "split_counts": data["split_counts"],
                     "criticality_rates": data["criticality_rates"],
@@ -930,7 +1054,9 @@ def run_regressor_tuning(config: RegressorTuningConfig) -> dict[str, object]:
             ]
         ),
         "baseline_fold_metrics": baseline["fold_metrics"],
-        "baseline_summary": pd.DataFrame([{**baseline["summary"], **baseline["test_metrics"]}]),
+        "baseline_summary": pd.DataFrame(
+            [{**baseline["summary"], **baseline["test_metrics"]}]
+        ),
         "candidate_results": candidate_results,
         "best_fold_metrics": champion_output["best_fold_metrics"],
         "test_predictions": predictions,
