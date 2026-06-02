@@ -28,7 +28,7 @@ function FornecedorNewPage() {
   const [avgDeliveryTime, setAvgDeliveryTime] = useState('')
   const [search, setSearch] = useState('')
   const [selected, setSelected] = useState<SelectedIngredient[]>([])
-  const [collapsedCategories, setCollapsedCategories] = useState<Set<string>>(new Set())
+  const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set())
 
   const selectedIds = useMemo(
     () => new Set(selected.map((item) => String(item.ingredient.id))),
@@ -97,7 +97,7 @@ function FornecedorNewPage() {
     selected.every((item) => Number(item.price) > 0)
 
   function toggleCategory(category: string) {
-    setCollapsedCategories((current) => {
+    setExpandedCategories((current) => {
       const next = new Set(current)
       if (next.has(category)) next.delete(category)
       else next.add(category)
@@ -178,7 +178,7 @@ function FornecedorNewPage() {
                 </div>
               ) : (
                 groupedAvailable.map(([category, items]) => {
-                  const collapsed = collapsedCategories.has(category)
+                  const expanded = expandedCategories.has(category)
                   return (
                     <section key={category} className="border-b border-stone-100 last:border-0">
                       <button
@@ -197,12 +197,12 @@ function FornecedorNewPage() {
                         <ChevronDown
                           className={[
                             'size-4 text-stone-400 transition-transform',
-                            collapsed ? '' : 'rotate-180',
+                            expanded ? 'rotate-180' : '',
                           ].join(' ')}
                           strokeWidth={2}
                         />
                       </button>
-                      {!collapsed && items.map((ingredient) => (
+                      {expanded && items.map((ingredient) => (
                         <button
                           key={ingredient.id}
                           type="button"

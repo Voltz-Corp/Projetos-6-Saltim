@@ -9,12 +9,13 @@ import {
   initializeAll,
   useContagemSession,
 } from '../hooks/useContagem';
+import { useFinalizarContagem } from '../hooks/useContagens';
 import { CATEGORIES, type Category } from '../data/ingredients';
 import { cn } from '../lib/cn';
 
 export const contagemCategoriaRoute = createRoute({
   getParentRoute: () => rootRoute,
-  path: '/estoque/contagem/$index',
+  path: '/estoque/contagem/atual/$index',
   component: ContagemCategoriaPage,
 });
 
@@ -153,6 +154,7 @@ export function ContagemCategoriaPage() {
   const { data: stock = [] } = useEstoque();
   const atualizar = useAtualizarEstoque();
   const contagem = useContagemSession();
+  const finalizar = useFinalizarContagem();
 
   // Garante que o progresso global esteja correto mesmo entrando direto na categoria
   initializeAll(stock);
@@ -206,10 +208,12 @@ export function ContagemCategoriaPage() {
       await atualizar.mutateAsync({ updates, contagemId });
     }
     if (isGlobalDone || isLastCategory) {
+      const contagemId = contagem.contagemId ?? await contagem.ensure();
+      await finalizar.mutateAsync(contagemId);
       navigate({ to: '/estoque', search: { counted: 'Contagem finalizada' } });
     } else {
       navigate({
-        to: '/estoque/contagem/$index',
+        to: '/estoque/contagem/atual/$index',
         params: { index: String(categoryIndex + 1) },
       });
     }
@@ -233,6 +237,8 @@ export function ContagemCategoriaPage() {
   let buttonLabel: string;
   if (atualizar.isPending) {
     buttonLabel = 'Salvando…';
+  } else if (finalizar.isPending) {
+    buttonLabel = 'Finalizando…';
   } else if (isGlobalDone) {
     buttonLabel = 'Finalizar contagem';
   } else if (isCategoryDone && !isLastCategory) {
@@ -248,7 +254,7 @@ export function ContagemCategoriaPage() {
       {/* Header */}
       <div className="bg-white border-b border-stone-200 px-8 py-4 flex items-center gap-3 flex-shrink-0">
         <button
-          onClick={() => navigate({ to: '/estoque/contagem' })}
+          onClick={() => navigate({ to: '/estoque/contagem/atual' })}
           className="size-8 rounded-lg border border-stone-200 flex items-center justify-center hover:bg-stone-50 transition-colors flex-shrink-0"
         >
           <svg
@@ -280,7 +286,7 @@ export function ContagemCategoriaPage() {
           </span>
           <button
             onClick={handleSairESalvar}
-            disabled={atualizar.isPending}
+            disabled={atualizar.isPending || finalizar.isPending}
             className="text-xs text-stone-400 hover:text-stone-700 transition-colors font-medium disabled:opacity-40"
           >
             Salvar e sair
@@ -346,7 +352,7 @@ export function ContagemCategoriaPage() {
       <div className="bg-white border-t border-stone-200 px-8 py-4 flex-shrink-0">
         <button
           onClick={handleNext}
-          disabled={atualizar.isPending}
+          disabled={atualizar.isPending || finalizar.isPending}
           className="w-full py-3 rounded-xl text-sm font-semibold transition-colors disabled:opacity-60 bg-brand-600 text-white hover:bg-brand-700"
         >
           {buttonLabel}

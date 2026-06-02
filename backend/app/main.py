@@ -1,11 +1,11 @@
 import math
 from contextlib import asynccontextmanager
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from typing import Optional
 
 from fastapi import FastAPI, Depends, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import asc, desc, func, or_
+from sqlalchemy import asc, case, desc, func, or_
 from sqlalchemy.orm import Session
 
 from .database import engine, Base, get_db, run_sql_loaders
@@ -29,6 +29,10 @@ from .models import (
 from .schemas import (
     IngredienteOut,
     ContagemCreate,
+    ContagemDetalheCategoria,
+    ContagemDetalheItem,
+    ContagemDetalheOut,
+    ContagemListItem,
     ContagemOut,
     EstoquePaginado,
     FornecedorCreate,
@@ -40,10 +44,19 @@ from .schemas import (
     FornecedorProductOut,
     FornecedorProfileKpis,
     FornecedorProfileResponse,
+    PedidoCreateRequest,
+    PedidoCreateResponse,
     PedidoDetailItem,
     PedidoDetailResponse,
+    PedidoGroupOut,
     PedidoOut,
     PedidoPaginado,
+    PedidoRecommendationItem,
+    PedidoRecommendationRequest,
+    PedidoRecommendationResponse,
+    RecommendedOrderGroup,
+    RecommendedOrderItem,
+    SupplierOption,
     AtualizacaoLote,
     AtualizacaoIngrediente,
     LogContagemOut,
@@ -75,6 +88,7 @@ DASHBOARD_STOCK_UNITS = ("KG", "UND", "L")
 async def lifespan(app: FastAPI):
     run_sql_loaders()
     Base.metadata.create_all(bind=engine)
+    ensure_contagem_estoque_schema()
     yield
 
 
@@ -94,22 +108,173 @@ app.add_middleware(
 # ---------------------------------------------------------------------------
 
 
+def ensure_contagem_estoque_schema() -> None:
+    statements = (
+        "ALTER TABLE contagens ADD COLUMN IF NOT EXISTS estoque_snapshot_data DATE",
+        "ALTER TABLE contagem_log ADD COLUMN IF NOT EXISTS estoque_id TEXT",
+        "ALTER TABLE contagem_log ADD COLUMN IF NOT EXISTS estoque_data DATE",
+        "ALTER TABLE contagem_log ADD COLUMN IF NOT EXISTS estoque_quantidade NUMERIC(14, 4)",
+        (
+            "CREATE INDEX IF NOT EXISTS idx_contagens_estoque_snapshot_data "
+            "ON contagens (estoque_snapshot_data)"
+        ),
+        (
+            "CREATE INDEX IF NOT EXISTS idx_contagem_log_estoque "
+            "ON contagem_log (estoque_id)"
+        ),
+        (
+            "UPDATE contagens "
+            "SET estoque_snapshot_data = (SELECT max(date(date_time)) FROM estoques) "
+            "WHERE estoque_snapshot_data IS NULL "
+            "AND EXISTS (SELECT 1 FROM estoques)"
+        ),
+        (
+            "DO $$ BEGIN "
+            "IF NOT EXISTS ("
+            "SELECT 1 "
+            "FROM pg_constraint c "
+            "JOIN pg_attribute a "
+            "ON a.attrelid = c.conrelid AND a.attnum = ANY(c.conkey) "
+            "WHERE c.contype = 'f' "
+            "AND c.conrelid = 'contagem_log'::regclass "
+            "AND c.confrelid = 'estoques'::regclass "
+            "AND a.attname = 'estoque_id'"
+            ") THEN "
+            "ALTER TABLE contagem_log "
+            "ADD CONSTRAINT fk_contagem_log_estoque "
+            "FOREIGN KEY (estoque_id) REFERENCES estoques(id); "
+            "END IF; "
+            "END $$"
+        ),
+    )
+    raw_conn = engine.raw_connection()
+    try:
+        with raw_conn.cursor() as cursor:
+            for statement in statements:
+                cursor.execute(statement)
+        raw_conn.commit()
+    except Exception:
+        raw_conn.rollback()
+        raise
+    finally:
+        raw_conn.close()
+
+
+def _countable_items_total(db: Session) -> int:
+    return (
+        db.query(func.count(Ingrediente.id))
+        .filter(Ingrediente.category_id != PRODUCTION_CATEGORY_ID)
+        .scalar()
+        or 0
+    )
+
+
+def _resolve_estoque_snapshot_data(db: Session, reference_date: Optional[date] = None) -> Optional[date]:
+    reference_date = reference_date or date.today()
+    snapshot = (
+        db.query(func.max(func.date(Estoque.date_time)))
+        .filter(func.date(Estoque.date_time) <= reference_date)
+        .scalar()
+    )
+    if snapshot is None:
+        snapshot = db.query(func.max(func.date(Estoque.date_time))).scalar()
+    return snapshot
+
+
+def _estoque_snapshot_for_ingredient(
+    db: Session,
+    ingredient_id: str,
+    snapshot_date: Optional[date],
+) -> Optional[Estoque]:
+    if snapshot_date is None:
+        return None
+    return (
+        db.query(Estoque)
+        .filter(Estoque.ingredient_id == ingredient_id)
+        .filter(func.date(Estoque.date_time) == snapshot_date)
+        .order_by(Estoque.date_time.desc(), Estoque.id.desc())
+        .first()
+    )
+
+
+def _latest_logs_by_ingredient(logs: list[ContagemLog]) -> dict[str, ContagemLog]:
+    ordered = sorted(logs, key=lambda log: (log.criado_em, log.id))
+    return {log.ingrediente_id: log for log in ordered}
+
+
+def _contagem_counts(
+    contagem: Contagem,
+    db: Session,
+    total_itens: Optional[int] = None,
+) -> dict[str, int]:
+    if total_itens is None:
+        total_itens = _countable_items_total(db)
+
+    logs = (
+        db.query(ContagemLog)
+        .join(Ingrediente, Ingrediente.id == ContagemLog.ingrediente_id)
+        .filter(ContagemLog.contagem_id == contagem.id)
+        .filter(Ingrediente.category_id != PRODUCTION_CATEGORY_ID)
+        .all()
+    )
+    latest_logs = _latest_logs_by_ingredient(logs)
+    itens_contados = len(latest_logs)
+    itens_alterados = sum(1 for log in latest_logs.values() if round(float(log.delta), 3) != 0)
+    itens_sem_alteracao = itens_contados - itens_alterados
+
+    return {
+        "total_itens": total_itens,
+        "itens_contados": itens_contados,
+        "itens_alterados": itens_alterados,
+        "itens_sem_alteracao": itens_sem_alteracao,
+        "itens_nao_contados": max(total_itens - itens_contados, 0),
+    }
+
+
+def _contagem_list_item(
+    contagem: Contagem,
+    db: Session,
+    total_itens: Optional[int] = None,
+) -> ContagemListItem:
+    return ContagemListItem(
+        id=contagem.id,
+        label=contagem.label,
+        status=contagem.status,
+        estoque_snapshot_data=contagem.estoque_snapshot_data,
+        criada_em=contagem.criada_em,
+        finalizada_em=contagem.finalizada_em,
+        **_contagem_counts(contagem, db, total_itens),
+    )
+
+
 @app.post("/api/contagens", response_model=ContagemOut)
 def create_contagem(payload: ContagemCreate, db: Session = Depends(get_db)):
     today = date.today().strftime("%d/%m/%Y")
     label = payload.label or f"Contagem {today}"
     existing = (
         db.query(Contagem)
-        .filter(Contagem.label == label, Contagem.status == "em_andamento")
-        .order_by(Contagem.id.asc())
+        .filter(Contagem.label == label)
+        .order_by(Contagem.id.desc())
         .first()
     )
     if existing is not None:
+        changed = False
+        if existing.estoque_snapshot_data is None:
+            existing.estoque_snapshot_data = _resolve_estoque_snapshot_data(db)
+            changed = True
+        if existing.status == "finalizada":
+            existing.status = "em_andamento"
+            existing.finalizada_em = None
+            changed = True
+        if changed:
+            db.commit()
+            db.refresh(existing)
         return existing
 
     contagem = Contagem(
         label=label,
         status="em_andamento",
+        estoque_snapshot_data=_resolve_estoque_snapshot_data(db),
     )
     db.add(contagem)
     db.commit()
@@ -117,11 +282,139 @@ def create_contagem(payload: ContagemCreate, db: Session = Depends(get_db)):
     return contagem
 
 
+@app.get("/api/contagens", response_model=list[ContagemListItem])
+def list_contagens(db: Session = Depends(get_db)):
+    contagens = db.query(Contagem).order_by(Contagem.criada_em.desc(), Contagem.id.desc()).all()
+    total_itens = _countable_items_total(db)
+    return [_contagem_list_item(contagem, db, total_itens) for contagem in contagens]
+
+
 @app.get("/api/contagens/{contagem_id}", response_model=ContagemOut)
 def get_contagem(contagem_id: int, db: Session = Depends(get_db)):
     contagem = db.query(Contagem).filter(Contagem.id == contagem_id).first()
     if contagem is None:
         raise HTTPException(status_code=404, detail="Contagem não encontrada")
+    return contagem
+
+
+@app.get("/api/contagens/{contagem_id}/detalhe", response_model=ContagemDetalheOut)
+def get_contagem_detalhe(contagem_id: int, db: Session = Depends(get_db)):
+    contagem = db.query(Contagem).filter(Contagem.id == contagem_id).first()
+    if contagem is None:
+        raise HTTPException(status_code=404, detail="Contagem não encontrada")
+
+    ingredientes = (
+        db.query(Ingrediente)
+        .join(Categoria, Categoria.id == Ingrediente.category_id)
+        .filter(Ingrediente.category_id != PRODUCTION_CATEGORY_ID)
+        .order_by(Categoria.name.asc(), Ingrediente.name.asc())
+        .all()
+    )
+    logs = (
+        db.query(ContagemLog)
+        .join(Ingrediente, Ingrediente.id == ContagemLog.ingrediente_id)
+        .filter(ContagemLog.contagem_id == contagem.id)
+        .filter(Ingrediente.category_id != PRODUCTION_CATEGORY_ID)
+        .all()
+    )
+    logs_by_ingredient = _latest_logs_by_ingredient(logs)
+
+    categorias: dict[str, dict] = {}
+    for ingrediente in ingredientes:
+        group = categorias.setdefault(
+            ingrediente.category_id,
+            {
+                "category_id": ingrediente.category_id,
+                "categoria": ingrediente.category,
+                "items": [],
+            },
+        )
+        log = logs_by_ingredient.get(ingrediente.id)
+        snapshot = _estoque_snapshot_for_ingredient(
+            db,
+            ingrediente.id,
+            contagem.estoque_snapshot_data,
+        )
+        if log is None:
+            status = "nao_contado"
+            item = ContagemDetalheItem(
+                ingrediente_id=ingrediente.id,
+                ingrediente_nome=ingrediente.name,
+                unit=ingrediente.unit,
+                quantidade_atual=float(ingrediente.current_qty),
+                estoque_id=snapshot.id if snapshot else None,
+                estoque_data=(
+                    snapshot.date_time.date()
+                    if snapshot and snapshot.date_time
+                    else contagem.estoque_snapshot_data
+                ),
+                estoque_quantidade=float(snapshot.quantity) if snapshot else None,
+                status=status,
+            )
+        else:
+            delta = round(float(log.delta), 3)
+            status = "sem_alteracao" if delta == 0 else "alterado"
+            item = ContagemDetalheItem(
+                ingrediente_id=ingrediente.id,
+                ingrediente_nome=ingrediente.name,
+                unit=ingrediente.unit,
+                quantidade_atual=float(ingrediente.current_qty),
+                estoque_id=log.estoque_id,
+                estoque_data=log.estoque_data,
+                estoque_quantidade=(
+                    float(log.estoque_quantidade)
+                    if log.estoque_quantidade is not None
+                    else None
+                ),
+                quantidade_anterior=float(log.quantidade_anterior),
+                quantidade_nova=float(log.quantidade_nova),
+                delta=delta,
+                status=status,
+                contado_em=log.criado_em,
+            )
+        group["items"].append(item)
+
+    detalhe_categorias = []
+    for group in categorias.values():
+        items = group["items"]
+        itens_contados = sum(1 for item in items if item.status != "nao_contado")
+        itens_alterados = sum(1 for item in items if item.status == "alterado")
+        itens_sem_alteracao = sum(1 for item in items if item.status == "sem_alteracao")
+        detalhe_categorias.append(
+            ContagemDetalheCategoria(
+                category_id=group["category_id"],
+                categoria=group["categoria"],
+                total_itens=len(items),
+                itens_contados=itens_contados,
+                itens_alterados=itens_alterados,
+                itens_sem_alteracao=itens_sem_alteracao,
+                itens_nao_contados=len(items) - itens_contados,
+                items=items,
+            )
+        )
+
+    counts = _contagem_counts(contagem, db, len(ingredientes))
+    return ContagemDetalheOut(
+        id=contagem.id,
+        label=contagem.label,
+        status=contagem.status,
+        estoque_snapshot_data=contagem.estoque_snapshot_data,
+        criada_em=contagem.criada_em,
+        finalizada_em=contagem.finalizada_em,
+        categorias=detalhe_categorias,
+        **counts,
+    )
+
+
+@app.patch("/api/contagens/{contagem_id}/finalizar", response_model=ContagemOut)
+def finalizar_contagem(contagem_id: int, db: Session = Depends(get_db)):
+    contagem = db.query(Contagem).filter(Contagem.id == contagem_id).first()
+    if contagem is None:
+        raise HTTPException(status_code=404, detail="Contagem não encontrada")
+    contagem.status = "finalizada"
+    contagem.finalizada_em = datetime.now()
+    db.commit()
+    db.refresh(contagem)
     return contagem
 
 def _compute_status(item: Ingrediente) -> str:
@@ -1583,26 +1876,63 @@ def update_estoque(lote: AtualizacaoLote, db: Session = Depends(get_db)):
 
         anterior = float(ingrediente.current_qty)
         if contagem is not None:
-            db.add(
-                ContagemLog(
-                    contagem_id=contagem.id,
-                    ingrediente_id=ingrediente.id,
-                    category_id=ingrediente.category_id,
-                    categoria=ingrediente.category,
-                    quantidade_anterior=anterior,
-                    quantidade_nova=atualizacao.new_qty,
-                    delta=round(atualizacao.new_qty - anterior, 3),
-                )
+            delta = round(atualizacao.new_qty - anterior, 3)
+            snapshot = _estoque_snapshot_for_ingredient(
+                db,
+                ingrediente.id,
+                contagem.estoque_snapshot_data,
             )
+            existing_log = (
+                db.query(ContagemLog)
+                .filter(ContagemLog.contagem_id == contagem.id)
+                .filter(ContagemLog.ingrediente_id == ingrediente.id)
+                .order_by(ContagemLog.criado_em.desc(), ContagemLog.id.desc())
+                .first()
+            )
+            if existing_log is None:
+                db.add(
+                    ContagemLog(
+                        contagem_id=contagem.id,
+                        ingrediente_id=ingrediente.id,
+                        estoque_id=snapshot.id if snapshot else None,
+                        estoque_data=(
+                            snapshot.date_time.date()
+                            if snapshot and snapshot.date_time
+                            else contagem.estoque_snapshot_data
+                        ),
+                        estoque_quantidade=snapshot.quantity if snapshot else None,
+                        category_id=ingrediente.category_id,
+                        categoria=ingrediente.category,
+                        quantidade_anterior=anterior,
+                        quantidade_nova=atualizacao.new_qty,
+                        delta=delta,
+                    )
+                )
+            else:
+                existing_log.estoque_id = snapshot.id if snapshot else None
+                existing_log.estoque_data = (
+                    snapshot.date_time.date()
+                    if snapshot and snapshot.date_time
+                    else contagem.estoque_snapshot_data
+                )
+                existing_log.estoque_quantidade = snapshot.quantity if snapshot else None
+                existing_log.category_id = ingrediente.category_id
+                existing_log.categoria = ingrediente.category
+                existing_log.quantidade_anterior = anterior
+                existing_log.quantidade_nova = atualizacao.new_qty
+                existing_log.delta = delta
+                existing_log.criado_em = datetime.now()
         if round(atualizacao.new_qty, 3) == round(anterior, 3):
             continue
-        db.add(LogContagem(
-            ingrediente_id=ingrediente.id,
-            quantidade_anterior=anterior,
-            quantidade_nova=atualizacao.new_qty,
-            delta=round(atualizacao.new_qty - anterior, 3),
-            sessao=lote.session_label,
-        ))
+        db.add(
+            LogContagem(
+                ingrediente_id=ingrediente.id,
+                quantidade_anterior=anterior,
+                quantidade_nova=atualizacao.new_qty,
+                delta=round(atualizacao.new_qty - anterior, 3),
+                sessao=lote.session_label,
+            )
+        )
         if ingrediente.estoque_atual is None:
             ingrediente.estoque_atual = EstoqueAtual(
                 id=f"CUR-{ingrediente.id}",
@@ -1907,6 +2237,63 @@ def get_fornecedor_profile(fornecedor_id: str, db: Session = Depends(get_db)):
 # ---------------------------------------------------------------------------
 
 
+def _pedido_group_key(supplier_id: str, order_date: date) -> str:
+    return f"{supplier_id}_{order_date.isoformat()}"
+
+
+def _discount_rate(discount_percent) -> float:
+    value = _as_float(discount_percent)
+    return value / 100 if value > 1 else value
+
+
+def _effective_unit_price(
+    price,
+    discount_percent,
+    min_to_discount,
+    qty: float,
+) -> tuple[float, bool]:
+    unit_price = _as_float(price)
+    min_qty = _as_float(min_to_discount)
+    rate = _discount_rate(discount_percent)
+    applies = rate > 0 and qty >= min_qty
+    if applies:
+        unit_price *= 1 - rate
+    return round(unit_price, 4), applies
+
+
+def _option_total(price, discount_percent, min_to_discount, qty: float) -> float:
+    effective_price, _ = _effective_unit_price(
+        price,
+        discount_percent,
+        min_to_discount,
+        qty,
+    )
+    return round(effective_price * qty, 2)
+
+
+def _next_pedido_id(db: Session, reserved_ids: Optional[set[str]] = None) -> str:
+    reserved_ids = reserved_ids if reserved_ids is not None else set()
+    last_id = (
+        db.query(Pedido.id)
+        .filter(Pedido.id.like("PED%"))
+        .order_by(Pedido.id.desc())
+        .first()
+    )
+    next_number = 1
+    if last_id:
+        try:
+            next_number = int(last_id[0].replace("PED", "")) + 1
+        except ValueError:
+            next_number = db.query(func.count(Pedido.id)).scalar() + 1
+
+    pedido_id = f"PED{next_number:012d}"
+    while pedido_id in reserved_ids or db.query(Pedido).filter(Pedido.id == pedido_id).first():
+        next_number += 1
+        pedido_id = f"PED{next_number:012d}"
+    reserved_ids.add(pedido_id)
+    return pedido_id
+
+
 def _pedido_base_query(db: Session):
     return (
         db.query(
@@ -1945,6 +2332,57 @@ def _apply_pedido_filters(
     return query
 
 
+def _pedido_group_query(db: Session):
+    return (
+        db.query(
+            Pedido.supplier_id,
+            Fornecedor.name.label("supplier_name"),
+            Pedido.data_pedido,
+            func.max(Pedido.data_prevista).label("data_prevista"),
+            func.count(func.distinct(Pedido.ingredient_id)).label("ingredients_count"),
+            func.sum(Pedido.qty).label("items_qty"),
+            func.sum(Pedido.valor).label("total_value"),
+            func.sum(
+                case((Pedido.status == "em_transito", 1), else_=0)
+            ).label("transit_count"),
+        )
+        .join(Fornecedor, Fornecedor.id == Pedido.supplier_id)
+        .join(Ingrediente, Ingrediente.id == Pedido.ingredient_id)
+        .filter(Ingrediente.category_id != PRODUCTION_CATEGORY_ID)
+        .group_by(Pedido.supplier_id, Fornecedor.name, Pedido.data_pedido)
+    )
+
+
+def _serialize_pedido_group(row) -> PedidoGroupOut:
+    return PedidoGroupOut(
+        group_key=_pedido_group_key(row.supplier_id, row.data_pedido),
+        supplier_id=row.supplier_id,
+        supplier_name=row.supplier_name,
+        order_date=row.data_pedido,
+        expected_date=row.data_prevista,
+        status="em_transito" if int(row.transit_count or 0) > 0 else "entregue",
+        ingredients_count=int(row.ingredients_count or 0),
+        items_qty=_as_float(row.items_qty),
+        total_value=_as_float(row.total_value),
+    )
+
+
+def _get_pedido_group(
+    db: Session,
+    supplier_id: str,
+    order_date: date,
+    status: Optional[str] = None,
+) -> Optional[PedidoGroupOut]:
+    row = _apply_pedido_filters(
+        _pedido_group_query(db),
+        status,
+        supplier_id,
+        order_date,
+        order_date,
+    ).first()
+    return _serialize_pedido_group(row) if row else None
+
+
 def _serialize_pedido(row) -> PedidoOut:
     return PedidoOut(
         id=row.id,
@@ -1960,6 +2398,259 @@ def _serialize_pedido(row) -> PedidoOut:
     )
 
 
+@app.post("/api/pedidos/recomendacao", response_model=PedidoRecommendationResponse)
+def recommend_pedidos(
+    payload: PedidoRecommendationRequest,
+    db: Session = Depends(get_db),
+):
+    today = date.today()
+    response_items: list[PedidoRecommendationItem] = []
+    grouped: dict[str, dict] = {}
+
+    for item in payload.items:
+        ingredient = (
+            db.query(Ingrediente)
+            .filter(Ingrediente.id == item.ingredient_id)
+            .filter(Ingrediente.category_id != PRODUCTION_CATEGORY_ID)
+            .first()
+        )
+        if ingredient is None:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Ingrediente inválido: {item.ingredient_id}",
+            )
+
+        option_rows = (
+            db.query(
+                FornecedorIngrediente.supplier_id,
+                Fornecedor.name.label("supplier_name"),
+                Fornecedor.avg_delivery_time,
+                FornecedorIngrediente.price,
+                FornecedorIngrediente.discount_percent,
+                FornecedorIngrediente.min_to_discount,
+            )
+            .join(Fornecedor, Fornecedor.id == FornecedorIngrediente.supplier_id)
+            .filter(FornecedorIngrediente.ingredient_id == item.ingredient_id)
+            .order_by(Fornecedor.name.asc())
+            .all()
+        )
+
+        raw_options = []
+        for row in option_rows:
+            delivery_days = int(row.avg_delivery_time or 0)
+            effective_unit_price, discount_applied = _effective_unit_price(
+                row.price,
+                row.discount_percent,
+                row.min_to_discount,
+                item.qty,
+            )
+            raw_options.append(
+                {
+                    "supplier_id": row.supplier_id,
+                    "supplier_name": row.supplier_name,
+                    "unit_price": _as_float(row.price),
+                    "discount_percent": _as_float(row.discount_percent),
+                    "min_to_discount": _as_float(row.min_to_discount),
+                    "discount_applied": discount_applied,
+                    "effective_unit_price": effective_unit_price,
+                    "total_value": round(effective_unit_price * item.qty, 2),
+                    "delivery_time_days": delivery_days,
+                    "expected_date": today + timedelta(days=delivery_days),
+                }
+            )
+
+        recommended = None
+        if raw_options:
+            recommended = min(
+                raw_options,
+                key=lambda option: (
+                    option["total_value"],
+                    option["delivery_time_days"],
+                    -option["discount_percent"],
+                    option["supplier_name"],
+                ),
+            )
+
+        options: list[SupplierOption] = []
+        for option in raw_options:
+            detractors: list[str] = []
+            if recommended and option["supplier_id"] != recommended["supplier_id"]:
+                if option["total_value"] > recommended["total_value"] + 0.005:
+                    detractors.append("mais caro")
+                if option["delivery_time_days"] > recommended["delivery_time_days"]:
+                    detractors.append("entrega mais lenta")
+                if option["discount_percent"] < recommended["discount_percent"]:
+                    detractors.append("desconto menor")
+                if recommended["discount_applied"] and not option["discount_applied"]:
+                    detractors.append("não aplica desconto")
+            options.append(
+                SupplierOption(
+                    **option,
+                    detractors=detractors,
+                    recommended=bool(
+                        recommended
+                        and option["supplier_id"] == recommended["supplier_id"]
+                    ),
+                )
+            )
+
+        options.sort(
+            key=lambda option: (
+                option.total_value,
+                option.delivery_time_days,
+                -option.discount_percent,
+                option.supplier_name,
+            )
+        )
+
+        response_items.append(
+            PedidoRecommendationItem(
+                ingredient_id=ingredient.id,
+                ingredient_name=ingredient.name,
+                category=ingredient.category,
+                unit=ingredient.unit,
+                qty=item.qty,
+                recommended_supplier_id=(
+                    recommended["supplier_id"] if recommended else None
+                ),
+                options=options,
+            )
+        )
+
+        if recommended:
+            group = grouped.setdefault(
+                recommended["supplier_id"],
+                {
+                    "supplier_id": recommended["supplier_id"],
+                    "supplier_name": recommended["supplier_name"],
+                    "expected_date": recommended["expected_date"],
+                    "total_value": 0.0,
+                    "items": [],
+                },
+            )
+            group["expected_date"] = max(
+                group["expected_date"],
+                recommended["expected_date"],
+            )
+            group["total_value"] += recommended["total_value"]
+            group["items"].append(
+                RecommendedOrderItem(
+                    ingredient_id=ingredient.id,
+                    ingredient_name=ingredient.name,
+                    qty=item.qty,
+                    unit=ingredient.unit,
+                    total_value=recommended["total_value"],
+                    expected_date=recommended["expected_date"],
+                )
+            )
+
+    groups = [
+        RecommendedOrderGroup(
+            supplier_id=group["supplier_id"],
+            supplier_name=group["supplier_name"],
+            expected_date=group["expected_date"],
+            total_value=round(group["total_value"], 2),
+            items=group["items"],
+        )
+        for group in grouped.values()
+    ]
+    groups.sort(key=lambda group: (group.expected_date, group.supplier_name))
+
+    return PedidoRecommendationResponse(items=response_items, groups=groups)
+
+
+@app.post("/api/pedidos", response_model=PedidoCreateResponse)
+def create_pedidos(payload: PedidoCreateRequest, db: Session = Depends(get_db)):
+    today = date.today()
+    aggregated: dict[tuple[str, str], float] = {}
+    for item in payload.items:
+        key = (item.supplier_id, item.ingredient_id)
+        aggregated[key] = aggregated.get(key, 0.0) + item.qty
+
+    created = 0
+    updated = 0
+    touched_groups: set[tuple[str, date]] = set()
+    reserved_pedido_ids: set[str] = set()
+
+    for (supplier_id, ingredient_id), qty in aggregated.items():
+        option = (
+            db.query(
+                FornecedorIngrediente,
+                Fornecedor.avg_delivery_time.label("avg_delivery_time"),
+            )
+            .join(Fornecedor, Fornecedor.id == FornecedorIngrediente.supplier_id)
+            .join(Ingrediente, Ingrediente.id == FornecedorIngrediente.ingredient_id)
+            .filter(FornecedorIngrediente.supplier_id == supplier_id)
+            .filter(FornecedorIngrediente.ingredient_id == ingredient_id)
+            .filter(Ingrediente.category_id != PRODUCTION_CATEGORY_ID)
+            .first()
+        )
+        if option is None:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Fornecedor inválido para ingrediente: "
+                    f"{supplier_id}/{ingredient_id}"
+                ),
+            )
+
+        fornecedor_ingrediente, avg_delivery_time = option
+        delivery_days = int(avg_delivery_time or 0)
+        expected_date = today + timedelta(days=delivery_days)
+
+        existing = (
+            db.query(Pedido)
+            .filter(Pedido.supplier_id == supplier_id)
+            .filter(Pedido.ingredient_id == ingredient_id)
+            .filter(Pedido.data_pedido == today)
+            .first()
+        )
+
+        if existing:
+            new_qty = _as_float(existing.qty) + qty
+            existing.qty = new_qty
+            existing.valor = _option_total(
+                fornecedor_ingrediente.price,
+                fornecedor_ingrediente.discount_percent,
+                fornecedor_ingrediente.min_to_discount,
+                new_qty,
+            )
+            existing.data_prevista = expected_date
+            existing.status = "em_transito"
+            updated += 1
+        else:
+            db.add(
+                Pedido(
+                    id=_next_pedido_id(db, reserved_pedido_ids),
+                    supplier_id=supplier_id,
+                    ingredient_id=ingredient_id,
+                    qty=qty,
+                    valor=_option_total(
+                        fornecedor_ingrediente.price,
+                        fornecedor_ingrediente.discount_percent,
+                        fornecedor_ingrediente.min_to_discount,
+                        qty,
+                    ),
+                    data_pedido=today,
+                    status="em_transito",
+                    data_prevista=expected_date,
+                )
+            )
+            created += 1
+
+        touched_groups.add((supplier_id, today))
+
+    db.commit()
+
+    groups = [
+        group
+        for supplier_id, order_date in sorted(touched_groups)
+        if (group := _get_pedido_group(db, supplier_id, order_date)) is not None
+    ]
+
+    return PedidoCreateResponse(groups=groups, created=created, updated=updated)
+
+
 @app.get("/api/pedidos", response_model=PedidoPaginado)
 def get_pedidos(
     status: Optional[str] = None,
@@ -1971,7 +2662,7 @@ def get_pedidos(
     db: Session = Depends(get_db),
 ):
     query = _apply_pedido_filters(
-        _pedido_base_query(db),
+        _pedido_group_query(db),
         status,
         supplier_id,
         date_from,
@@ -1981,14 +2672,14 @@ def get_pedidos(
     total = query.count()
     total_pages = max(1, math.ceil(total / page_size))
     rows = (
-        query.order_by(Pedido.data_pedido.desc(), Pedido.id.desc())
+        query.order_by(Pedido.data_pedido.desc(), Fornecedor.name.asc())
         .offset((page - 1) * page_size)
         .limit(page_size)
         .all()
     )
 
     return PedidoPaginado(
-        items=[_serialize_pedido(row) for row in rows],
+        items=[_serialize_pedido_group(row) for row in rows],
         total=total,
         page=page,
         page_size=page_size,
@@ -1996,7 +2687,7 @@ def get_pedidos(
     )
 
 
-@app.get("/api/pedidos/em-transito", response_model=list[PedidoOut])
+@app.get("/api/pedidos/em-transito", response_model=list[PedidoGroupOut])
 def get_pedidos_em_transito(
     supplier_id: Optional[str] = None,
     date_from: Optional[date] = None,
@@ -2005,16 +2696,118 @@ def get_pedidos_em_transito(
 ):
     rows = (
         _apply_pedido_filters(
-            _pedido_base_query(db),
+            _pedido_group_query(db),
             "em_transito",
             supplier_id,
             date_from,
             date_to,
         )
-        .order_by(Pedido.data_prevista.asc(), Pedido.data_pedido.desc())
+        .order_by(func.max(Pedido.data_prevista).asc(), Pedido.data_pedido.desc())
         .all()
     )
-    return [_serialize_pedido(row) for row in rows]
+    return [_serialize_pedido_group(row) for row in rows]
+
+
+@app.get(
+    "/api/pedidos/grupos/{supplier_id}/{order_date}",
+    response_model=PedidoDetailResponse,
+)
+def get_pedido_group_detail(
+    supplier_id: str,
+    order_date: date,
+    db: Session = Depends(get_db),
+):
+    rows = (
+        db.query(
+            Pedido.id,
+            Pedido.supplier_id,
+            Fornecedor.name.label("supplier_name"),
+            Pedido.data_pedido,
+            Pedido.data_prevista,
+            Pedido.status,
+            Pedido.ingredient_id,
+            Ingrediente.name.label("ingredient_name"),
+            Categoria.name.label("category"),
+            Ingrediente.unit,
+            Pedido.qty,
+            Pedido.valor,
+        )
+        .join(Fornecedor, Fornecedor.id == Pedido.supplier_id)
+        .join(Ingrediente, Ingrediente.id == Pedido.ingredient_id)
+        .join(Categoria, Categoria.id == Ingrediente.category_id)
+        .filter(Pedido.supplier_id == supplier_id)
+        .filter(Pedido.data_pedido == order_date)
+        .filter(Ingrediente.category_id != PRODUCTION_CATEGORY_ID)
+        .order_by(Ingrediente.name.asc())
+        .all()
+    )
+    if not rows:
+        raise HTTPException(status_code=404, detail="Pedido não encontrado")
+
+    items = [
+        PedidoDetailItem(
+            ingredient_id=row.ingredient_id,
+            ingredient_name=row.ingredient_name,
+            category=row.category,
+            unit=row.unit,
+            qty=_as_float(row.qty),
+            unit_price=(
+                _as_float(row.valor) / _as_float(row.qty)
+                if _as_float(row.qty) > 0
+                else 0
+            ),
+            total_value=_as_float(row.valor),
+        )
+        for row in rows
+    ]
+    first = rows[0]
+    expected_date = max(row.data_prevista for row in rows)
+    status = (
+        "em_transito"
+        if any(row.status == "em_transito" for row in rows)
+        else "entregue"
+    )
+    group_key = _pedido_group_key(supplier_id, order_date)
+
+    return PedidoDetailResponse(
+        id=group_key,
+        group_key=group_key,
+        supplier_id=first.supplier_id,
+        supplier_name=first.supplier_name,
+        order_date=first.data_pedido,
+        expected_date=expected_date,
+        status=status,
+        items_qty=sum(item.qty for item in items),
+        total_value=sum(item.total_value for item in items),
+        items=items,
+    )
+
+
+@app.patch(
+    "/api/pedidos/grupos/{supplier_id}/{order_date}/entregar",
+    response_model=PedidoDetailResponse,
+)
+def mark_pedido_group_delivered(
+    supplier_id: str,
+    order_date: date,
+    db: Session = Depends(get_db),
+):
+    pedidos = (
+        db.query(Pedido)
+        .join(Ingrediente, Ingrediente.id == Pedido.ingredient_id)
+        .filter(Pedido.supplier_id == supplier_id)
+        .filter(Pedido.data_pedido == order_date)
+        .filter(Ingrediente.category_id != PRODUCTION_CATEGORY_ID)
+        .all()
+    )
+    if not pedidos:
+        raise HTTPException(status_code=404, detail="Pedido não encontrado")
+
+    for pedido in pedidos:
+        pedido.status = "entregue"
+
+    db.commit()
+    return get_pedido_group_detail(supplier_id, order_date, db)
 
 
 @app.get("/api/pedidos/{pedido_id}", response_model=PedidoDetailResponse)
@@ -2065,6 +2858,7 @@ def get_pedido_detail(pedido_id: str, db: Session = Depends(get_db)):
 
     return PedidoDetailResponse(
         id=first.id,
+        group_key=_pedido_group_key(first.supplier_id, first.data_pedido),
         supplier_id=first.supplier_id,
         supplier_name=first.supplier_name,
         order_date=first.data_pedido,

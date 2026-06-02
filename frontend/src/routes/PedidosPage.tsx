@@ -1,13 +1,22 @@
-import { useState } from 'react'
+import { useMemo, useState, type ComponentType, type ReactNode } from 'react'
 import { createRoute, Link, useNavigate } from '@tanstack/react-router'
 import {
   ArrowLeft,
   CalendarClock,
   CalendarDays,
+  Check,
+  ChevronDown,
   CircleDollarSign,
+  ClipboardList,
   Hash,
+  Minus,
+  Package,
   PackageCheck,
+  Plus,
+  Search,
   Store,
+  Trash2,
+  Truck,
 } from 'lucide-react'
 import { rootRoute } from './Root'
 import { AppSelect } from '../components/AppSelect'
@@ -19,13 +28,18 @@ import {
 } from '../components/DateFilterControl'
 import { FilterDrawer, FilterField, FilterSection } from '../components/FilterPanel'
 import { useFornecedores } from '../hooks/useFornecedores'
+import { useEstoque, type StockItem } from '../hooks/useEstoque'
 import {
-  usePedidoDetail,
+  useCreatePedido,
+  usePedidoGroupDetail,
+  usePedidoRecommendation,
   usePedidos,
   usePedidosEmTransito,
-  type Pedido,
   type PedidoDetailItem,
   type PedidoFilters,
+  type PedidoGroup,
+  type PedidoRecommendationItem,
+  useMarkPedidoGroupDelivered,
 } from '../hooks/usePedidos'
 
 export const pedidosRoute = createRoute({
@@ -34,13 +48,25 @@ export const pedidosRoute = createRoute({
   component: PedidosPage,
 })
 
-export const pedidoDetailRoute = createRoute({
+export const pedidoNewRoute = createRoute({
   getParentRoute: () => rootRoute,
-  path: '/pedidos/$id',
-  component: PedidoDetailPage,
+  path: '/pedidos/novo',
+  component: PedidoNewPage,
+})
+
+export const pedidoGroupDetailRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/pedidos/grupos/$supplierId/$orderDate',
+  component: PedidoGroupDetailPage,
 })
 
 type OrdersView = 'history' | 'transit'
+type OrderStep = 'selection' | 'review'
+
+interface SelectedIngredient {
+  ingredient: StockItem
+  qty: string
+}
 
 const PAGE_SIZE_OPTIONS = [10, 25, 50]
 const STATUS_OPTIONS = [
@@ -58,6 +84,11 @@ const fmt = {
     value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }),
   date: (value: string) =>
     new Date(`${value}T00:00:00`).toLocaleDateString('pt-BR'),
+  percent: (value: number) =>
+    `${(value * 100).toLocaleString('pt-BR', {
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 1,
+    })}%`,
 }
 
 function PedidosPage() {
@@ -145,9 +176,16 @@ function PedidosPage() {
           <p className="mt-1 text-xs tabular-nums text-stone-400">
             {isFetching || isFetchingTransit
               ? 'Carregando...'
-              : `${activeTotal} pedidos encontrados`}
+              : `${activeTotal} grupos de pedidos encontrados`}
           </p>
         </div>
+        <Link
+          to="/pedidos/novo"
+          className="inline-flex items-center gap-2 rounded-lg bg-brand-600 px-4 py-2 text-sm font-bold text-white transition hover:bg-brand-700"
+        >
+          <Plus className="size-4" strokeWidth={2} />
+          Novo pedido
+        </Link>
       </header>
 
       <FilterDrawer
@@ -199,17 +237,15 @@ function PedidosPage() {
 
       <main className="flex-1 space-y-6 overflow-auto p-6">
         <section className="rounded-xl border border-stone-200 bg-white p-4 shadow-sm">
-          <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
-            <SegmentedToggle value={view} onChange={setView} />
-          </div>
+          <SegmentedToggle value={view} onChange={setView} />
         </section>
 
         <DataPanel
-          title={view === 'history' ? 'Histórico de pedidos' : 'Pedidos em trânsito'}
+          title={view === 'history' ? 'Histórico por fornecedor e dia' : 'Pedidos em trânsito'}
           subtitle={
             view === 'history'
-              ? 'Todos os pedidos registrados'
-              : 'Pedidos que ainda têm entrega prevista'
+              ? 'Pedidos agrupados por fornecedor e data'
+              : 'Pedidos em aberto agrupados por fornecedor e data'
           }
         >
           {view === 'history' ? (
@@ -245,10 +281,391 @@ function PedidosPage() {
   )
 }
 
-function PedidoDetailPage() {
+function PedidoNewPage() {
   const navigate = useNavigate()
-  const { id } = pedidoDetailRoute.useParams()
-  const { data, isFetching, isError } = usePedidoDetail(id)
+  const { data: ingredients = [] } = useEstoque()
+  const recommendPedido = usePedidoRecommendation()
+  const createPedido = useCreatePedido()
+  const [step, setStep] = useState<OrderStep>('selection')
+  const [search, setSearch] = useState('')
+  const [selected, setSelected] = useState<SelectedIngredient[]>([])
+  const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set())
+  const [recommendation, setRecommendation] = useState<PedidoRecommendationItem[]>([])
+  const [supplierByIngredient, setSupplierByIngredient] = useState<Record<string, string>>({})
+  const [error, setError] = useState('')
+
+  const selectedIds = useMemo(
+    () => new Set(selected.map((item) => String(item.ingredient.id))),
+    [selected],
+  )
+
+  const available = useMemo(
+    () =>
+      ingredients.filter(
+        (ingredient) =>
+          !selectedIds.has(String(ingredient.id)) &&
+          ingredient.name.toLowerCase().includes(search.toLowerCase()),
+      ),
+    [ingredients, search, selectedIds],
+  )
+
+  const groupedAvailable = useMemo(() => {
+    const groups = new Map<string, StockItem[]>()
+    available.forEach((ingredient) => {
+      const category = ingredient.category || 'Sem categoria'
+      groups.set(category, [...(groups.get(category) ?? []), ingredient])
+    })
+    return Array.from(groups.entries()).sort(([a], [b]) => a.localeCompare(b))
+  }, [available])
+
+  const canReview =
+    selected.length > 0 && selected.every((item) => Number(item.qty) > 0)
+
+  const reviewGroups = useMemo(
+    () => buildReviewGroups(recommendation, supplierByIngredient),
+    [recommendation, supplierByIngredient],
+  )
+  const reviewTotal = reviewGroups.reduce((sum, group) => sum + group.totalValue, 0)
+  const unresolvedItems = recommendation.filter(
+    (item) => !supplierByIngredient[item.ingredient_id],
+  )
+
+  function addIngredient(ingredient: StockItem) {
+    setSelected((current) => [...current, { ingredient, qty: '1' }])
+  }
+
+  function removeIngredient(id: string | number) {
+    setSelected((current) =>
+      current.filter((item) => String(item.ingredient.id) !== String(id)),
+    )
+  }
+
+  function updateQty(id: string | number, qty: string) {
+    setSelected((current) =>
+      current.map((item) =>
+        String(item.ingredient.id) === String(id) ? { ...item, qty } : item,
+      ),
+    )
+  }
+
+  function adjustQty(id: string | number, delta: number) {
+    setSelected((current) =>
+      current.map((item) => {
+        if (String(item.ingredient.id) !== String(id)) return item
+        const currentQty = Number(item.qty) || 0
+        const nextQty = Math.max(0, Math.round((currentQty + delta) * 100) / 100)
+        return { ...item, qty: String(nextQty) }
+      }),
+    )
+  }
+
+  function toggleCategory(category: string) {
+    setExpandedCategories((current) => {
+      const next = new Set(current)
+      if (next.has(category)) next.delete(category)
+      else next.add(category)
+      return next
+    })
+  }
+
+  async function handleReview() {
+    setError('')
+    try {
+      const response = await recommendPedido.mutateAsync({
+        items: selected.map((item) => ({
+          ingredient_id: String(item.ingredient.id),
+          qty: Number(item.qty),
+        })),
+      })
+      setRecommendation(response.items)
+      setSupplierByIngredient(
+        Object.fromEntries(
+          response.items
+            .filter((item) => item.recommended_supplier_id)
+            .map((item) => [item.ingredient_id, item.recommended_supplier_id as string]),
+        ),
+      )
+      setStep('review')
+    } catch {
+      setError('Não foi possível calcular os fornecedores.')
+    }
+  }
+
+  async function handleConfirm() {
+    setError('')
+    try {
+      await createPedido.mutateAsync({
+        items: recommendation
+          .filter((item) => supplierByIngredient[item.ingredient_id])
+          .map((item) => ({
+            ingredient_id: item.ingredient_id,
+            qty: item.qty,
+            supplier_id: supplierByIngredient[item.ingredient_id],
+          })),
+      })
+      navigate({ to: '/pedidos' })
+    } catch {
+      setError('Não foi possível confirmar os pedidos.')
+    }
+  }
+
+  return (
+    <div className="flex h-screen flex-col bg-surface">
+      <header className="flex flex-shrink-0 items-center gap-3 border-b border-stone-200 bg-white px-8 py-4">
+        <button
+          type="button"
+          onClick={() => (step === 'review' ? setStep('selection') : navigate({ to: '/pedidos' }))}
+          className="flex size-9 items-center justify-center rounded-lg border border-stone-200 text-stone-500 transition hover:bg-stone-50 hover:text-stone-900"
+          aria-label="Voltar"
+        >
+          <ArrowLeft className="size-4" strokeWidth={2} />
+        </button>
+        <div className="min-w-0 flex-1">
+          <p className="text-xs font-bold uppercase tracking-wide text-brand-600">
+            Novo pedido
+          </p>
+          <h1 className="truncate text-xl font-semibold text-stone-900">
+            {step === 'selection' ? 'Selecionar ingredientes' : 'Revisar fornecedores'}
+          </h1>
+        </div>
+      </header>
+
+      <main className="flex-1 overflow-auto p-6">
+        <div className="space-y-6">
+          <StepBar step={step} />
+
+          {error && (
+            <section className="rounded-xl border border-red-100 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">
+              {error}
+            </section>
+          )}
+
+          {step === 'selection' ? (
+            <>
+              <section className="grid grid-cols-1 items-start gap-6 xl:grid-cols-[minmax(0,1.35fr)_minmax(320px,0.65fr)]">
+                <IngredientList
+                  title="Ingredientes disponíveis"
+                  subtitle="Selecione o que deseja comprar"
+                  search={search}
+                  onSearchChange={setSearch}
+                  variant="available"
+                >
+                  {groupedAvailable.length === 0 ? (
+                    <EmptyState>Nenhum ingrediente encontrado.</EmptyState>
+                  ) : (
+                    groupedAvailable.map(([category, items]) => {
+                      const expanded = expandedCategories.has(category)
+                      return (
+                        <section key={category} className="border-b border-stone-100 last:border-0">
+                          <button
+                            type="button"
+                            onClick={() => toggleCategory(category)}
+                            className="flex w-full items-center justify-between gap-4 bg-stone-50/80 px-5 py-4 text-left transition hover:bg-stone-100"
+                          >
+                            <span className="flex min-w-0 items-center gap-3">
+                              <span className="flex size-10 flex-shrink-0 items-center justify-center rounded-lg bg-white text-brand-700 shadow-sm">
+                                <ClipboardList className="size-5" strokeWidth={2} />
+                              </span>
+                              <span className="min-w-0">
+                                <span className="block truncate text-base font-black text-stone-900">
+                                  {category}
+                                </span>
+                                <span className="mt-1 inline-flex items-center gap-1 text-xs font-bold text-stone-500">
+                                  <Hash className="size-3.5" strokeWidth={2} />
+                                  {items.length} ingrediente{items.length !== 1 ? 's' : ''}
+                                </span>
+                              </span>
+                            </span>
+                            <ChevronDown
+                              className={[
+                                'size-4 text-stone-400 transition-transform',
+                                expanded ? 'rotate-180' : '',
+                              ].join(' ')}
+                              strokeWidth={2}
+                            />
+                          </button>
+                          {expanded &&
+                            items.map((ingredient) => (
+                              <button
+                                key={ingredient.id}
+                                type="button"
+                                onClick={() => addIngredient(ingredient)}
+                                className="ml-6 flex w-[calc(100%-1.5rem)] items-center justify-between gap-3 border-t border-stone-100 px-4 py-3 text-left transition hover:bg-brand-50/40"
+                              >
+                                <div className="flex min-w-0 items-center gap-3">
+                                  <span className="flex size-8 flex-shrink-0 items-center justify-center rounded-lg bg-stone-100 text-stone-500">
+                                    <Package className="size-4" strokeWidth={2} />
+                                  </span>
+                                  <span className="min-w-0">
+                                    <span className="block truncate text-sm font-bold text-stone-900">
+                                      {ingredient.name}
+                                    </span>
+                                    <span className="block text-xs text-stone-400">
+                                      {ingredient.category} · {ingredient.unit}
+                                    </span>
+                                  </span>
+                                </div>
+                                <Plus className="size-4 flex-shrink-0 text-brand-600" />
+                              </button>
+                            ))}
+                        </section>
+                      )
+                    })
+                  )}
+                </IngredientList>
+
+                <IngredientList
+                  title="Lista de compra"
+                  subtitle={`${selected.length} ingrediente${selected.length !== 1 ? 's' : ''} selecionado${selected.length !== 1 ? 's' : ''}`}
+                  variant="cart"
+                >
+                  {selected.length === 0 ? (
+                    <EmptyState>Nenhum ingrediente selecionado.</EmptyState>
+                  ) : (
+                    selected.map(({ ingredient, qty }) => (
+                      <div
+                        key={ingredient.id}
+                        className="grid grid-cols-[minmax(0,1fr)_120px_32px] items-center gap-2 border-b border-brand-100/70 px-3 py-2.5 last:border-0"
+                      >
+                        <div className="flex min-w-0 items-center gap-2">
+                          <span className="flex size-7 flex-shrink-0 items-center justify-center rounded-lg bg-white text-brand-700 shadow-sm">
+                            <Package className="size-3.5" strokeWidth={2} />
+                          </span>
+                          <span className="min-w-0">
+                            <span className="block truncate text-sm font-black text-stone-900">
+                              {ingredient.name}
+                            </span>
+                            <span className="block truncate text-[11px] text-stone-500">
+                              {ingredient.unit}
+                            </span>
+                          </span>
+                        </div>
+                        <QtyStepper
+                          value={qty}
+                          unit={ingredient.unit}
+                          onChange={(value) => updateQty(ingredient.id, value)}
+                          onDecrease={() => adjustQty(ingredient.id, -1)}
+                          onIncrease={() => adjustQty(ingredient.id, 1)}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => removeIngredient(ingredient.id)}
+                          className="flex size-8 items-center justify-center rounded-lg text-stone-400 transition hover:bg-red-50 hover:text-red-600"
+                          aria-label="Remover ingrediente"
+                        >
+                          <Trash2 className="size-4" strokeWidth={2} />
+                        </button>
+                      </div>
+                    ))
+                  )}
+                </IngredientList>
+              </section>
+
+              <div className="flex justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={() => navigate({ to: '/pedidos' })}
+                  className="rounded-lg border border-stone-200 px-4 py-2 text-sm font-bold text-stone-600 transition hover:bg-stone-50"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  disabled={!canReview || recommendPedido.isPending}
+                  onClick={handleReview}
+                  className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-bold text-white transition hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {recommendPedido.isPending ? 'Calculando...' : 'Revisar fornecedores'}
+                </button>
+              </div>
+            </>
+          ) : (
+            <>
+              <section className="grid grid-cols-1 gap-4 md:grid-cols-3">
+                <KpiCard
+                  icon={PackageCheck}
+                  label="Ingredientes"
+                  value={fmt.number(recommendation.length, 0)}
+                  detail="Itens na lista"
+                  tone="green"
+                />
+                <KpiCard
+                  icon={Truck}
+                  label="Fornecedores"
+                  value={fmt.number(reviewGroups.length, 0)}
+                  detail="Pedidos a confirmar"
+                  tone="orange"
+                />
+                <KpiCard
+                  icon={CircleDollarSign}
+                  label="Total estimado"
+                  value={fmt.currency(reviewTotal)}
+                  detail="Com descontos aplicados"
+                  tone="blue"
+                />
+              </section>
+
+              <section className="space-y-4">
+                {recommendation.map((item) => (
+                  <ReviewItem
+                    key={item.ingredient_id}
+                    item={item}
+                    selectedSupplierId={supplierByIngredient[item.ingredient_id] ?? ''}
+                    onChange={(supplierId) =>
+                      setSupplierByIngredient((current) => ({
+                        ...current,
+                        [item.ingredient_id]: supplierId,
+                      }))
+                    }
+                  />
+                ))}
+              </section>
+
+              <DataPanel
+                title="Pedidos gerados"
+                subtitle="Agrupamento previsto por fornecedor"
+              >
+                <ReviewGroupsTable groups={reviewGroups} />
+              </DataPanel>
+
+              <div className="flex justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={() => setStep('selection')}
+                  className="rounded-lg border border-stone-200 px-4 py-2 text-sm font-bold text-stone-600 transition hover:bg-stone-50"
+                >
+                  Voltar
+                </button>
+                <button
+                  type="button"
+                  disabled={
+                    createPedido.isPending ||
+                    recommendation.length === 0 ||
+                    unresolvedItems.length > 0
+                  }
+                  onClick={handleConfirm}
+                  className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-bold text-white transition hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {createPedido.isPending ? 'Confirmando...' : 'Confirmar pedidos'}
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      </main>
+    </div>
+  )
+}
+
+function PedidoGroupDetailPage() {
+  const navigate = useNavigate()
+  const { supplierId, orderDate } = pedidoGroupDetailRoute.useParams()
+  const { data, isFetching, isError } = usePedidoGroupDetail(supplierId, orderDate)
+  const markDelivered = useMarkPedidoGroupDelivered()
+
+  async function handleMarkDelivered() {
+    await markDelivered.mutateAsync({ supplierId, orderDate })
+  }
 
   return (
     <div className="flex h-screen flex-col bg-surface">
@@ -263,23 +680,30 @@ function PedidoDetailPage() {
         </button>
         <div className="min-w-0 flex-1">
           <p className="text-xs font-bold uppercase tracking-wide text-brand-600">
-            Detalhe do pedido
+            Pedido por fornecedor e dia
           </p>
           <h1 className="truncate text-xl font-semibold text-stone-900">
-            {id}
+            {data ? `${data.supplier_name} · ${fmt.date(data.order_date)}` : 'Pedido'}
           </h1>
         </div>
+        {data?.status === 'em_transito' && (
+          <button
+            type="button"
+            onClick={handleMarkDelivered}
+            disabled={markDelivered.isPending}
+            className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-bold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            <PackageCheck className="size-4" strokeWidth={2} />
+            {markDelivered.isPending ? 'Atualizando...' : 'Marcar como entregue'}
+          </button>
+        )}
       </header>
 
       <main className="flex-1 space-y-6 overflow-auto p-6">
         {isFetching ? (
-          <section className="rounded-xl border border-stone-200 bg-white p-10 text-center text-sm text-stone-400 shadow-sm">
-            Carregando pedido...
-          </section>
+          <EmptyPanel>Carregando pedido...</EmptyPanel>
         ) : isError || !data ? (
-          <section className="rounded-xl border border-stone-200 bg-white p-10 text-center text-sm text-stone-400 shadow-sm">
-            Pedido não encontrado.
-          </section>
+          <EmptyPanel>Pedido não encontrado.</EmptyPanel>
         ) : (
           <>
             <section className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
@@ -299,7 +723,7 @@ function PedidoDetailPage() {
             <section className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_320px]">
               <DataPanel
                 title="Ingredientes do pedido"
-                subtitle={`${data.items.length} ingrediente${data.items.length !== 1 ? 's' : ''} no pedido`}
+                subtitle={`${data.items.length} ingrediente${data.items.length !== 1 ? 's' : ''} no grupo`}
               >
                 <PedidoItemsTable items={data.items} />
               </DataPanel>
@@ -307,7 +731,7 @@ function PedidoDetailPage() {
               <aside className="rounded-xl border border-stone-200 bg-white p-5 shadow-sm">
                 <p className="text-sm font-black text-stone-900">Resumo do pedido</p>
                 <p className="mt-1 text-xs text-stone-400">
-                  Totais calculados pelos itens listados
+                  Totais agrupados por fornecedor e dia
                 </p>
                 <div className="mt-5 space-y-3">
                   <SummaryMetric
@@ -362,6 +786,142 @@ function SegmentedToggle({
   )
 }
 
+function StepBar({ step }: { step: OrderStep }) {
+  return (
+    <section className="rounded-xl border border-stone-200 bg-white p-4 shadow-sm">
+      <div className="grid gap-3 sm:grid-cols-2">
+        {[
+          ['selection', 'Selecionar ingredientes'],
+          ['review', 'Revisar fornecedores'],
+        ].map(([key, label], index) => {
+          const active = step === key
+          const complete = step === 'review' && key === 'selection'
+          return (
+            <div
+              key={key}
+              className={[
+                'flex items-center gap-3 rounded-lg border px-4 py-3',
+                active || complete
+                  ? 'border-brand-100 bg-brand-50 text-brand-800'
+                  : 'border-stone-100 bg-stone-50 text-stone-500',
+              ].join(' ')}
+            >
+              <span
+                className={[
+                  'flex size-7 items-center justify-center rounded-full text-xs font-black',
+                  active || complete ? 'bg-white text-brand-700' : 'bg-white text-stone-400',
+                ].join(' ')}
+              >
+                {complete ? <Check className="size-4" /> : index + 1}
+              </span>
+              <span className="text-sm font-black">{label}</span>
+            </div>
+          )
+        })}
+      </div>
+    </section>
+  )
+}
+
+function ReviewItem({
+  item,
+  selectedSupplierId,
+  onChange,
+}: {
+  item: PedidoRecommendationItem
+  selectedSupplierId: string
+  onChange: (supplierId: string) => void
+}) {
+  const selectedOption = item.options.find(
+    (option) => option.supplier_id === selectedSupplierId,
+  )
+  const supplierOptions = item.options.map((option) => ({
+    value: option.supplier_id,
+    label: `${option.supplier_name} · ${fmt.currency(option.total_value)}`,
+  }))
+
+  return (
+    <section className="rounded-xl border border-stone-200 bg-white p-5 shadow-sm">
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px] xl:items-start">
+        <div className="min-w-0">
+          <p className="truncate text-sm font-black text-stone-900">
+            {item.ingredient_name}
+          </p>
+          <p className="mt-1 text-xs text-stone-400">
+            {item.category} · {fmt.number(item.qty, 2)} {item.unit}
+          </p>
+          {selectedOption ? (
+            <div className="mt-3 flex flex-wrap gap-2 text-xs">
+              <MetricPill label="Preço" value={fmt.currency(selectedOption.effective_unit_price)} />
+              <MetricPill label="Total" value={fmt.currency(selectedOption.total_value)} />
+              <MetricPill label="Entrega" value={`${selectedOption.delivery_time_days} dia${selectedOption.delivery_time_days === 1 ? '' : 's'}`} />
+              {selectedOption.discount_applied && (
+                <MetricPill label="Desconto" value={fmt.percent(selectedOption.discount_percent)} />
+              )}
+            </div>
+          ) : (
+            <p className="mt-3 text-xs font-semibold text-red-600">
+              Nenhum fornecedor disponível para este ingrediente.
+            </p>
+          )}
+          {selectedOption && !selectedOption.recommended && (
+            <p className="mt-3 text-xs font-semibold text-amber-700">
+              {selectedOption.detractors.length > 0
+                ? `Detrator: ${selectedOption.detractors.join(', ')}.`
+                : 'Fornecedor alternativo sem detrator relevante.'}
+            </p>
+          )}
+        </div>
+
+        <AppSelect
+          value={selectedSupplierId}
+          onChange={onChange}
+          options={supplierOptions}
+          className="w-full"
+        />
+      </div>
+    </section>
+  )
+}
+
+function ReviewGroupsTable({
+  groups,
+}: {
+  groups: Array<{
+    supplierId: string
+    supplierName: string
+    expectedDate: string
+    totalValue: number
+    items: Array<{ ingredientName: string; qty: number; unit: string }>
+  }>
+}) {
+  return (
+    <DataTable
+      headers={reviewGroupHeaders}
+      colSpan={5}
+      minWidth="860px"
+      isEmpty={groups.length === 0}
+      emptyMessage="Nenhum pedido para confirmar."
+      embedded
+    >
+      {groups.map((group) => (
+        <tr
+          key={group.supplierId}
+          className="border-b border-stone-100 transition-colors last:border-0 hover:bg-stone-50"
+        >
+          <BodyCell strong>{group.supplierName}</BodyCell>
+          <BodyCell>{group.items.length}</BodyCell>
+          <BodyCell>{fmt.date(group.expectedDate)}</BodyCell>
+          <BodyCell>
+            {group.items.slice(0, 2).map((item) => item.ingredientName).join(', ')}
+            {group.items.length > 2 ? ` +${group.items.length - 2}` : ''}
+          </BodyCell>
+          <BodyCell align="right">{fmt.currency(group.totalValue)}</BodyCell>
+        </tr>
+      ))}
+    </DataTable>
+  )
+}
 
 function SummaryMetric({
   icon: Icon,
@@ -369,7 +929,7 @@ function SummaryMetric({
   value,
   featured = false,
 }: {
-  icon: React.ComponentType<{ className?: string; strokeWidth?: number }>
+  icon: ComponentType<{ className?: string; strokeWidth?: number }>
   label: string
   value: string
   featured?: boolean
@@ -435,15 +995,6 @@ function PedidoItemsTable({ items }: { items: PedidoDetailItem[] }) {
   )
 }
 
-const pedidoItemHeaders: DataTableHeader[] = [
-  { key: 'ingredient', content: 'Ingrediente' },
-  { key: 'category', content: 'Categoria' },
-  { key: 'unit', content: 'Unidade' },
-  { key: 'qty', content: 'Qtd', align: 'right' },
-  { key: 'unit-price', content: 'Preço unitário', align: 'right' },
-  { key: 'total', content: 'Total', align: 'right' },
-]
-
 function DataPanel({
   title,
   subtitle,
@@ -451,7 +1002,7 @@ function DataPanel({
 }: {
   title: string
   subtitle: string
-  children: React.ReactNode
+  children: ReactNode
 }) {
   return (
     <section className="overflow-hidden rounded-xl border border-stone-200 bg-white">
@@ -464,6 +1015,117 @@ function DataPanel({
   )
 }
 
+function QtyStepper({
+  value,
+  unit,
+  onChange,
+  onDecrease,
+  onIncrease,
+}: {
+  value: string
+  unit: string
+  onChange: (value: string) => void
+  onDecrease: () => void
+  onIncrease: () => void
+}) {
+  return (
+    <div className="grid grid-cols-[28px_minmax(0,1fr)_28px] items-center overflow-hidden rounded-lg border border-brand-100 bg-white">
+      <button
+        type="button"
+        onClick={onDecrease}
+        className="flex size-7 items-center justify-center text-stone-500 transition hover:bg-stone-50 hover:text-brand-700"
+        aria-label="Diminuir quantidade"
+      >
+        <Minus className="size-3.5" strokeWidth={2.2} />
+      </button>
+      <label className="relative min-w-0 border-x border-brand-100">
+        <input
+          type="number"
+          min="0"
+          step="0.01"
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+          className="h-7 w-full bg-white px-2 pr-7 text-center text-xs font-black tabular-nums text-stone-900 outline-none"
+          placeholder="Qtd"
+        />
+        <span className="pointer-events-none absolute right-1.5 top-1/2 -translate-y-1/2 text-[9px] font-bold uppercase text-stone-300">
+          {unit}
+        </span>
+      </label>
+      <button
+        type="button"
+        onClick={onIncrease}
+        className="flex size-7 items-center justify-center text-brand-700 transition hover:bg-brand-50"
+        aria-label="Aumentar quantidade"
+      >
+        <Plus className="size-3.5" strokeWidth={2.2} />
+      </button>
+    </div>
+  )
+}
+
+function IngredientList({
+  title,
+  subtitle,
+  search,
+  onSearchChange,
+  variant = 'available',
+  children,
+}: {
+  title: string
+  subtitle: string
+  search?: string
+  onSearchChange?: (value: string) => void
+  variant?: 'available' | 'cart'
+  children: ReactNode
+}) {
+  const compact = variant === 'cart'
+
+  return (
+    <section
+      className={[
+        'overflow-hidden rounded-xl border shadow-sm',
+        compact
+          ? 'border-stone-200 bg-white'
+          : 'border-stone-200 bg-white',
+      ].join(' ')}
+    >
+      <div
+        className={[
+          'border-b',
+          compact ? 'border-stone-100 px-4 py-3' : 'border-stone-100 p-5',
+        ].join(' ')}
+      >
+        <h2
+          className={[
+            'font-black text-stone-900',
+            compact ? 'text-sm' : 'text-base',
+          ].join(' ')}
+        >
+          {title}
+        </h2>
+        <p className={compact ? 'mt-0.5 text-[11px] text-stone-500' : 'mt-1 text-xs text-stone-400'}>
+          {subtitle}
+        </p>
+        {onSearchChange && (
+          <div className="relative mt-4">
+            <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-stone-400" />
+            <input
+              value={search}
+              onChange={(event) => onSearchChange(event.target.value)}
+              className={`${inputClass} pl-9`}
+              placeholder="Buscar ingrediente"
+            />
+          </div>
+        )}
+      </div>
+      <div className={compact ? 'max-h-[430px] overflow-auto' : 'max-h-[560px] overflow-auto'}>
+        {children}
+      </div>
+    </section>
+  )
+}
+
 function PedidosTable({
   pedidos,
   isLoading = false,
@@ -472,7 +1134,7 @@ function PedidosTable({
   showExpectedDate = true,
   pagination,
 }: {
-  pedidos: Pedido[]
+  pedidos: PedidoGroup[]
   isLoading?: boolean
   isError?: boolean
   emptyMessage?: string
@@ -480,6 +1142,7 @@ function PedidosTable({
   pagination?: React.ComponentProps<typeof DataTable>['pagination']
 }) {
   const headers = showExpectedDate ? pedidoHeaders : pedidoHeadersWithoutExpected
+  const rowOffset = pagination ? (pagination.page - 1) * pagination.pageSize : 0
 
   return (
     <DataTable
@@ -493,23 +1156,25 @@ function PedidosTable({
       pagination={pagination}
       embedded
     >
-      {pedidos.map((pedido) => (
+      {pedidos.map((pedido, index) => {
+        const displayId = `PED-${String(rowOffset + index + 1).padStart(4, '0')}`
+        return (
         <tr
-          key={pedido.id}
+          key={pedido.group_key}
           className="border-b border-stone-100 transition-colors last:border-0 hover:bg-stone-50"
         >
           <BodyCell strong>
             <Link
-              to="/pedidos/$id"
-              params={{ id: pedido.id }}
+              to="/pedidos/grupos/$supplierId/$orderDate"
+              params={{ supplierId: pedido.supplier_id, orderDate: pedido.order_date }}
               className="text-stone-900 transition hover:text-brand-600 hover:underline"
             >
-              {pedido.id}
+              {displayId}
             </Link>
           </BodyCell>
           <BodyCell>{fmt.date(pedido.order_date)}</BodyCell>
-          <BodyCell>{pedido.supplier_name}</BodyCell>
-          <BodyCell>{pedido.ingredient_name}</BodyCell>
+          <BodyCell strong>{pedido.supplier_name}</BodyCell>
+          <BodyCell align="right">{fmt.number(pedido.ingredients_count, 0)}</BodyCell>
           <BodyCell align="right">{fmt.number(pedido.items_qty, 2)}</BodyCell>
           <BodyCell align="right">{fmt.currency(pedido.total_value)}</BodyCell>
           <BodyCell align="center">
@@ -524,7 +1189,8 @@ function PedidosTable({
             </BodyCell>
           )}
         </tr>
-      ))}
+        )
+      })}
     </DataTable>
   )
 }
@@ -534,7 +1200,7 @@ function BodyCell({
   align = 'left',
   strong = false,
 }: {
-  children: React.ReactNode
+  children: ReactNode
   align?: 'left' | 'right' | 'center'
   strong?: boolean
 }) {
@@ -567,17 +1233,84 @@ function StatusPill({ status }: { status: string }) {
   )
 }
 
+function MetricPill({ label, value }: { label: string; value: string }) {
+  return (
+    <span className="rounded-full border border-stone-200 bg-stone-50 px-2.5 py-1 font-semibold text-stone-600">
+      {label}: {value}
+    </span>
+  )
+}
+
+function EmptyState({ children }: { children: ReactNode }) {
+  return <div className="px-4 py-16 text-center text-sm text-stone-400">{children}</div>
+}
+
+function EmptyPanel({ children }: { children: ReactNode }) {
+  return (
+    <section className="rounded-xl border border-stone-200 bg-white p-10 text-center text-sm text-stone-400 shadow-sm">
+      {children}
+    </section>
+  )
+}
+
+function buildReviewGroups(
+  items: PedidoRecommendationItem[],
+  supplierByIngredient: Record<string, string>,
+) {
+  const groups = new Map<
+    string,
+    {
+      supplierId: string
+      supplierName: string
+      expectedDate: string
+      totalValue: number
+      items: Array<{ ingredientName: string; qty: number; unit: string }>
+    }
+  >()
+
+  items.forEach((item) => {
+    const supplierId = supplierByIngredient[item.ingredient_id]
+    const option = item.options.find((candidate) => candidate.supplier_id === supplierId)
+    if (!option) return
+
+    const group = groups.get(supplierId) ?? {
+      supplierId,
+      supplierName: option.supplier_name,
+      expectedDate: option.expected_date,
+      totalValue: 0,
+      items: [],
+    }
+    if (new Date(`${option.expected_date}T00:00:00`) > new Date(`${group.expectedDate}T00:00:00`)) {
+      group.expectedDate = option.expected_date
+    }
+    group.totalValue += option.total_value
+    group.items.push({
+      ingredientName: item.ingredient_name,
+      qty: item.qty,
+      unit: item.unit,
+    })
+    groups.set(supplierId, group)
+  })
+
+  return Array.from(groups.values()).sort((a, b) =>
+    a.supplierName.localeCompare(b.supplierName),
+  )
+}
+
 function formatStatus(status: string) {
   const normalized = status.toLowerCase().replace(/_/g, ' ')
   if (normalized === 'em transito') return 'Em trânsito'
   return normalized.charAt(0).toUpperCase() + normalized.slice(1)
 }
 
+const inputClass =
+  'h-9 w-full rounded-lg border border-stone-200 bg-white px-3 text-sm text-stone-700 outline-none transition focus:border-brand-600 focus:ring-2 focus:ring-brand-600/20'
+
 const pedidoHeaders: DataTableHeader[] = [
   { key: 'id', content: 'Pedido' },
   { key: 'date', content: 'Data' },
   { key: 'supplier', content: 'Fornecedor' },
-  { key: 'ingredient', content: 'Produto' },
+  { key: 'ingredients', content: 'Ingredientes', align: 'right' },
   { key: 'qty', content: 'Quantidade', align: 'right' },
   { key: 'value', content: 'Valor total', align: 'right' },
   { key: 'status', content: 'Status', align: 'center' },
@@ -587,3 +1320,20 @@ const pedidoHeaders: DataTableHeader[] = [
 const pedidoHeadersWithoutExpected = pedidoHeaders.filter(
   (header) => header.key !== 'expected',
 )
+
+const pedidoItemHeaders: DataTableHeader[] = [
+  { key: 'ingredient', content: 'Ingrediente' },
+  { key: 'category', content: 'Categoria' },
+  { key: 'unit', content: 'Unidade' },
+  { key: 'qty', content: 'Qtd', align: 'right' },
+  { key: 'unit-price', content: 'Preço unitário', align: 'right' },
+  { key: 'total', content: 'Total', align: 'right' },
+]
+
+const reviewGroupHeaders: DataTableHeader[] = [
+  { key: 'supplier', content: 'Fornecedor' },
+  { key: 'items', content: 'Itens' },
+  { key: 'expected', content: 'Previsão' },
+  { key: 'preview', content: 'Ingredientes' },
+  { key: 'total', content: 'Total', align: 'right' },
+]

@@ -118,6 +118,7 @@ export function useAtualizarIngrediente() {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: QUERY_KEY })
+      qc.invalidateQueries({ queryKey: ['contagens'] })
     },
   })
 }

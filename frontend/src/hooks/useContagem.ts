@@ -10,6 +10,31 @@ let globalContagemLabel = ''
 let globalContagemPromise: Promise<{ id: number; label: string }> | null = null
 const API_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:8000'
 
+export function setContagemSession(contagem: { id: number; label: string }) {
+  globalContagemId = contagem.id
+  globalContagemLabel = contagem.label
+}
+
+export function hydrateContagemSession(
+  contagem: { id: number; label: string },
+  items: Array<{
+    ingrediente_id: string | number
+    quantidade_atual: number
+    quantidade_nova: number | null
+    status: string
+  }>,
+) {
+  resetContagem()
+  setContagemSession(contagem)
+  for (const item of items) {
+    const id = item.ingrediente_id as unknown as number
+    globalCounts.set(id, item.quantidade_nova ?? item.quantidade_atual)
+    if (item.status !== 'nao_contado') {
+      globalTouched.add(id)
+    }
+  }
+}
+
 export function resetContagem() {
   globalCounts.clear()
   globalTouched.clear()
@@ -32,8 +57,7 @@ export function useContagemSession() {
       return response.json() as Promise<{ id: number; label: string }>
     },
     onSuccess: (contagem) => {
-      globalContagemId = contagem.id
-      globalContagemLabel = contagem.label
+      setContagemSession(contagem)
       forceRender(value => value + 1)
     },
   })
@@ -57,15 +81,12 @@ export function useContagemSession() {
   }
 }
 
-// Pré-inicializa todos os itens: preenche contagens e marca os que já atingem o mínimo.
+// Pré-inicializa todos os itens com o estoque atual, mas mantém tudo pendente.
 // Idempotente — seguro chamar em qualquer render.
 export function initializeAll(allItems: StockItem[]) {
   for (const item of allItems) {
     if (!globalCounts.has(item.id)) {
       globalCounts.set(item.id, item.currentQty)
-      if (item.currentQty >= item.minQty) {
-        globalTouched.add(item.id)
-      }
     }
   }
 }
@@ -98,20 +119,16 @@ export function useContagem(items: StockItem[]) {
   const [, forceRender] = useState(0)
 
   // Pré-preenche com o estoque atual na primeira vez que o item aparece.
-  // Itens acima do mínimo são marcados automaticamente como contados.
+  // A confirmação explícita é necessária mesmo quando o valor não muda.
   for (const item of items) {
     if (!globalCounts.has(item.id)) {
       globalCounts.set(item.id, item.currentQty)
-      if (item.currentQty >= item.minQty) {
-        globalTouched.add(item.id)
-      }
     }
   }
 
   function commit(id: number, next: number) {
     globalCounts.set(id, next)
-    if (next === 0) globalTouched.delete(id)
-    else globalTouched.add(id)
+    globalTouched.add(id)
     forceRender(n => n + 1)
   }
 

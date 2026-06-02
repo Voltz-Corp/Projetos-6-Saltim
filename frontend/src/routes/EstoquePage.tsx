@@ -58,7 +58,7 @@ const columns = [
     header: 'Insumo',
     cell: (i) => (
       <Link
-        to="/estoque/contagem/$index"
+        to="/estoque/contagem/atual/$index"
         params={{ index: String(CATEGORIES.indexOf(i.row.original.category)) }}
         className="font-medium text-stone-900 hover:text-brand-600 hover:underline transition-colors"
       >
@@ -260,20 +260,6 @@ export function EstoquePage() {
             className="pl-9 pr-4 py-2 text-sm border border-stone-200 rounded-lg bg-white outline-none focus:border-brand-600 w-52 transition"
           />
         </div>
-
-        <button
-          onClick={() => navigate({ to: '/estoque/contagem' })}
-          className="flex items-center gap-2 px-4 py-2 bg-brand-600 text-white rounded-lg text-sm font-semibold hover:bg-brand-700 transition-colors flex-shrink-0"
-        >
-          <svg
-            viewBox="0 0 20 20"
-            className="size-4 flex-shrink-0"
-            fill="currentColor"
-          >
-            <path d="M6 4l11 6-11 6V4z" />
-          </svg>
-          Iniciar contagem
-        </button>
       </div>
 
       <FilterDrawer

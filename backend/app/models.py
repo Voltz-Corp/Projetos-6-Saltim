@@ -10,6 +10,7 @@ from sqlalchemy import (
     Integer,
     Numeric,
     String,
+    UniqueConstraint,
 )
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -329,6 +330,7 @@ class Contagem(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     label = Column(String, nullable=False)
     status = Column(String, nullable=False, default="em_andamento", index=True)
+    estoque_snapshot_data = Column(Date, index=True)
     criada_em = Column(
         DateTime(timezone=True), server_default=func.now(), nullable=False, index=True
     )
@@ -340,6 +342,7 @@ class Contagem(Base):
 class ContagemLog(Base):
     __tablename__ = "contagem_log"
     __table_args__ = (
+        UniqueConstraint("contagem_id", "ingrediente_id", name="uq_contagem_log_item"),
         Index("idx_contagem_log_contagem_categoria", "contagem_id", "category_id"),
         Index("idx_contagem_log_ingredient", "ingrediente_id"),
     )
@@ -347,6 +350,9 @@ class ContagemLog(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     contagem_id = Column(Integer, ForeignKey("contagens.id"), nullable=False)
     ingrediente_id = Column(String, ForeignKey("ingredientes.id"), nullable=False)
+    estoque_id = Column(String, ForeignKey("estoques.id", name="fk_contagem_log_estoque"))
+    estoque_data = Column(Date)
+    estoque_quantidade = Column(Numeric(14, 4))
     category_id = Column(String, ForeignKey("categorias.id"), nullable=False)
     categoria = Column(String, nullable=False)
     quantidade_anterior = Column(Numeric(14, 4), nullable=False)
@@ -358,3 +364,4 @@ class ContagemLog(Base):
 
     contagem = relationship("Contagem", back_populates="logs")
     ingrediente = relationship("Ingrediente")
+    estoque = relationship("Estoque")

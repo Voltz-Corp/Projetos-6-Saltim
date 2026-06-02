@@ -57,8 +57,52 @@ class ContagemOut(BaseModel):
     id: int
     label: str
     status: str
+    estoque_snapshot_data: Optional[date] = None
     criada_em: datetime
     finalizada_em: Optional[datetime] = None
+
+
+class ContagemListItem(ContagemOut):
+    total_itens: int
+    itens_contados: int
+    itens_alterados: int
+    itens_sem_alteracao: int
+    itens_nao_contados: int
+
+
+class ContagemDetalheItem(BaseModel):
+    ingrediente_id: str
+    ingrediente_nome: str
+    unit: str
+    quantidade_atual: float
+    estoque_id: Optional[str] = None
+    estoque_data: Optional[date] = None
+    estoque_quantidade: Optional[float] = None
+    quantidade_anterior: Optional[float] = None
+    quantidade_nova: Optional[float] = None
+    delta: Optional[float] = None
+    status: str
+    contado_em: Optional[datetime] = None
+
+
+class ContagemDetalheCategoria(BaseModel):
+    category_id: str
+    categoria: str
+    total_itens: int
+    itens_contados: int
+    itens_alterados: int
+    itens_sem_alteracao: int
+    itens_nao_contados: int
+    items: List[ContagemDetalheItem]
+
+
+class ContagemDetalheOut(ContagemOut):
+    total_itens: int
+    itens_contados: int
+    itens_alterados: int
+    itens_sem_alteracao: int
+    itens_nao_contados: int
+    categorias: List[ContagemDetalheCategoria]
 
 
 class EstoquePaginado(BaseModel):
@@ -187,8 +231,20 @@ class PedidoOut(BaseModel):
     expected_date: date
 
 
+class PedidoGroupOut(BaseModel):
+    group_key: str
+    supplier_id: str
+    supplier_name: str
+    order_date: date
+    expected_date: date
+    status: str
+    ingredients_count: int
+    items_qty: float
+    total_value: float
+
+
 class PedidoPaginado(BaseModel):
-    items: List[PedidoOut]
+    items: List[PedidoGroupOut]
     total: int
     page: int
     page_size: int
@@ -207,6 +263,7 @@ class PedidoDetailItem(BaseModel):
 
 class PedidoDetailResponse(BaseModel):
     id: str
+    group_key: Optional[str] = None
     supplier_id: str
     supplier_name: str
     order_date: date
@@ -215,6 +272,83 @@ class PedidoDetailResponse(BaseModel):
     items_qty: float
     total_value: float
     items: List[PedidoDetailItem]
+
+
+class PedidoRequestItem(BaseModel):
+    ingredient_id: str
+    qty: float
+
+    @field_validator("qty")
+    @classmethod
+    def validate_qty(cls, value: float) -> float:
+        if value <= 0:
+            raise ValueError("Quantidade deve ser maior que zero")
+        return value
+
+
+class PedidoCreateItem(PedidoRequestItem):
+    supplier_id: str
+
+
+class PedidoRecommendationRequest(BaseModel):
+    items: List[PedidoRequestItem]
+
+
+class SupplierOption(BaseModel):
+    supplier_id: str
+    supplier_name: str
+    unit_price: float
+    discount_percent: float
+    min_to_discount: float
+    discount_applied: bool
+    effective_unit_price: float
+    total_value: float
+    delivery_time_days: int
+    expected_date: date
+    detractors: List[str] = []
+    recommended: bool = False
+
+
+class PedidoRecommendationItem(BaseModel):
+    ingredient_id: str
+    ingredient_name: str
+    category: str
+    unit: str
+    qty: float
+    recommended_supplier_id: Optional[str] = None
+    options: List[SupplierOption]
+
+
+class RecommendedOrderItem(BaseModel):
+    ingredient_id: str
+    ingredient_name: str
+    qty: float
+    unit: str
+    total_value: float
+    expected_date: date
+
+
+class RecommendedOrderGroup(BaseModel):
+    supplier_id: str
+    supplier_name: str
+    expected_date: date
+    total_value: float
+    items: List[RecommendedOrderItem]
+
+
+class PedidoRecommendationResponse(BaseModel):
+    items: List[PedidoRecommendationItem]
+    groups: List[RecommendedOrderGroup]
+
+
+class PedidoCreateRequest(BaseModel):
+    items: List[PedidoCreateItem]
+
+
+class PedidoCreateResponse(BaseModel):
+    groups: List[PedidoGroupOut]
+    created: int
+    updated: int
 
 
 class DashboardRankItem(BaseModel):

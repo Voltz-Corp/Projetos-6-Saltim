@@ -3,6 +3,8 @@
 
 DROP SCHEMA IF EXISTS dados CASCADE;
 DROP TABLE IF EXISTS
+    contagem_log,
+    contagens,
     log_contagem,
     resumo_mensal_vendas,
     resumo_mensal_estoques,
@@ -33,6 +35,31 @@ CREATE TABLE ingredientes (
     name TEXT NOT NULL,
     unit TEXT NOT NULL,
     category_id TEXT NOT NULL REFERENCES categorias (id)
+);
+
+CREATE TABLE contagens (
+    id BIGSERIAL PRIMARY KEY,
+    label TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'em_andamento',
+    estoque_snapshot_data DATE,
+    criada_em TIMESTAMPTZ NOT NULL DEFAULT now(),
+    finalizada_em TIMESTAMPTZ
+);
+
+CREATE TABLE contagem_log (
+    id BIGSERIAL PRIMARY KEY,
+    contagem_id BIGINT NOT NULL REFERENCES contagens (id),
+    ingrediente_id TEXT NOT NULL REFERENCES ingredientes (id),
+    estoque_id TEXT,
+    estoque_data DATE,
+    estoque_quantidade NUMERIC(14, 4),
+    category_id TEXT NOT NULL REFERENCES categorias (id),
+    categoria TEXT NOT NULL,
+    quantidade_anterior NUMERIC(14, 4) NOT NULL,
+    quantidade_nova NUMERIC(14, 4) NOT NULL,
+    delta NUMERIC(14, 4) NOT NULL,
+    criado_em TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (contagem_id, ingrediente_id)
 );
 
 CREATE TABLE estoque_atual (
@@ -185,6 +212,11 @@ COPY estoques (id, date_time, ingredient_id, quantity)
 FROM '/data/estoques.csv'
 WITH (FORMAT csv, HEADER true, NULL '', ENCODING 'UTF8');
 
+ALTER TABLE contagem_log
+    ADD CONSTRAINT fk_contagem_log_estoque
+    FOREIGN KEY (estoque_id)
+    REFERENCES estoques (id);
+
 COPY feriados_recife (data, nome, tipo)
 FROM '/data/feriados_recife.csv'
 WITH (FORMAT csv, HEADER true, NULL '', ENCODING 'UTF8');
@@ -294,6 +326,24 @@ WITH (FORMAT csv, HEADER true, NULL '', ENCODING 'UTF8');
 CREATE INDEX idx_ingredientes_category_id
     ON ingredientes (category_id);
 
+CREATE INDEX idx_contagens_criada_em
+    ON contagens (criada_em);
+
+CREATE INDEX idx_contagens_status
+    ON contagens (status);
+
+CREATE INDEX idx_contagens_estoque_snapshot_data
+    ON contagens (estoque_snapshot_data);
+
+CREATE INDEX idx_contagem_log_contagem_categoria
+    ON contagem_log (contagem_id, category_id);
+
+CREATE INDEX idx_contagem_log_ingredient
+    ON contagem_log (ingrediente_id);
+
+CREATE INDEX idx_contagem_log_estoque
+    ON contagem_log (estoque_id);
+
 CREATE INDEX idx_estoque_atual_ingrediente
     ON estoque_atual (ingrediente);
 
@@ -323,6 +373,8 @@ CREATE INDEX idx_pedidos_log_ingredient_date
 
 ANALYZE categorias;
 ANALYZE ingredientes;
+ANALYZE contagens;
+ANALYZE contagem_log;
 ANALYZE estoque_atual;
 ANALYZE estoques;
 ANALYZE feriados_recife;
