@@ -1,8 +1,8 @@
 import re
 
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from datetime import date, datetime
-from typing import Optional, List
+from typing import Any, Optional, List
 
 
 class IngredienteOut(BaseModel):
@@ -16,6 +16,10 @@ class IngredienteOut(BaseModel):
     category: str
     min_qty: float
     current_qty: float
+    status: str = "OK"
+    criticidade_predita: Optional[str] = None
+    criticidade_report_id: Optional[int] = None
+    criticidade_reference_date: Optional[date] = None
 
 
 class AtualizacaoItem(BaseModel):
@@ -56,6 +60,7 @@ class ContagemOut(BaseModel):
 
     id: int
     label: str
+    data_contagem: date
     status: str
     estoque_snapshot_data: Optional[date] = None
     criada_em: datetime
@@ -111,6 +116,60 @@ class EstoquePaginado(BaseModel):
     page: int
     page_size: int
     total_pages: int
+
+
+class CriticidadeReportRunOut(BaseModel):
+    id: Optional[int] = None
+    reference_date: Optional[date] = None
+    generated_at: Optional[datetime] = None
+    status: str
+    contagem_id: Optional[int] = None
+    contagem_status: Optional[str] = None
+    model_name: Optional[str] = None
+    model_uri: Optional[str] = None
+    model_run_id: Optional[str] = None
+    total_items: int = 0
+    ok_count: int = 0
+    alert_count: int = 0
+    alert_rate: float = 0.0
+    metrics: dict[str, Any] = Field(default_factory=dict)
+    stability: dict[str, Any] = Field(default_factory=dict)
+    error_message: Optional[str] = None
+
+
+class CriticidadeReportItemOut(BaseModel):
+    ingredient_id: str
+    ingredient_name: str
+    category_id: Optional[str] = None
+    category: Optional[str] = None
+    unit: Optional[str] = None
+    estoque_atual: float
+    stock_position: float
+    baseline_threshold: float
+    cobertura_estoque_pct: float
+    limiar_alerta_predito_pct: float
+    limiar_critico_predito_pct: float
+    criticidade_predita: str
+    necessita_compra: bool
+    score_alerta_compra: float
+    rank_position: int
+
+
+class CriticidadeReportCategoryOut(BaseModel):
+    category: str
+    total_items: int
+    ok_count: int
+    alert_count: int
+    alert_rate: float
+
+
+class CriticidadeReportLatestOut(BaseModel):
+    run: CriticidadeReportRunOut
+    distribution: list[dict[str, Any]]
+    categories: list[CriticidadeReportCategoryOut]
+    critical_items: list[CriticidadeReportItemOut]
+    examples_critical: list[CriticidadeReportItemOut]
+    examples_ok: list[CriticidadeReportItemOut]
 
 
 class AtualizacaoIngrediente(BaseModel):

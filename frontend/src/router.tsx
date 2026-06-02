@@ -6,6 +6,7 @@ import { contagemRoute } from './routes/ContagemPage'
 import { contagemAtualRoute } from './routes/ContagemAtualPage'
 import { contagemCategoriaRoute } from './routes/ContagemCategoriaPage'
 import { contagemHistoricoDetalheRoute } from './routes/ContagemHistoricoDetalhePage'
+import { criticidadeRoute } from './routes/CriticidadePage'
 import { ingredienteEditRoute } from './routes/IngredienteEditPage'
 import { fornecedorNewRoute } from './routes/FornecedorNewPage'
 import { fornecedorProfileRoute, fornecedoresRoute } from './routes/FornecedoresPage'
@@ -18,6 +19,7 @@ const routeTree = rootRoute.addChildren([
   contagemAtualRoute,
   contagemCategoriaRoute,
   contagemHistoricoDetalheRoute,
+  criticidadeRoute,
   ingredienteEditRoute,
   fornecedoresRoute,
   fornecedorNewRoute,

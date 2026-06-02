@@ -7,16 +7,30 @@ const globalCounts = new Map<number, number>()
 const globalTouched = new Set<number>()
 let globalContagemId: number | null = null
 let globalContagemLabel = ''
-let globalContagemPromise: Promise<{ id: number; label: string }> | null = null
+let globalContagemDate = ''
+let globalContagemStatus = ''
+let globalContagemPromise: Promise<{
+  id: number
+  label: string
+  data_contagem?: string
+  status?: string
+}> | null = null
 const API_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:8000'
 
-export function setContagemSession(contagem: { id: number; label: string }) {
+export function setContagemSession(contagem: {
+  id: number
+  label: string
+  data_contagem?: string
+  status?: string
+}) {
   globalContagemId = contagem.id
   globalContagemLabel = contagem.label
+  globalContagemDate = contagem.data_contagem ?? ''
+  globalContagemStatus = contagem.status ?? ''
 }
 
 export function hydrateContagemSession(
-  contagem: { id: number; label: string },
+  contagem: { id: number; label: string; data_contagem?: string; status?: string },
   items: Array<{
     ingrediente_id: string | number
     quantidade_atual: number
@@ -40,6 +54,8 @@ export function resetContagem() {
   globalTouched.clear()
   globalContagemId = null
   globalContagemLabel = ''
+  globalContagemDate = ''
+  globalContagemStatus = ''
   globalContagemPromise = null
 }
 
@@ -54,7 +70,12 @@ export function useContagemSession() {
         body: JSON.stringify({}),
       })
       if (!response.ok) throw new Error('Falha ao criar contagem')
-      return response.json() as Promise<{ id: number; label: string }>
+      return response.json() as Promise<{
+        id: number
+        label: string
+        data_contagem?: string
+        status?: string
+      }>
     },
     onSuccess: (contagem) => {
       setContagemSession(contagem)
@@ -76,6 +97,8 @@ export function useContagemSession() {
   return {
     contagemId: globalContagemId,
     label: globalContagemLabel,
+    dataContagem: globalContagemDate,
+    status: globalContagemStatus,
     isCreating: mutation.isPending,
     ensure,
   }

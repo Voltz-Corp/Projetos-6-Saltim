@@ -9,6 +9,7 @@ export type ContagemItemStatus = 'nao_contado' | 'sem_alteracao' | 'alterado'
 export interface ContagemBase {
   id: number
   label: string
+  data_contagem: string
   status: ContagemStatus
   estoque_snapshot_data: string | null
   criada_em: string
@@ -75,6 +76,19 @@ export function useContagens() {
       ),
     staleTime: 15_000,
   })
+}
+
+export function todayISO() {
+  const now = new Date()
+  const year = now.getFullYear()
+  const month = String(now.getMonth() + 1).padStart(2, '0')
+  const day = String(now.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+export function getContagemHoje(contagens: ContagemResumo[]) {
+  const today = todayISO()
+  return contagens.find((contagem) => contagem.data_contagem === today)
 }
 
 export function useContagemDetalhe(id: number | string) {

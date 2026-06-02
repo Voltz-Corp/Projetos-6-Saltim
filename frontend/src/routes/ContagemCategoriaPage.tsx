@@ -1,15 +1,16 @@
-import { useState, useMemo } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { createRoute, useNavigate } from '@tanstack/react-router';
 import { rootRoute } from './Root';
-import { useEstoque, useAtualizarEstoque } from '../hooks/useEstoque';
+import { useEstoque, useAtualizarEstoque, type StockStatus } from '../hooks/useEstoque';
 import {
   useContagem,
   getGlobalProgress,
   buildAllUpdates,
+  hydrateContagemSession,
   initializeAll,
   useContagemSession,
 } from '../hooks/useContagem';
-import { useFinalizarContagem } from '../hooks/useContagens';
+import { fetchContagemDetalhe, useFinalizarContagem } from '../hooks/useContagens';
 import { CATEGORIES, type Category } from '../data/ingredients';
 import { cn } from '../lib/cn';
 
@@ -155,6 +156,23 @@ export function ContagemCategoriaPage() {
   const atualizar = useAtualizarEstoque();
   const contagem = useContagemSession();
   const finalizar = useFinalizarContagem();
+  const [, forceRender] = useState(0);
+
+  useEffect(() => {
+    let active = true;
+    async function loadContagemHoje() {
+      const contagemId = await contagem.ensure();
+      const detalhe = await fetchContagemDetalhe(contagemId);
+      if (active) {
+        hydrateContagemSession(detalhe, detalhe.categorias.flatMap((categoria) => categoria.items));
+        forceRender((value) => value + 1);
+      }
+    }
+    loadContagemHoje();
+    return () => {
+      active = false;
+    };
+  }, []);
 
   // Garante que o progresso global esteja correto mesmo entrando direto na categoria
   initializeAll(stock);
@@ -207,10 +225,12 @@ export function ContagemCategoriaPage() {
       const contagemId = contagem.contagemId ?? await contagem.ensure();
       await atualizar.mutateAsync({ updates, contagemId });
     }
-    if (isGlobalDone || isLastCategory) {
+    if (isGlobalDone) {
       const contagemId = contagem.contagemId ?? await contagem.ensure();
       await finalizar.mutateAsync(contagemId);
       navigate({ to: '/estoque', search: { counted: 'Contagem finalizada' } });
+    } else if (isLastCategory) {
+      navigate({ to: '/estoque/contagem/atual' });
     } else {
       navigate({
         to: '/estoque/contagem/atual/$index',
@@ -244,7 +264,7 @@ export function ContagemCategoriaPage() {
   } else if (isCategoryDone && !isLastCategory) {
     buttonLabel = `Próxima: ${CATEGORIES[categoryIndex + 1]} →`;
   } else if (isLastCategory) {
-    buttonLabel = 'Finalizar contagem';
+    buttonLabel = `Salvar e revisar pendentes (${globalProgress.totalCount - globalProgress.touchedCount})`;
   } else {
     buttonLabel = `Salvar e continuar → (${remaining} restante${remaining !== 1 ? 's' : ''})`;
   }
@@ -370,6 +390,7 @@ interface ItemCardProps {
     minQty: number;
     currentQty: number;
     category: Category;
+    status: StockStatus;
   };
   value: number;
   onAdjust: (id: number, delta: number) => void;
@@ -389,7 +410,8 @@ function ItemCard({
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState('');
 
-  const isCritical = done && value < item.minQty;
+  const displayStatus: StockStatus = done && value <= 0 ? 'Esgotado' : item.status;
+  const isCritical = displayStatus === 'Crítico' || displayStatus === 'Esgotado';
   const step = getStep(item.unit);
 
   // Deficit: how far below minimum (based on counted value when counted, else current stock)
@@ -425,9 +447,9 @@ function ItemCard({
           <div className="text-sm font-semibold text-stone-900 leading-snug line-clamp-2">
             {item.name}
           </div>
-          {isCritical && done && (
+          {isCritical && (
             <span className="inline-flex items-center gap-1 mt-1 text-xs font-semibold text-red-600">
-              Crítico
+              {displayStatus}
             </span>
           )}
         </div>

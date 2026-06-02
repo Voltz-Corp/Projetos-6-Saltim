@@ -8,6 +8,7 @@ from sqlalchemy import (
     ForeignKeyConstraint,
     Index,
     Integer,
+    JSON,
     Numeric,
     String,
     UniqueConstraint,
@@ -326,9 +327,11 @@ class LogContagem(Base):
 
 class Contagem(Base):
     __tablename__ = "contagens"
+    __table_args__ = (Index("uq_contagens_data_contagem", "data_contagem", unique=True),)
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     label = Column(String, nullable=False)
+    data_contagem = Column(Date, nullable=False, index=True)
     status = Column(String, nullable=False, default="em_andamento", index=True)
     estoque_snapshot_data = Column(Date, index=True)
     criada_em = Column(
@@ -365,3 +368,64 @@ class ContagemLog(Base):
     contagem = relationship("Contagem", back_populates="logs")
     ingrediente = relationship("Ingrediente")
     estoque = relationship("Estoque")
+
+
+class CriticalityReportRun(Base):
+    __tablename__ = "criticidade_report_runs"
+    __table_args__ = (
+        Index("idx_criticidade_report_runs_reference_date", "reference_date"),
+        Index("idx_criticidade_report_runs_generated_at", "generated_at"),
+        {"schema": "ml"},
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    reference_date = Column(Date, nullable=False)
+    generated_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    status = Column(String, nullable=False, index=True)
+    contagem_id = Column(Integer)
+    contagem_status = Column(String)
+    model_name = Column(String, nullable=False)
+    model_uri = Column(String, nullable=False)
+    model_run_id = Column(String)
+    total_items = Column(Integer, nullable=False, default=0)
+    ok_count = Column(Integer, nullable=False, default=0)
+    alert_count = Column(Integer, nullable=False, default=0)
+    alert_rate = Column(Float, nullable=False, default=0.0)
+    metrics = Column(JSON)
+    stability = Column(JSON)
+    error_message = Column(String)
+
+    items = relationship(
+        "CriticalityReportItem",
+        back_populates="run",
+        cascade="all, delete-orphan",
+    )
+
+
+class CriticalityReportItem(Base):
+    __tablename__ = "criticidade_report_items"
+    __table_args__ = (
+        Index("idx_criticidade_report_items_run_rank", "run_id", "rank_position"),
+        Index("idx_criticidade_report_items_run_criticality", "run_id", "criticidade_predita"),
+        {"schema": "ml"},
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    run_id = Column(Integer, ForeignKey("ml.criticidade_report_runs.id", ondelete="CASCADE"), nullable=False)
+    ingredient_id = Column(String, nullable=False)
+    ingredient_name = Column(String, nullable=False)
+    category_id = Column(String)
+    category = Column(String)
+    unit = Column(String)
+    estoque_atual = Column(Float, nullable=False, default=0.0)
+    stock_position = Column(Float, nullable=False, default=0.0)
+    baseline_threshold = Column(Float, nullable=False, default=0.0)
+    cobertura_estoque_pct = Column(Float, nullable=False, default=0.0)
+    limiar_alerta_predito_pct = Column(Float, nullable=False, default=0.0)
+    limiar_critico_predito_pct = Column(Float, nullable=False, default=0.0)
+    criticidade_predita = Column(String, nullable=False)
+    necessita_compra = Column(Integer, nullable=False, default=0)
+    score_alerta_compra = Column(Float, nullable=False, default=0.0)
+    rank_position = Column(Integer, nullable=False)
+
+    run = relationship("CriticalityReportRun", back_populates="items")

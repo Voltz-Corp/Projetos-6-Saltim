@@ -1,9 +1,16 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { createRoute, useNavigate } from '@tanstack/react-router'
 import { rootRoute } from './Root'
 import { useEstoque, getStockStatus } from '../hooks/useEstoque'
 import { CATEGORIES, type Category } from '../data/ingredients'
-import { getGlobalProgress, isCategoryComplete, initializeAll, useContagemSession } from '../hooks/useContagem'
+import { fetchContagemDetalhe } from '../hooks/useContagens'
+import {
+  getGlobalProgress,
+  hydrateContagemSession,
+  isCategoryComplete,
+  initializeAll,
+  useContagemSession,
+} from '../hooks/useContagem'
 import { cn } from '../lib/cn'
 
 export const contagemAtualRoute = createRoute({
@@ -16,9 +23,22 @@ export function ContagemAtualPage() {
   const navigate = useNavigate()
   const { data: stock = [] } = useEstoque()
   const contagem = useContagemSession()
+  const [, forceRender] = useState(0)
 
   useEffect(() => {
-    contagem.ensure()
+    let active = true
+    async function loadContagemHoje() {
+      const contagemId = await contagem.ensure()
+      const detalhe = await fetchContagemDetalhe(contagemId)
+      if (active) {
+        hydrateContagemSession(detalhe, detalhe.categorias.flatMap((categoria) => categoria.items))
+        forceRender((value) => value + 1)
+      }
+    }
+    loadContagemHoje()
+    return () => {
+      active = false
+    }
   }, [])
 
   initializeAll(stock)
@@ -46,7 +66,7 @@ export function ContagemAtualPage() {
           </svg>
         </button>
         <div className="flex-1">
-          <h1 className="text-xl font-semibold text-stone-900">Nova contagem</h1>
+          <h1 className="text-xl font-semibold text-stone-900">Contagem de hoje</h1>
           <p className="text-xs text-stone-400 mt-0.5">
             {contagem.label || 'Criando contagem...'} · selecione a categoria para começar
           </p>

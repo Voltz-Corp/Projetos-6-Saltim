@@ -148,7 +148,6 @@ const columns = [
 const PAGE_SIZE_OPTIONS = [25, 50, 100];
 const STATUS_OPTIONS: StockStatusFilter[] = [
   'OK',
-  'Atenção',
   'Crítico',
   'Esgotado',
 ];
@@ -332,7 +331,6 @@ export function EstoquePage() {
                 className={cn(
                   'border-b border-stone-100 hover:bg-stone-50 transition-colors',
                   s === 'Crítico' && 'border-l-2 border-l-red-400',
-                  s === 'Atenção' && 'border-l-2 border-l-amber-400',
                   s === 'Esgotado' && 'opacity-60',
                 )}
               >

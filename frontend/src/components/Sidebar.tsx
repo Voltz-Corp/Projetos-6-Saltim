@@ -1,5 +1,5 @@
 import { Link } from '@tanstack/react-router';
-import { ClipboardList, LayoutDashboard, Package, PackageCheck, Truck } from 'lucide-react';
+import { Activity, ClipboardList, LayoutDashboard, Package, PackageCheck, Truck } from 'lucide-react';
 import type { ComponentType } from 'react';
 
 interface NavItemProps {
@@ -55,6 +55,7 @@ export function Sidebar() {
         <NavItem to="/fornecedores" icon={Truck} label="Fornecedores" />
         <NavItem to="/pedidos" icon={PackageCheck} label="Pedidos" />
         <NavItem to="/estoque/contagem" icon={ClipboardList} label="Contagem" />
+        <NavItem to="/ml/criticidade" icon={Activity} label="Criticidade" />
       </nav>
     </aside>
   );

@@ -13,6 +13,8 @@ from .models import (
     Categoria,
     Contagem,
     ContagemLog,
+    CriticalityReportItem,
+    CriticalityReportRun,
     Estoque,
     EstoqueAtual,
     FeriadoRecife,
@@ -34,6 +36,10 @@ from .schemas import (
     ContagemDetalheOut,
     ContagemListItem,
     ContagemOut,
+    CriticidadeReportCategoryOut,
+    CriticidadeReportItemOut,
+    CriticidadeReportLatestOut,
+    CriticidadeReportRunOut,
     EstoquePaginado,
     FornecedorCreate,
     FornecedorKpis,
@@ -87,6 +93,7 @@ DASHBOARD_STOCK_UNITS = ("KG", "UND", "L")
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     run_sql_loaders()
+    ensure_ml_schema()
     Base.metadata.create_all(bind=engine)
     ensure_contagem_estoque_schema()
     yield
@@ -108,8 +115,36 @@ app.add_middleware(
 # ---------------------------------------------------------------------------
 
 
+def ensure_ml_schema() -> None:
+    raw_conn = engine.raw_connection()
+    try:
+        with raw_conn.cursor() as cursor:
+            cursor.execute("CREATE SCHEMA IF NOT EXISTS ml")
+        raw_conn.commit()
+    except Exception:
+        raw_conn.rollback()
+        raise
+    finally:
+        raw_conn.close()
+
+
 def ensure_contagem_estoque_schema() -> None:
     statements = (
+        "ALTER TABLE contagens ADD COLUMN IF NOT EXISTS data_contagem DATE",
+        (
+            "UPDATE contagens "
+            "SET data_contagem = date(criada_em) "
+            "WHERE data_contagem IS NULL"
+        ),
+        "ALTER TABLE contagens ALTER COLUMN data_contagem SET NOT NULL",
+        (
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_contagens_data_contagem "
+            "ON contagens (data_contagem)"
+        ),
+        (
+            "CREATE INDEX IF NOT EXISTS idx_contagens_data_contagem "
+            "ON contagens (data_contagem)"
+        ),
         "ALTER TABLE contagens ADD COLUMN IF NOT EXISTS estoque_snapshot_data DATE",
         "ALTER TABLE contagem_log ADD COLUMN IF NOT EXISTS estoque_id TEXT",
         "ALTER TABLE contagem_log ADD COLUMN IF NOT EXISTS estoque_data DATE",
@@ -239,6 +274,7 @@ def _contagem_list_item(
     return ContagemListItem(
         id=contagem.id,
         label=contagem.label,
+        data_contagem=contagem.data_contagem,
         status=contagem.status,
         estoque_snapshot_data=contagem.estoque_snapshot_data,
         criada_em=contagem.criada_em,
@@ -249,11 +285,11 @@ def _contagem_list_item(
 
 @app.post("/api/contagens", response_model=ContagemOut)
 def create_contagem(payload: ContagemCreate, db: Session = Depends(get_db)):
-    today = date.today().strftime("%d/%m/%Y")
-    label = payload.label or f"Contagem {today}"
+    today = date.today()
+    label = payload.label or f"Contagem {today.strftime('%d/%m/%Y')}"
     existing = (
         db.query(Contagem)
-        .filter(Contagem.label == label)
+        .filter(Contagem.data_contagem == today)
         .order_by(Contagem.id.desc())
         .first()
     )
@@ -273,6 +309,7 @@ def create_contagem(payload: ContagemCreate, db: Session = Depends(get_db)):
 
     contagem = Contagem(
         label=label,
+        data_contagem=today,
         status="em_andamento",
         estoque_snapshot_data=_resolve_estoque_snapshot_data(db),
     )
@@ -397,6 +434,7 @@ def get_contagem_detalhe(contagem_id: int, db: Session = Depends(get_db)):
     return ContagemDetalheOut(
         id=contagem.id,
         label=contagem.label,
+        data_contagem=contagem.data_contagem,
         status=contagem.status,
         estoque_snapshot_data=contagem.estoque_snapshot_data,
         criada_em=contagem.criada_em,
@@ -411,6 +449,15 @@ def finalizar_contagem(contagem_id: int, db: Session = Depends(get_db)):
     contagem = db.query(Contagem).filter(Contagem.id == contagem_id).first()
     if contagem is None:
         raise HTTPException(status_code=404, detail="Contagem não encontrada")
+    counts = _contagem_counts(contagem, db)
+    if counts["itens_nao_contados"] > 0:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "A contagem só pode ser finalizada quando todos os itens "
+                "compráveis forem contados."
+            ),
+        )
     contagem.status = "finalizada"
     contagem.finalizada_em = datetime.now()
     db.commit()
@@ -427,6 +474,163 @@ def _compute_status(item: Ingrediente) -> str:
     if qty < min_qty * 1.5:
         return "Atenção"
     return "OK"
+
+
+def _latest_criticidade_run(db: Session) -> Optional[CriticalityReportRun]:
+    return (
+        db.query(CriticalityReportRun)
+        .filter(CriticalityReportRun.status == "success")
+        .filter(CriticalityReportRun.total_items > 0)
+        .order_by(CriticalityReportRun.generated_at.desc(), CriticalityReportRun.id.desc())
+        .first()
+    )
+
+
+def _latest_criticidade_by_ingredient(db: Session) -> tuple[Optional[CriticalityReportRun], dict[str, CriticalityReportItem]]:
+    run = _latest_criticidade_run(db)
+    if run is None:
+        return None, {}
+    items = (
+        db.query(CriticalityReportItem)
+        .filter(CriticalityReportItem.run_id == run.id)
+        .all()
+    )
+    return run, {item.ingredient_id: item for item in items}
+
+
+def _model_stock_status(ingrediente: Ingrediente, criticidade: Optional[CriticalityReportItem]) -> str:
+    if float(ingrediente.current_qty) <= 0:
+        return "Esgotado"
+    if criticidade is not None and bool(criticidade.necessita_compra):
+        return "Crítico"
+    return "OK"
+
+
+def _ingrediente_out(
+    ingrediente: Ingrediente,
+    criticidade_run: Optional[CriticalityReportRun],
+    criticidade_by_ingredient: dict[str, CriticalityReportItem],
+) -> IngredienteOut:
+    criticidade = criticidade_by_ingredient.get(ingrediente.id)
+    return IngredienteOut(
+        id=ingrediente.id,
+        name=ingrediente.name,
+        unit=ingrediente.unit,
+        category_id=ingrediente.category_id,
+        price=float(ingrediente.price),
+        category=ingrediente.category,
+        min_qty=float(ingrediente.min_qty),
+        current_qty=float(ingrediente.current_qty),
+        status=_model_stock_status(ingrediente, criticidade),
+        criticidade_predita=criticidade.criticidade_predita if criticidade else None,
+        criticidade_report_id=criticidade_run.id if criticidade_run else None,
+        criticidade_reference_date=criticidade_run.reference_date if criticidade_run else None,
+    )
+
+
+def _criticidade_item_out(item: CriticalityReportItem) -> CriticidadeReportItemOut:
+    return CriticidadeReportItemOut(
+        ingredient_id=item.ingredient_id,
+        ingredient_name=item.ingredient_name,
+        category_id=item.category_id,
+        category=item.category,
+        unit=item.unit,
+        estoque_atual=_as_float(item.estoque_atual),
+        stock_position=_as_float(item.stock_position),
+        baseline_threshold=_as_float(item.baseline_threshold),
+        cobertura_estoque_pct=_as_float(item.cobertura_estoque_pct),
+        limiar_alerta_predito_pct=_as_float(item.limiar_alerta_predito_pct),
+        limiar_critico_predito_pct=_as_float(item.limiar_critico_predito_pct),
+        criticidade_predita=item.criticidade_predita,
+        necessita_compra=bool(item.necessita_compra),
+        score_alerta_compra=_as_float(item.score_alerta_compra),
+        rank_position=item.rank_position,
+    )
+
+
+@app.get("/api/ml/criticidade/relatorio/latest", response_model=CriticidadeReportLatestOut)
+def get_latest_criticidade_report(db: Session = Depends(get_db)):
+    run = (
+        db.query(CriticalityReportRun)
+        .order_by(CriticalityReportRun.generated_at.desc(), CriticalityReportRun.id.desc())
+        .first()
+    )
+    if run is None:
+        empty_run = CriticidadeReportRunOut(
+            status="no_report",
+            model_name="XGBoost Regressor",
+            model_uri="runs:/58db15b4b9364e6cb1bf7d9ebe65f922/model",
+            error_message="Nenhum relatório de criticidade foi gerado ainda.",
+        )
+        return CriticidadeReportLatestOut(
+            run=empty_run,
+            distribution=[],
+            categories=[],
+            critical_items=[],
+            examples_critical=[],
+            examples_ok=[],
+        )
+
+    items = (
+        db.query(CriticalityReportItem)
+        .filter(CriticalityReportItem.run_id == run.id)
+        .order_by(CriticalityReportItem.rank_position.asc())
+        .all()
+    )
+    item_outputs = [_criticidade_item_out(item) for item in items]
+    critical_outputs = [item for item in item_outputs if item.necessita_compra]
+    ok_outputs = [item for item in item_outputs if not item.necessita_compra]
+
+    categories: list[CriticidadeReportCategoryOut] = []
+    category_names = sorted({item.category or "Sem categoria" for item in item_outputs})
+    for category in category_names:
+        category_items = [(item) for item in item_outputs if (item.category or "Sem categoria") == category]
+        total_items = len(category_items)
+        alert_count = sum(1 for item in category_items if item.necessita_compra)
+        ok_count = total_items - alert_count
+        categories.append(
+            CriticidadeReportCategoryOut(
+                category=category,
+                total_items=total_items,
+                ok_count=ok_count,
+                alert_count=alert_count,
+                alert_rate=(alert_count / total_items if total_items else 0.0),
+            )
+        )
+    categories.sort(key=lambda item: (item.alert_count, item.alert_rate), reverse=True)
+
+    distribution = []
+    if run.total_items > 0:
+        distribution = [
+            {"status": "OK", "count": run.ok_count, "rate": 1 - run.alert_rate},
+            {"status": "Alerta de compra", "count": run.alert_count, "rate": run.alert_rate},
+        ]
+
+    return CriticidadeReportLatestOut(
+        run=CriticidadeReportRunOut(
+            id=run.id,
+            reference_date=run.reference_date,
+            generated_at=run.generated_at,
+            status=run.status,
+            contagem_id=run.contagem_id,
+            contagem_status=run.contagem_status,
+            model_name=run.model_name,
+            model_uri=run.model_uri,
+            model_run_id=run.model_run_id,
+            total_items=run.total_items,
+            ok_count=run.ok_count,
+            alert_count=run.alert_count,
+            alert_rate=run.alert_rate,
+            metrics=run.metrics or {},
+            stability=run.stability or {},
+            error_message=run.error_message,
+        ),
+        distribution=distribution,
+        categories=categories,
+        critical_items=critical_outputs,
+        examples_critical=critical_outputs[:5],
+        examples_ok=sorted(ok_outputs, key=lambda item: item.cobertura_estoque_pct, reverse=True)[:5],
+    )
 
 
 def _as_float(value) -> float:
@@ -1808,10 +2012,15 @@ def get_estoque(
         query = query.filter(or_(Ingrediente.category_id == category, Categoria.name == category))
     if q:
         query = query.filter(Ingrediente.name.ilike(f"%{q}%"))
+    criticidade_run, criticidade_by_ingredient = _latest_criticidade_by_ingredient(db)
     items = query.all()
     if status:
-        items = [i for i in items if _compute_status(i) == status]
-    return items
+        items = [
+            item
+            for item in items
+            if _model_stock_status(item, criticidade_by_ingredient.get(item.id)) == status
+        ]
+    return [_ingrediente_out(item, criticidade_run, criticidade_by_ingredient) for item in items]
 
 
 @app.get("/api/estoque/paginado", response_model=EstoquePaginado)
@@ -1833,9 +2042,14 @@ def get_estoque_paginado(
         query = query.filter(or_(Ingrediente.category_id == category, Categoria.name == category))
     if q:
         query = query.filter(Ingrediente.name.ilike(f"%{q}%"))
+    criticidade_run, criticidade_by_ingredient = _latest_criticidade_by_ingredient(db)
     items = query.all()
     if status:
-        items = [i for i in items if _compute_status(i) == status]
+        items = [
+            item
+            for item in items
+            if _model_stock_status(item, criticidade_by_ingredient.get(item.id)) == status
+        ]
 
     total = len(items)
     total_pages = max(1, math.ceil(total / page_size))
@@ -1843,7 +2057,7 @@ def get_estoque_paginado(
     page_items = items[offset: offset + page_size]
 
     return EstoquePaginado(
-        items=page_items,
+        items=[_ingrediente_out(item, criticidade_run, criticidade_by_ingredient) for item in page_items],
         total=total,
         page=page,
         page_size=page_size,
@@ -1858,6 +2072,9 @@ def update_estoque(lote: AtualizacaoLote, db: Session = Depends(get_db)):
         contagem = db.query(Contagem).filter(Contagem.id == lote.contagem_id).first()
         if contagem is None:
             raise HTTPException(status_code=404, detail="Contagem não encontrada")
+        if contagem.status == "finalizada":
+            contagem.status = "em_andamento"
+            contagem.finalizada_em = None
 
     ids = [u.id for u in lote.updates]
     por_id = {
@@ -1922,6 +2139,15 @@ def update_estoque(lote: AtualizacaoLote, db: Session = Depends(get_db)):
                 existing_log.quantidade_nova = atualizacao.new_qty
                 existing_log.delta = delta
                 existing_log.criado_em = datetime.now()
+            if ingrediente.estoque_atual is None:
+                ingrediente.estoque_atual = EstoqueAtual(
+                    id=f"CUR-{ingrediente.id}",
+                    qtd=atualizacao.new_qty,
+                    data=contagem.data_contagem,
+                )
+            else:
+                ingrediente.estoque_atual.qtd = atualizacao.new_qty
+                ingrediente.estoque_atual.data = contagem.data_contagem
         if round(atualizacao.new_qty, 3) == round(anterior, 3):
             continue
         db.add(
@@ -1933,13 +2159,13 @@ def update_estoque(lote: AtualizacaoLote, db: Session = Depends(get_db)):
                 sessao=lote.session_label,
             )
         )
-        if ingrediente.estoque_atual is None:
+        if contagem is None and ingrediente.estoque_atual is None:
             ingrediente.estoque_atual = EstoqueAtual(
                 id=f"CUR-{ingrediente.id}",
                 qtd=atualizacao.new_qty,
                 data=date.today(),
             )
-        else:
+        elif contagem is None:
             ingrediente.estoque_atual.qtd = atualizacao.new_qty
             ingrediente.estoque_atual.data = date.today()
         count += 1

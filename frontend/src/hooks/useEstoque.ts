@@ -14,19 +14,19 @@ export interface StockItem {
   category: Category
   min_qty: number
   current_qty: number
+  status: StockStatus
+  criticidade_predita: string | null
+  criticidade_report_id: number | null
+  criticidade_reference_date: string | null
   // aliases camelCase (adicionados no fetch)
   minQty: number
   currentQty: number
 }
 
-export type StockStatus = 'Esgotado' | 'Crítico' | 'Atenção' | 'OK'
+export type StockStatus = 'Esgotado' | 'Crítico' | 'OK'
 
 export function getStockStatus(item: StockItem): StockStatus {
-  const qty = item.currentQty
-  if (qty <= 0) return 'Esgotado'
-  if (qty < item.minQty) return 'Crítico'
-  if (qty < item.minQty * 1.5) return 'Atenção'
-  return 'OK'
+  return item.status ?? (item.currentQty <= 0 ? 'Esgotado' : 'OK')
 }
 
 async function fetchEstoque(): Promise<StockItem[]> {
@@ -49,7 +49,7 @@ export function useEstoque() {
   })
 }
 
-export type StockStatusFilter = 'OK' | 'Atenção' | 'Crítico' | 'Esgotado'
+export type StockStatusFilter = StockStatus
 
 export interface EstoqueFiltros {
   category?: string
@@ -145,6 +145,7 @@ export function useAtualizarEstoque() {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: QUERY_KEY })
+      qc.invalidateQueries({ queryKey: ['contagens'] })
     },
   })
 }

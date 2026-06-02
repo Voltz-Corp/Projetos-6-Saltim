@@ -40,10 +40,12 @@ CREATE TABLE ingredientes (
 CREATE TABLE contagens (
     id BIGSERIAL PRIMARY KEY,
     label TEXT NOT NULL,
+    data_contagem DATE NOT NULL DEFAULT CURRENT_DATE,
     status TEXT NOT NULL DEFAULT 'em_andamento',
     estoque_snapshot_data DATE,
     criada_em TIMESTAMPTZ NOT NULL DEFAULT now(),
-    finalizada_em TIMESTAMPTZ
+    finalizada_em TIMESTAMPTZ,
+    UNIQUE (data_contagem)
 );
 
 CREATE TABLE contagem_log (
@@ -331,6 +333,9 @@ CREATE INDEX idx_contagens_criada_em
 
 CREATE INDEX idx_contagens_status
     ON contagens (status);
+
+CREATE INDEX idx_contagens_data_contagem
+    ON contagens (data_contagem);
 
 CREATE INDEX idx_contagens_estoque_snapshot_data
     ON contagens (estoque_snapshot_data);

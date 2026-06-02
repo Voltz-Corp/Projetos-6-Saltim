@@ -4,6 +4,7 @@ import { rootRoute } from './Root'
 import { hydrateContagemSession, resetContagem } from '../hooks/useContagem'
 import {
   fetchContagemDetalhe,
+  getContagemHoje,
   useContagens,
   useIniciarContagem,
   type ContagemResumo,
@@ -27,6 +28,14 @@ const fmt = {
           minute: '2-digit',
         })
       : '-',
+  date: (value: string | null) =>
+    value
+      ? new Date(`${value}T00:00:00`).toLocaleDateString('pt-BR', {
+          day: '2-digit',
+          month: '2-digit',
+          year: 'numeric',
+        })
+      : '-',
   percent: (contagem: ContagemResumo) =>
     contagem.total_itens === 0
       ? 0
@@ -37,7 +46,13 @@ export function ContagemPage() {
   const navigate = useNavigate()
   const { data: contagens = [], isFetching, isError } = useContagens()
   const iniciar = useIniciarContagem()
-  const contagemAberta = contagens.find((contagem) => contagem.status === 'em_andamento')
+  const contagemHoje = getContagemHoje(contagens)
+
+  const buttonLabel = contagemHoje
+    ? contagemHoje.status === 'finalizada'
+      ? 'Atualizar contagem de hoje'
+      : 'Continuar contagem de hoje'
+    : 'Iniciar contagem de hoje'
 
   async function handleIniciar() {
     resetContagem()
@@ -66,7 +81,7 @@ export function ContagemPage() {
           ) : (
             <Play className="size-4" strokeWidth={2} />
           )}
-          {contagemAberta ? 'Continuar contagem' : 'Iniciar contagem'}
+          {buttonLabel}
         </button>
       </header>
 
@@ -123,7 +138,7 @@ function ContagemRow({ contagem }: { contagem: ContagemResumo }) {
           </span>
         </div>
         <p className="mt-1 text-xs text-stone-400">
-          Criada em {fmt.dateTime(contagem.criada_em)}
+          Contagem de {fmt.date(contagem.data_contagem)} · criada em {fmt.dateTime(contagem.criada_em)}
         </p>
       </div>
 
