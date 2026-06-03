@@ -4,5 +4,11 @@ import tailwindcss from '@tailwindcss/vite'
 
 export default defineConfig({
   plugins: [tailwindcss(), react()],
-  server: { port: 5173, open: true },
+  server: {
+    port: 5173,
+    open: true,
+    watch: {
+      ignored: ['**/dist/**', '**/.vite/**', '**/coverage/**'],
+    },
+  },
 })

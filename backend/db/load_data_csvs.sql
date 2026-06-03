@@ -25,6 +25,22 @@ DROP TABLE IF EXISTS
     categorias
 CASCADE;
 
+CREATE SCHEMA IF NOT EXISTS ml;
+
+CREATE TABLE IF NOT EXISTS ml.job_status (
+    id BIGSERIAL PRIMARY KEY,
+    dia DATE NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    inicio_em TIMESTAMPTZ,
+    fim_em TIMESTAMPTZ,
+    atualizado_em TIMESTAMPTZ NOT NULL DEFAULT now(),
+    error_message TEXT,
+    CONSTRAINT uq_job_status_dia UNIQUE (dia),
+    CONSTRAINT ck_job_status_status CHECK (status IN ('running', 'pending', 'success', 'failed'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_job_status_dia ON ml.job_status (dia);
+
 CREATE TABLE categorias (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL

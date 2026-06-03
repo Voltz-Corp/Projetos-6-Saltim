@@ -10,17 +10,25 @@ import traceback
 from datetime import date, datetime, time, timedelta
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import numpy as np
 import pandas as pd
 from sqlalchemy import create_engine, text
 
-
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(PROJECT_ROOT / "data" / "scripts"))
 sys.path.insert(0, str(PROJECT_ROOT / "data" / "ml_dataset" / "scripts"))
 sys.path.insert(0, str(PROJECT_ROOT / "ml" / "notebooks" / "utils"))
 
 from build_abt_reposicao import build_abt, load_config  # noqa: E402
+from gerar_estoque_historico_criticidade import (  # noqa: E402
+    backfill_historical_stock_until_cutoff,
+)
+from gerar_vendas import (  # noqa: E402
+    backfill_historical_sales_until_cutoff,
+    generate_operational_sales_from_contagem,
+)
 from two_stage_common import (  # noqa: E402
     CRITICAL_THRESHOLD_GAP_PCT,
     MAX_ALERT_THRESHOLD_PCT,
@@ -39,18 +47,31 @@ except ImportError:  # pragma: no cover - handled as a runtime failure in the jo
     mlflow = None
 
 
-DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://saltim:saltim123@localhost:5432/saltim_db")
+DATABASE_URL = os.getenv(
+    "DATABASE_URL", "postgresql://saltim:saltim123@localhost:5432/saltim_db"
+)
 MLFLOW_TRACKING_URI = os.getenv("MLFLOW_TRACKING_URI", "http://localhost:5000")
 DEFAULT_MODEL_URI = os.getenv(
     "CRITICIDADE_MODEL_URI",
     "runs:/58db15b4b9364e6cb1bf7d9ebe65f922/model",
 )
 DEFAULT_MODEL_NAME = "XGBoost Regressor"
+DAILY_MLFLOW_EXPERIMENT = os.getenv(
+    "CRITICIDADE_DAILY_MLFLOW_EXPERIMENT",
+    "jobs/criticidade/relatorio_diario",
+)
 EXCLUDED_PURCHASE_CATEGORY_ID = "CAT0015"
+RECIFE_TZ = ZoneInfo("America/Recife")
+
+
+def today_recife() -> date:
+    return datetime.now(RECIFE_TZ).date()
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Gera o relatório diário de criticidade do Saltim.")
+    parser = argparse.ArgumentParser(
+        description="Gera o relatório diário de criticidade do Saltim."
+    )
     parser.add_argument(
         "--reference-date",
         default="today",
@@ -140,6 +161,22 @@ def ensure_schema(engine) -> None:
         "CREATE INDEX IF NOT EXISTS idx_criticidade_report_runs_generated_at ON ml.criticidade_report_runs (generated_at)",
         "CREATE INDEX IF NOT EXISTS idx_criticidade_report_items_run_rank ON ml.criticidade_report_items (run_id, rank_position)",
         "CREATE INDEX IF NOT EXISTS idx_criticidade_report_items_run_criticality ON ml.criticidade_report_items (run_id, criticidade_predita)",
+        """
+        CREATE TABLE IF NOT EXISTS ml.job_status (
+            id BIGSERIAL PRIMARY KEY,
+            dia DATE NOT NULL,
+            status TEXT NOT NULL DEFAULT 'pending',
+            inicio_em TIMESTAMPTZ,
+            fim_em TIMESTAMPTZ,
+            atualizado_em TIMESTAMPTZ NOT NULL DEFAULT now(),
+            error_message TEXT,
+            CONSTRAINT uq_job_status_dia UNIQUE (dia),
+            CONSTRAINT ck_job_status_status CHECK (status IN ('running', 'pending', 'success', 'failed'))
+        )
+        """,
+        "ALTER TABLE ml.job_status ADD COLUMN IF NOT EXISTS inicio_em TIMESTAMPTZ",
+        "ALTER TABLE ml.job_status ADD COLUMN IF NOT EXISTS fim_em TIMESTAMPTZ",
+        "CREATE INDEX IF NOT EXISTS idx_job_status_dia ON ml.job_status (dia)",
     ]
     with engine.begin() as conn:
         for statement in statements:
@@ -149,14 +186,62 @@ def ensure_schema(engine) -> None:
 def resolve_reference_date(engine, value: str) -> date:
     normalized = value.strip().lower()
     if normalized == "today":
-        return date.today()
+        return today_recife()
     if normalized == "latest":
         with engine.begin() as conn:
-            latest = conn.execute(text("SELECT max(data_contagem) FROM contagens")).scalar()
+            latest = conn.execute(
+                text("SELECT max(data_contagem) FROM contagens")
+            ).scalar()
             if latest is None:
-                latest = conn.execute(text("SELECT max(data) FROM estoque_atual")).scalar()
-        return latest or date.today()
+                latest = conn.execute(
+                    text("SELECT max(data) FROM estoque_atual")
+                ).scalar()
+        return latest or today_recife()
     return date.fromisoformat(value)
+
+
+def upsert_job_status(
+    engine,
+    dia: date,
+    status: str,
+    error_message: str | None = None,
+) -> None:
+    with engine.begin() as conn:
+        conn.execute(
+            text("""
+                INSERT INTO ml.job_status (
+                    dia,
+                    status,
+                    inicio_em,
+                    fim_em,
+                    atualizado_em,
+                    error_message
+                )
+                VALUES (
+                    :dia,
+                    :status,
+                    CASE WHEN :status = 'running' THEN now() ELSE NULL END,
+                    CASE WHEN :status IN ('pending', 'success', 'failed') THEN now() ELSE NULL END,
+                    now(),
+                    :error_message
+                )
+                ON CONFLICT (dia)
+                DO UPDATE SET
+                    status = EXCLUDED.status,
+                    inicio_em = CASE
+                        WHEN EXCLUDED.status = 'running' THEN now()
+                        ELSE COALESCE(ml.job_status.inicio_em, EXCLUDED.inicio_em)
+                    END,
+                    fim_em = CASE
+                        WHEN EXCLUDED.status = 'running' THEN NULL
+                        WHEN EXCLUDED.status IN ('pending', 'success', 'failed') THEN now()
+                        ELSE ml.job_status.fim_em
+                    END,
+                    atualizado_em = now(),
+                    error_message = EXCLUDED.error_message
+                """),
+            {"dia": dia, "status": status, "error_message": error_message},
+        )
 
 
 def model_run_id_from_uri(model_uri: str) -> str | None:
@@ -184,8 +269,7 @@ def insert_run(
     stability: dict[str, Any] | None = None,
     error_message: str | None = None,
 ) -> int:
-    sql = text(
-        """
+    sql = text("""
         INSERT INTO ml.criticidade_report_runs (
             reference_date,
             status,
@@ -219,8 +303,7 @@ def insert_run(
             :error_message
         )
         RETURNING id
-        """
-    )
+        """)
     params = {
         "reference_date": reference_date,
         "status": status,
@@ -241,19 +324,49 @@ def insert_run(
         return int(conn.execute(sql, params).scalar_one())
 
 
-def validate_contagem(engine, reference_date: date) -> tuple[int | None, str | None, str | None]:
+def update_run_payload(
+    engine,
+    run_id: int,
+    *,
+    metrics: dict[str, Any] | None = None,
+    stability: dict[str, Any] | None = None,
+    error_message: str | None = None,
+) -> None:
+    assignments = []
+    params: dict[str, Any] = {"run_id": run_id}
+    if metrics is not None:
+        assignments.append("metrics = CAST(:metrics AS jsonb)")
+        params["metrics"] = json_dump(metrics)
+    if stability is not None:
+        assignments.append("stability = CAST(:stability AS jsonb)")
+        params["stability"] = json_dump(stability)
+    if error_message is not None:
+        assignments.append("error_message = :error_message")
+        params["error_message"] = error_message
+    if not assignments:
+        return
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                f"UPDATE ml.criticidade_report_runs SET {', '.join(assignments)} WHERE id = :run_id"
+            ),
+            params,
+        )
+
+
+def validate_contagem(
+    engine, reference_date: date
+) -> tuple[int | None, str | None, str | None]:
     with engine.begin() as conn:
         contagem = (
             conn.execute(
-                text(
-                    """
+                text("""
                     SELECT id, status
                     FROM contagens
                     WHERE data_contagem = :reference_date
                     ORDER BY id DESC
                     LIMIT 1
-                    """
-                ),
+                    """),
                 {"reference_date": reference_date},
             )
             .mappings()
@@ -264,21 +377,29 @@ def validate_contagem(engine, reference_date: date) -> tuple[int | None, str | N
 
         total_items = int(
             conn.execute(
-                text("SELECT count(*) FROM ingredientes WHERE category_id != :category_id"),
+                text(
+                    "SELECT count(*) FROM ingredientes WHERE category_id != :category_id"
+                ),
                 {"category_id": EXCLUDED_PURCHASE_CATEGORY_ID},
             ).scalar()
             or 0
         )
         counted_items = int(
             conn.execute(
-                text("SELECT count(DISTINCT ingrediente_id) FROM contagem_log WHERE contagem_id = :contagem_id"),
+                text(
+                    "SELECT count(DISTINCT ingrediente_id) FROM contagem_log WHERE contagem_id = :contagem_id"
+                ),
                 {"contagem_id": contagem["id"]},
             ).scalar()
             or 0
         )
 
     if contagem["status"] != "finalizada":
-        return int(contagem["id"]), str(contagem["status"]), "A contagem do dia ainda não foi finalizada."
+        return (
+            int(contagem["id"]),
+            str(contagem["status"]),
+            "A contagem do dia ainda não foi finalizada.",
+        )
     if counted_items < total_items:
         return (
             int(contagem["id"]),
@@ -305,7 +426,10 @@ def read_sources(engine) -> dict[str, pd.DataFrame]:
         "estoque_atual": "SELECT ingrediente, qtd, data FROM estoque_atual",
     }
     with engine.begin() as conn:
-        data = {name: pd.read_sql_query(text(query), conn) for name, query in queries.items()}
+        data = {
+            name: pd.read_sql_query(text(query), conn)
+            for name, query in queries.items()
+        }
 
     date_columns = {
         "vendas": ["date_time"],
@@ -323,10 +447,14 @@ def read_sources(engine) -> dict[str, pd.DataFrame]:
     return data
 
 
-def append_operational_stock(data: dict[str, pd.DataFrame], reference_date: date) -> dict[str, pd.DataFrame]:
+def append_operational_stock(
+    data: dict[str, pd.DataFrame], reference_date: date
+) -> dict[str, pd.DataFrame]:
     current = data["estoque_atual"].copy()
     if current.empty:
-        raise RuntimeError("estoque_atual está vazio; não é possível gerar criticidade operacional.")
+        raise RuntimeError(
+            "estoque_atual está vazio; não é possível gerar criticidade operacional."
+        )
 
     historical = data["estoques"].copy()
     if historical.empty:
@@ -359,7 +487,9 @@ def append_operational_stock(data: dict[str, pd.DataFrame], reference_date: date
     return data
 
 
-def build_operational_frame(engine, config_path: Path, reference_date: date) -> pd.DataFrame:
+def build_operational_frame(
+    engine, config_path: Path, reference_date: date
+) -> pd.DataFrame:
     config = load_config(config_path)
     if pd.Timestamp(reference_date) > pd.Timestamp(config["end_date"]):
         config["end_date"] = reference_date.isoformat()
@@ -371,13 +501,17 @@ def build_operational_frame(engine, config_path: Path, reference_date: date) -> 
     abt["date"] = pd.to_datetime(abt["date"])
     current = abt[abt["date"].dt.date == reference_date].copy()
     if current.empty:
-        raise RuntimeError(f"Nenhuma linha operacional foi montada para {reference_date.isoformat()}.")
+        raise RuntimeError(
+            f"Nenhuma linha operacional foi montada para {reference_date.isoformat()}."
+        )
     return current.reset_index(drop=True)
 
 
 def load_model(model_uri: str):
     if mlflow is None:
-        raise RuntimeError("MLflow não está instalado. Instale as dependências de ml/requirements.txt.")
+        raise RuntimeError(
+            "MLflow não está instalado. Instale as dependências de ml/requirements.txt."
+        )
     mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
     return mlflow.sklearn.load_model(model_uri)
 
@@ -390,12 +524,126 @@ def mlflow_metrics(model_run_id: str | None) -> dict[str, float]:
     return {key: float(value) for key, value in run.data.metrics.items()}
 
 
+def setup_daily_mlflow_experiment() -> None:
+    if mlflow is None:
+        raise RuntimeError(
+            "MLflow não está instalado. Instale as dependências de ml/requirements.txt."
+        )
+    mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
+    client = mlflow.tracking.MlflowClient()
+    if client.get_experiment_by_name(DAILY_MLFLOW_EXPERIMENT) is None:
+        client.create_experiment(DAILY_MLFLOW_EXPERIMENT)
+    mlflow.set_experiment(DAILY_MLFLOW_EXPERIMENT)
+
+
+def flatten_numeric(prefix: str, payload: dict[str, Any] | None) -> dict[str, float]:
+    values: dict[str, float] = {}
+    if not payload:
+        return values
+    for key, value in payload.items():
+        metric_name = f"{prefix}_{key}" if prefix else str(key)
+        if isinstance(value, dict):
+            values.update(flatten_numeric(metric_name, value))
+            continue
+        if isinstance(value, (int, float, np.integer, np.floating)) and not pd.isna(value):
+            values[metric_name[:250]] = float(value)
+    return values
+
+
+def log_daily_mlflow_run(
+    *,
+    reference_date: date,
+    status: str,
+    model_name: str,
+    source_model_uri: str,
+    source_model_run_id: str | None,
+    contagem_id: int | None,
+    contagem_status: str | None,
+    db_run_id: int,
+    metrics: dict[str, Any] | None = None,
+    stability: dict[str, Any] | None = None,
+    scored: pd.DataFrame | None = None,
+    model: Any | None = None,
+    error_message: str | None = None,
+) -> dict[str, str]:
+    setup_daily_mlflow_experiment()
+    run_name = f"criticidade_diaria_{reference_date.isoformat()}_{status}"
+    with mlflow.start_run(run_name=run_name, nested=mlflow.active_run() is not None) as run:
+        mlflow.set_tags(
+            {
+                "project": "saltim",
+                "job": "generate_criticality_report",
+                "problem": "stock_criticality",
+                "stage": "daily_inference",
+                "status": status,
+                "reference_date": reference_date.isoformat(),
+                "model_name": model_name,
+                "source_model_uri": source_model_uri,
+                "source_model_run_id": source_model_run_id or "",
+                "contagem_id": str(contagem_id or ""),
+                "contagem_status": contagem_status or "",
+                "db_report_run_id": str(db_run_id),
+            }
+        )
+        mlflow.log_params(
+            {
+                "reference_date": reference_date.isoformat(),
+                "status": status,
+                "model_name": model_name,
+                "source_model_uri": source_model_uri,
+                "source_model_run_id": source_model_run_id or "",
+                "contagem_id": contagem_id or "",
+                "contagem_status": contagem_status or "",
+                "db_report_run_id": db_run_id,
+                "run_source": "daily_operational_inference",
+            }
+        )
+        numeric_metrics = {
+            **flatten_numeric("", metrics),
+            **flatten_numeric("stability", stability),
+        }
+        if numeric_metrics:
+            mlflow.log_metrics(numeric_metrics)
+        mlflow.log_dict(metrics or {}, "report/metrics.json")
+        mlflow.log_dict(stability or {}, "report/stability.json")
+        if error_message:
+            mlflow.log_text(error_message, "report/error.txt")
+        if scored is not None:
+            mlflow.log_text(scored.to_csv(index=False), "report/predictions.csv")
+            summary = (
+                scored.groupby(["categoria", "criticidade_predita"], dropna=False)
+                .size()
+                .reset_index(name="total")
+            )
+            mlflow.log_text(summary.to_csv(index=False), "report/category_summary.csv")
+        daily_model_uri = ""
+        if model is not None:
+            mlflow.sklearn.log_model(model, name="model")
+            daily_model_uri = f"runs:/{run.info.run_id}/model"
+        return {
+            "daily_mlflow_run_id": run.info.run_id,
+            "daily_model_uri": daily_model_uri,
+            "daily_mlflow_experiment": DAILY_MLFLOW_EXPERIMENT,
+        }
+
+
+def safe_log_daily_mlflow_run(**kwargs: Any) -> dict[str, str]:
+    try:
+        return log_daily_mlflow_run(**kwargs)
+    except Exception as exc:
+        return {"daily_mlflow_error": str(exc)}
+
+
 def score_current_stock(current: pd.DataFrame, model) -> pd.DataFrame:
     feature_columns = select_feature_columns(current)
     X_current = current[feature_columns].copy()
-    alert_pred = pd.Series(model.predict(X_current), index=current.index).astype(float).clip(
-        lower=MIN_ALERT_THRESHOLD_PCT,
-        upper=MAX_ALERT_THRESHOLD_PCT,
+    alert_pred = (
+        pd.Series(model.predict(X_current), index=current.index)
+        .astype(float)
+        .clip(
+            lower=MIN_ALERT_THRESHOLD_PCT,
+            upper=MAX_ALERT_THRESHOLD_PCT,
+        )
     )
     critical_pred = (alert_pred - CRITICAL_THRESHOLD_GAP_PCT).clip(lower=0.0)
     criticality = _derive_criticality(
@@ -422,7 +670,9 @@ def score_current_stock(current: pd.DataFrame, model) -> pd.DataFrame:
     scored["limiar_critico_predito_pct"] = critical_pred
     scored["criticidade_predita"] = criticality
     scored["necessita_compra"] = scored["criticidade_predita"].eq(PURCHASE_ALERT_LABEL)
-    scored["score_alerta_compra"] = scored["limiar_critico_predito_pct"] - scored["cobertura_estoque_pct"]
+    scored["score_alerta_compra"] = (
+        scored["limiar_critico_predito_pct"] - scored["cobertura_estoque_pct"]
+    )
     scored = scored.sort_values(
         ["necessita_compra", "score_alerta_compra", "cobertura_estoque_pct"],
         ascending=[False, False, True],
@@ -431,28 +681,32 @@ def score_current_stock(current: pd.DataFrame, model) -> pd.DataFrame:
     return scored
 
 
-def stability_payload(engine, alert_rate: float, metrics: dict[str, Any]) -> dict[str, Any]:
+def stability_payload(
+    engine, alert_rate: float, metrics: dict[str, Any]
+) -> dict[str, Any]:
     with engine.begin() as conn:
         previous = pd.read_sql_query(
-            text(
-                """
+            text("""
                 SELECT alert_rate
                 FROM ml.criticidade_report_runs
                 WHERE status = 'success'
                 ORDER BY generated_at DESC, id DESC
                 LIMIT 30
-                """
-            ),
+                """),
             conn,
         )
 
-    training_alert_rate = metrics.get("taxa_alerta_compra") or metrics.get("taxa_necessita_compra")
+    training_alert_rate = metrics.get("taxa_alerta_compra") or metrics.get(
+        "taxa_necessita_compra"
+    )
     payload: dict[str, Any] = {
         "current_alert_rate": alert_rate,
         "training_alert_rate": training_alert_rate,
     }
     if training_alert_rate is not None:
-        payload["delta_vs_training_alert_rate"] = alert_rate - float(training_alert_rate)
+        payload["delta_vs_training_alert_rate"] = alert_rate - float(
+            training_alert_rate
+        )
 
     if previous.empty:
         payload["status"] = "sem_historico_operacional"
@@ -470,13 +724,16 @@ def stability_payload(engine, alert_rate: float, metrics: dict[str, Any]) -> dic
             "coefficient_of_variation": (std_rate / mean_rate if mean_rate else None),
         }
     )
-    payload["status"] = "estavel" if abs(alert_rate - mean_rate) <= max(0.05, 2 * std_rate) else "atencao"
+    payload["status"] = (
+        "estavel"
+        if abs(alert_rate - mean_rate) <= max(0.05, 2 * std_rate)
+        else "atencao"
+    )
     return payload
 
 
 def insert_items(engine, run_id: int, scored: pd.DataFrame) -> None:
-    sql = text(
-        """
+    sql = text("""
         INSERT INTO ml.criticidade_report_items (
             run_id,
             ingredient_id,
@@ -513,8 +770,7 @@ def insert_items(engine, run_id: int, scored: pd.DataFrame) -> None:
             :score_alerta_compra,
             :rank_position
         )
-        """
-    )
+        """)
     records = []
     for row in scored.itertuples(index=False):
         records.append(
@@ -547,9 +803,55 @@ def run_job(args: argparse.Namespace) -> int:
     ensure_schema(engine)
     reference_date = resolve_reference_date(engine, args.reference_date)
     model_run_id = model_run_id_from_uri(args.model_uri)
+    upsert_job_status(engine, reference_date, "running")
+    try:
+        historical_sales_payload = backfill_historical_sales_until_cutoff(
+            engine, reference_date
+        )
+        historical_stock_payload = backfill_historical_stock_until_cutoff(
+            engine, reference_date
+        )
+    except Exception as exc:
+        detail = f"{exc}\n{traceback.format_exc(limit=8)}"
+        upsert_job_status(engine, reference_date, "failed", detail[:4000])
+        metrics = {
+            "model": args.model_name,
+            "model_uri": args.model_uri,
+            "status": "failed",
+            "vendas_historicas": {
+                "status": "failed",
+                "error": str(exc),
+            },
+            "estoques_historicos": {
+                "status": "failed",
+                "error": str(exc),
+            },
+        }
+        run_id = insert_run(
+            engine,
+            reference_date=reference_date,
+            status="failed",
+            model_name=args.model_name,
+            model_uri=args.model_uri,
+            model_run_id=model_run_id,
+            metrics=metrics,
+            error_message=detail[:4000],
+        )
+        print(f"Falha registrada no run {run_id}: {exc}")
+        return 1
 
-    contagem_id, contagem_status, validation_error = validate_contagem(engine, reference_date)
+    contagem_id, contagem_status, validation_error = validate_contagem(
+        engine, reference_date
+    )
     if validation_error:
+        upsert_job_status(engine, reference_date, "pending", validation_error)
+        metrics = {
+            "model": args.model_name,
+            "model_uri": args.model_uri,
+            "status": "pending_contagem",
+            "vendas_historicas": historical_sales_payload,
+            "estoques_historicos": historical_stock_payload,
+        }
         run_id = insert_run(
             engine,
             reference_date=reference_date,
@@ -559,12 +861,31 @@ def run_job(args: argparse.Namespace) -> int:
             model_run_id=model_run_id,
             contagem_id=contagem_id,
             contagem_status=contagem_status,
+            metrics=metrics,
             error_message=validation_error,
         )
+        daily_mlflow = safe_log_daily_mlflow_run(
+            reference_date=reference_date,
+            status="pending_contagem",
+            model_name=args.model_name,
+            source_model_uri=args.model_uri,
+            source_model_run_id=model_run_id,
+            contagem_id=contagem_id,
+            contagem_status=contagem_status,
+            db_run_id=run_id,
+            metrics=metrics,
+            stability={},
+            error_message=validation_error,
+        )
+        metrics["daily_mlflow"] = daily_mlflow
+        update_run_payload(engine, run_id, metrics=metrics)
         print(f"Relatório pendente registrado no run {run_id}: {validation_error}")
         return 0
 
     try:
+        operational_sales_payload = generate_operational_sales_from_contagem(
+            engine, reference_date, int(contagem_id)
+        )
         current = build_operational_frame(engine, args.config, reference_date)
         model = load_model(args.model_uri)
         scored = score_current_stock(current, model)
@@ -581,6 +902,9 @@ def run_job(args: argparse.Namespace) -> int:
             "alert_count": alert_count,
             "alert_rate": alert_rate,
             "mlflow": model_metrics,
+            "vendas_historicas": historical_sales_payload,
+            "estoques_historicos": historical_stock_payload,
+            "vendas_geradas": operational_sales_payload,
         }
         stability = stability_payload(engine, alert_rate, model_metrics)
         run_id = insert_run(
@@ -600,6 +924,23 @@ def run_job(args: argparse.Namespace) -> int:
             stability=stability,
         )
         insert_items(engine, run_id, scored)
+        daily_mlflow = safe_log_daily_mlflow_run(
+            reference_date=reference_date,
+            status="success",
+            model_name=args.model_name,
+            source_model_uri=args.model_uri,
+            source_model_run_id=model_run_id,
+            contagem_id=contagem_id,
+            contagem_status=contagem_status,
+            db_run_id=run_id,
+            metrics=metrics,
+            stability=stability,
+            scored=scored,
+            model=model,
+        )
+        metrics["daily_mlflow"] = daily_mlflow
+        update_run_payload(engine, run_id, metrics=metrics, stability=stability)
+        upsert_job_status(engine, reference_date, "success")
         print(
             "Relatório de criticidade gerado: "
             f"run={run_id}, data={reference_date.isoformat()}, "
@@ -608,6 +949,12 @@ def run_job(args: argparse.Namespace) -> int:
         return 0
     except Exception as exc:
         detail = f"{exc}\n{traceback.format_exc(limit=8)}"
+        upsert_job_status(engine, reference_date, "failed", detail[:4000])
+        metrics = {
+            "model": args.model_name,
+            "model_uri": args.model_uri,
+            "status": "failed",
+        }
         run_id = insert_run(
             engine,
             reference_date=reference_date,
@@ -617,8 +964,24 @@ def run_job(args: argparse.Namespace) -> int:
             model_run_id=model_run_id,
             contagem_id=contagem_id,
             contagem_status=contagem_status,
+            metrics=metrics,
             error_message=detail[:4000],
         )
+        daily_mlflow = safe_log_daily_mlflow_run(
+            reference_date=reference_date,
+            status="failed",
+            model_name=args.model_name,
+            source_model_uri=args.model_uri,
+            source_model_run_id=model_run_id,
+            contagem_id=contagem_id,
+            contagem_status=contagem_status,
+            db_run_id=run_id,
+            metrics=metrics,
+            stability={},
+            error_message=detail[:4000],
+        )
+        metrics["daily_mlflow"] = daily_mlflow
+        update_run_payload(engine, run_id, metrics=metrics)
         print(f"Falha registrada no run {run_id}: {exc}")
         return 1
 

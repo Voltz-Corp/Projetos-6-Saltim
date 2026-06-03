@@ -402,6 +402,27 @@ class CriticalityReportRun(Base):
     )
 
 
+class JobStatus(Base):
+    __tablename__ = "job_status"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('running', 'pending', 'success', 'failed')",
+            name="ck_job_status_status",
+        ),
+        UniqueConstraint("dia", name="uq_job_status_dia"),
+        Index("idx_job_status_dia", "dia"),
+        {"schema": "ml"},
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    dia = Column(Date, nullable=False)
+    status = Column(String, nullable=False, default="pending")
+    inicio_em = Column(DateTime(timezone=True))
+    fim_em = Column(DateTime(timezone=True))
+    atualizado_em = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    error_message = Column(String)
+
+
 class CriticalityReportItem(Base):
     __tablename__ = "criticidade_report_items"
     __table_args__ = (

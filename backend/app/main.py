@@ -1,11 +1,16 @@
 import math
+import os
+import subprocess
+import sys
 from contextlib import asynccontextmanager
 from datetime import date, datetime, timedelta
+from pathlib import Path
 from typing import Optional
+from zoneinfo import ZoneInfo
 
-from fastapi import FastAPI, Depends, HTTPException, Query
+from fastapi import FastAPI, Depends, HTTPException, Query, Response
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import asc, case, desc, func, or_
+from sqlalchemy import asc, case, desc, func, or_, text
 from sqlalchemy.orm import Session
 
 from .database import engine, Base, get_db, run_sql_loaders
@@ -21,6 +26,7 @@ from .models import (
     Fornecedor,
     FornecedorIngrediente,
     Ingrediente,
+    JobStatus,
     LogContagem,
     Pedido,
     Receita,
@@ -50,6 +56,7 @@ from .schemas import (
     FornecedorProductOut,
     FornecedorProfileKpis,
     FornecedorProfileResponse,
+    JobStatusOut,
     PedidoCreateRequest,
     PedidoCreateResponse,
     PedidoDetailItem,
@@ -88,6 +95,11 @@ from .schemas import (
 
 PRODUCTION_CATEGORY_ID = "CAT0015"
 DASHBOARD_STOCK_UNITS = ("KG", "UND", "L")
+RECIFE_TZ = ZoneInfo("America/Recife")
+
+
+def _now_recife() -> datetime:
+    return datetime.now(RECIFE_TZ)
 
 
 @asynccontextmanager
@@ -103,7 +115,13 @@ app = FastAPI(title="Saltim Café API", version="1.0.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:4173"],
+    allow_origins=[
+        "http://localhost:5173",
+        "http://localhost:5174",
+        "http://localhost:5175",
+        "http://localhost:5176",
+        "http://localhost:4173",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -116,10 +134,30 @@ app.add_middleware(
 
 
 def ensure_ml_schema() -> None:
+    statements = (
+        "CREATE SCHEMA IF NOT EXISTS ml",
+        """
+        CREATE TABLE IF NOT EXISTS ml.job_status (
+            id BIGSERIAL PRIMARY KEY,
+            dia DATE NOT NULL,
+            status TEXT NOT NULL DEFAULT 'pending',
+            inicio_em TIMESTAMPTZ,
+            fim_em TIMESTAMPTZ,
+            atualizado_em TIMESTAMPTZ NOT NULL DEFAULT now(),
+            error_message TEXT,
+            CONSTRAINT uq_job_status_dia UNIQUE (dia),
+            CONSTRAINT ck_job_status_status CHECK (status IN ('running', 'pending', 'success', 'failed'))
+        )
+        """,
+        "ALTER TABLE ml.job_status ADD COLUMN IF NOT EXISTS inicio_em TIMESTAMPTZ",
+        "ALTER TABLE ml.job_status ADD COLUMN IF NOT EXISTS fim_em TIMESTAMPTZ",
+        "CREATE INDEX IF NOT EXISTS idx_job_status_dia ON ml.job_status (dia)",
+    )
     raw_conn = engine.raw_connection()
     try:
         with raw_conn.cursor() as cursor:
-            cursor.execute("CREATE SCHEMA IF NOT EXISTS ml")
+            for statement in statements:
+                cursor.execute(statement)
         raw_conn.commit()
     except Exception:
         raw_conn.rollback()
@@ -205,7 +243,7 @@ def _countable_items_total(db: Session) -> int:
 
 
 def _resolve_estoque_snapshot_data(db: Session, reference_date: Optional[date] = None) -> Optional[date]:
-    reference_date = reference_date or date.today()
+    reference_date = reference_date or _now_recife().date()
     snapshot = (
         db.query(func.max(func.date(Estoque.date_time)))
         .filter(func.date(Estoque.date_time) <= reference_date)
@@ -285,7 +323,7 @@ def _contagem_list_item(
 
 @app.post("/api/contagens", response_model=ContagemOut)
 def create_contagem(payload: ContagemCreate, db: Session = Depends(get_db)):
-    today = date.today()
+    today = _now_recife().date()
     label = payload.label or f"Contagem {today.strftime('%d/%m/%Y')}"
     existing = (
         db.query(Contagem)
@@ -459,7 +497,7 @@ def finalizar_contagem(contagem_id: int, db: Session = Depends(get_db)):
             ),
         )
     contagem.status = "finalizada"
-    contagem.finalizada_em = datetime.now()
+    contagem.finalizada_em = _now_recife()
     db.commit()
     db.refresh(contagem)
     return contagem
@@ -548,25 +586,27 @@ def _criticidade_item_out(item: CriticalityReportItem) -> CriticidadeReportItemO
     )
 
 
-@app.get("/api/ml/criticidade/relatorio/latest", response_model=CriticidadeReportLatestOut)
-def get_latest_criticidade_report(db: Session = Depends(get_db)):
+def _criticidade_report_for_date(db: Session, reference_date: date) -> CriticidadeReportLatestOut:
     run = (
         db.query(CriticalityReportRun)
+        .filter(CriticalityReportRun.reference_date == reference_date)
         .order_by(CriticalityReportRun.generated_at.desc(), CriticalityReportRun.id.desc())
         .first()
     )
     if run is None:
         empty_run = CriticidadeReportRunOut(
             status="no_report",
+            reference_date=reference_date,
             model_name="XGBoost Regressor",
             model_uri="runs:/58db15b4b9364e6cb1bf7d9ebe65f922/model",
-            error_message="Nenhum relatório de criticidade foi gerado ainda.",
+            error_message="Nenhum relatório de criticidade foi gerado para hoje.",
         )
         return CriticidadeReportLatestOut(
             run=empty_run,
             distribution=[],
             categories=[],
             critical_items=[],
+            zero_items=[],
             examples_critical=[],
             examples_ok=[],
         )
@@ -578,7 +618,10 @@ def get_latest_criticidade_report(db: Session = Depends(get_db)):
         .all()
     )
     item_outputs = [_criticidade_item_out(item) for item in items]
-    critical_outputs = [item for item in item_outputs if item.necessita_compra]
+    zero_outputs = [item for item in item_outputs if item.estoque_atual <= 0]
+    critical_outputs = [
+        item for item in item_outputs if item.necessita_compra and item.estoque_atual > 0
+    ]
     ok_outputs = [item for item in item_outputs if not item.necessita_compra]
 
     categories: list[CriticidadeReportCategoryOut] = []
@@ -628,9 +671,160 @@ def get_latest_criticidade_report(db: Session = Depends(get_db)):
         distribution=distribution,
         categories=categories,
         critical_items=critical_outputs,
+        zero_items=zero_outputs,
         examples_critical=critical_outputs[:5],
-        examples_ok=sorted(ok_outputs, key=lambda item: item.cobertura_estoque_pct, reverse=True)[:5],
+        examples_ok=sorted(ok_outputs, key=lambda item: abs(item.score_alerta_compra))[:5],
     )
+
+
+def _upsert_job_status(
+    db: Session,
+    dia: date,
+    status: str,
+    error_message: Optional[str] = None,
+) -> None:
+    db.execute(
+        text("""
+            INSERT INTO ml.job_status (
+                dia,
+                status,
+                inicio_em,
+                fim_em,
+                atualizado_em,
+                error_message
+            )
+            VALUES (
+                :dia,
+                :status,
+                CASE WHEN :status = 'running' THEN now() ELSE NULL END,
+                CASE WHEN :status IN ('pending', 'success', 'failed') THEN now() ELSE NULL END,
+                now(),
+                :error_message
+            )
+            ON CONFLICT (dia)
+            DO UPDATE SET
+                status = EXCLUDED.status,
+                inicio_em = CASE
+                    WHEN EXCLUDED.status = 'running' THEN now()
+                    ELSE COALESCE(ml.job_status.inicio_em, EXCLUDED.inicio_em)
+                END,
+                fim_em = CASE
+                    WHEN EXCLUDED.status = 'running' THEN NULL
+                    WHEN EXCLUDED.status IN ('pending', 'success', 'failed') THEN now()
+                    ELSE ml.job_status.fim_em
+                END,
+                atualizado_em = now(),
+                error_message = EXCLUDED.error_message
+            """),
+        {"dia": dia, "status": status, "error_message": error_message},
+    )
+    db.commit()
+
+
+def _job_status_for_date(db: Session, dia: date) -> JobStatusOut:
+    status = (
+        db.query(JobStatus)
+        .filter(JobStatus.dia == dia)
+        .order_by(JobStatus.atualizado_em.desc(), JobStatus.id.desc())
+        .first()
+    )
+    if status is None:
+        return JobStatusOut(dia=dia, status="pending")
+    return JobStatusOut.model_validate(status)
+
+
+def _ensure_criticidade_failed_run(
+    db: Session,
+    reference_date: date,
+    error_message: str,
+) -> None:
+    existing = (
+        db.query(CriticalityReportRun)
+        .filter(CriticalityReportRun.reference_date == reference_date)
+        .order_by(CriticalityReportRun.generated_at.desc(), CriticalityReportRun.id.desc())
+        .first()
+    )
+    if existing is not None:
+        return
+
+    db.add(
+        CriticalityReportRun(
+            reference_date=reference_date,
+            status="failed",
+            model_name="XGBoost Regressor",
+            model_uri="runs:/58db15b4b9364e6cb1bf7d9ebe65f922/model",
+            model_run_id="58db15b4b9364e6cb1bf7d9ebe65f922",
+            metrics={
+                "status": "failed",
+                "source": "backend_subprocess_fallback",
+            },
+            stability={},
+            error_message=error_message[:4000],
+        )
+    )
+    db.commit()
+
+
+@app.get("/api/ml/criticidade/job-status/latest", response_model=JobStatusOut)
+def get_latest_criticidade_job_status(response: Response, db: Session = Depends(get_db)):
+    response.headers["Cache-Control"] = "no-store"
+    return _job_status_for_date(db, _now_recife().date())
+
+
+@app.get("/api/ml/criticidade/relatorio/latest", response_model=CriticidadeReportLatestOut)
+def get_latest_criticidade_report(response: Response, db: Session = Depends(get_db)):
+    response.headers["Cache-Control"] = "no-store"
+    return _criticidade_report_for_date(db, _now_recife().date())
+
+
+@app.post("/api/ml/criticidade/relatorio/run", response_model=CriticidadeReportLatestOut)
+def run_criticidade_report(response: Response, db: Session = Depends(get_db)):
+    response.headers["Cache-Control"] = "no-store"
+    reference_date = _now_recife().date()
+    _upsert_job_status(db, reference_date, "running")
+    project_root = Path(__file__).resolve().parents[2]
+    script_path = project_root / "ml" / "jobs" / "generate_criticality_report.py"
+    python_path = project_root / ".venv" / "bin" / "python"
+    python_executable = str(python_path) if python_path.exists() else sys.executable
+    env = os.environ.copy()
+    env.setdefault("DATABASE_URL", "postgresql://saltim:saltim123@localhost:5432/saltim_db")
+    env.setdefault("MLFLOW_TRACKING_URI", "http://localhost:5000")
+
+    result = subprocess.run(
+        [python_executable, str(script_path), "--reference-date", "today"],
+        cwd=str(project_root),
+        env=env,
+        text=True,
+        capture_output=True,
+        timeout=600,
+        check=False,
+    )
+    process_output = (
+        result.stderr
+        or result.stdout
+        or "O job terminou sem registrar uma rodada em criticidade_report_runs."
+    )
+    if result.returncode not in {0, 1}:
+        _upsert_job_status(
+            db,
+            reference_date,
+            "failed",
+            process_output[:2000],
+        )
+        _ensure_criticidade_failed_run(db, reference_date, process_output)
+        return _criticidade_report_for_date(db, reference_date)
+
+    db.expire_all()
+    if (
+        db.query(CriticalityReportRun)
+        .filter(CriticalityReportRun.reference_date == reference_date)
+        .first()
+        is None
+    ):
+        _upsert_job_status(db, reference_date, "failed", process_output[:2000])
+        _ensure_criticidade_failed_run(db, reference_date, process_output)
+        db.expire_all()
+    return _criticidade_report_for_date(db, reference_date)
 
 
 def _as_float(value) -> float:
@@ -2138,7 +2332,7 @@ def update_estoque(lote: AtualizacaoLote, db: Session = Depends(get_db)):
                 existing_log.quantidade_anterior = anterior
                 existing_log.quantidade_nova = atualizacao.new_qty
                 existing_log.delta = delta
-                existing_log.criado_em = datetime.now()
+                existing_log.criado_em = _now_recife()
             if ingrediente.estoque_atual is None:
                 ingrediente.estoque_atual = EstoqueAtual(
                     id=f"CUR-{ingrediente.id}",
@@ -2160,14 +2354,14 @@ def update_estoque(lote: AtualizacaoLote, db: Session = Depends(get_db)):
             )
         )
         if contagem is None and ingrediente.estoque_atual is None:
-            ingrediente.estoque_atual = EstoqueAtual(
-                id=f"CUR-{ingrediente.id}",
-                qtd=atualizacao.new_qty,
-                data=date.today(),
-            )
+                ingrediente.estoque_atual = EstoqueAtual(
+                    id=f"CUR-{ingrediente.id}",
+                    qtd=atualizacao.new_qty,
+                    data=_now_recife().date(),
+                )
         elif contagem is None:
             ingrediente.estoque_atual.qtd = atualizacao.new_qty
-            ingrediente.estoque_atual.data = date.today()
+            ingrediente.estoque_atual.data = _now_recife().date()
         count += 1
 
     db.commit()

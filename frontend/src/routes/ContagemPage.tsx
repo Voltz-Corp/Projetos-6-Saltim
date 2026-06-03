@@ -21,6 +21,7 @@ const fmt = {
   dateTime: (value: string | null) =>
     value
       ? new Date(value).toLocaleString('pt-BR', {
+          timeZone: 'America/Recife',
           day: '2-digit',
           month: '2-digit',
           year: 'numeric',
@@ -31,6 +32,7 @@ const fmt = {
   date: (value: string | null) =>
     value
       ? new Date(`${value}T00:00:00`).toLocaleDateString('pt-BR', {
+          timeZone: 'America/Recife',
           day: '2-digit',
           month: '2-digit',
           year: 'numeric',
@@ -64,7 +66,7 @@ export function ContagemPage() {
 
   return (
     <div className="flex h-screen flex-col bg-surface">
-      <header className="flex flex-shrink-0 items-center justify-between gap-4 border-b border-stone-200 bg-white px-8 py-4">
+      <header className="flex h-[73px] flex-shrink-0 items-center justify-between gap-4 border-b border-stone-200 bg-white px-8">
         <div className="min-w-0">
           <h1 className="text-xl font-semibold text-stone-900">Histórico de contagens</h1>
           <p className="mt-0.5 text-xs text-stone-400">

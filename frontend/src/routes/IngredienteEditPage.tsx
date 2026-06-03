@@ -63,7 +63,7 @@ export function IngredienteEditPage() {
   return (
     <div className="flex flex-col h-screen bg-surface">
       {/* Header */}
-      <div className="bg-white border-b border-stone-200 px-8 py-4 flex items-center gap-3 flex-shrink-0">
+      <div className="flex h-[73px] flex-shrink-0 items-center gap-3 border-b border-stone-200 bg-white px-8">
         <button
           type="button"
           onClick={() => navigate({ to: '/estoque' })}

@@ -1,8 +1,20 @@
 import re
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator
 from datetime import date, datetime
+from zoneinfo import ZoneInfo
 from typing import Any, Optional, List
+
+
+RECIFE_TZ = ZoneInfo("America/Recife")
+
+
+def _to_recife_datetime(value: Optional[datetime]) -> Optional[str]:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=RECIFE_TZ)
+    return value.astimezone(RECIFE_TZ).isoformat()
 
 
 class IngredienteOut(BaseModel):
@@ -44,6 +56,10 @@ class LogContagemOut(BaseModel):
     sessao: Optional[str]
     criado_em: datetime
 
+    @field_serializer("criado_em", when_used="json")
+    def serialize_criado_em(self, value: datetime) -> Optional[str]:
+        return _to_recife_datetime(value)
+
 
 class ResultadoLote(BaseModel):
     ok: bool
@@ -65,6 +81,10 @@ class ContagemOut(BaseModel):
     estoque_snapshot_data: Optional[date] = None
     criada_em: datetime
     finalizada_em: Optional[datetime] = None
+
+    @field_serializer("criada_em", "finalizada_em", when_used="json")
+    def serialize_datetime(self, value: Optional[datetime]) -> Optional[str]:
+        return _to_recife_datetime(value)
 
 
 class ContagemListItem(ContagemOut):
@@ -88,6 +108,10 @@ class ContagemDetalheItem(BaseModel):
     delta: Optional[float] = None
     status: str
     contado_em: Optional[datetime] = None
+
+    @field_serializer("contado_em", when_used="json")
+    def serialize_contado_em(self, value: Optional[datetime]) -> Optional[str]:
+        return _to_recife_datetime(value)
 
 
 class ContagemDetalheCategoria(BaseModel):
@@ -168,8 +192,24 @@ class CriticidadeReportLatestOut(BaseModel):
     distribution: list[dict[str, Any]]
     categories: list[CriticidadeReportCategoryOut]
     critical_items: list[CriticidadeReportItemOut]
+    zero_items: list[CriticidadeReportItemOut] = Field(default_factory=list)
     examples_critical: list[CriticidadeReportItemOut]
     examples_ok: list[CriticidadeReportItemOut]
+
+
+class JobStatusOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    dia: date
+    status: str
+    inicio_em: Optional[datetime] = None
+    fim_em: Optional[datetime] = None
+    atualizado_em: Optional[datetime] = None
+    error_message: Optional[str] = None
+
+    @field_serializer("inicio_em", "fim_em", "atualizado_em", when_used="json")
+    def serialize_job_datetime(self, value: Optional[datetime]) -> Optional[str]:
+        return _to_recife_datetime(value)
 
 
 class AtualizacaoIngrediente(BaseModel):

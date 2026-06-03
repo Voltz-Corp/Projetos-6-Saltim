@@ -1058,6 +1058,8 @@ function CombinedHistoryChart({
             tick={{ fill: '#888780', fontSize: 11 }}
             axisLine={false}
             tickLine={false}
+            interval="preserveStartEnd"
+            minTickGap={24}
           />
           {showStock && (
             <YAxis
@@ -1285,7 +1287,7 @@ export function DashboardPage() {
   if (isError) {
     return (
       <div className="flex flex-col h-screen bg-surface overflow-auto">
-        <div className="h-[73px] bg-white border-b border-stone-200 px-8 flex items-center flex-shrink-0">
+        <div className="flex h-[73px] flex-shrink-0 items-center border-b border-stone-200 bg-white px-8">
           <div>
             <h1 className="text-xl font-semibold text-stone-900">Dashboard</h1>
             <p className="text-sm text-stone-400 mt-0.5">
@@ -1320,7 +1322,7 @@ export function DashboardPage() {
         }}
         appliedCount={activeCount}
       />
-      <div className="h-[73px] bg-white border-b border-stone-200 px-8 flex items-center flex-shrink-0">
+      <div className="flex h-[73px] flex-shrink-0 items-center border-b border-stone-200 bg-white px-8">
         <div>
           <h1 className="text-xl font-semibold text-stone-900">
             {period}, Fernanda

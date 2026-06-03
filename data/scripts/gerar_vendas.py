@@ -8,9 +8,12 @@ Colunas: id, date_time, recipe_id, quantity, unit_price
 from __future__ import annotations
 
 from pathlib import Path
+from datetime import date, timedelta
+from typing import Any
 
 import numpy as np
 import pandas as pd
+from sqlalchemy import text
 
 # ---------------------------------------------------------------------------
 # Constantes
@@ -18,6 +21,7 @@ import pandas as pd
 SEED = 42
 START_DATE = "2023-01-01"
 END_DATE = "2026-05-19"
+HISTORICAL_SALES_END_DATE = date(2026, 6, 2)
 OPEN_HOUR = 8
 CLOSE_HOUR = 20  # último pedido até 19:59:59
 PRICE_FLOOR = 8.0
@@ -815,6 +819,342 @@ def generate_sales(
     sales = sales.sort_values("date_time").reset_index(drop=True)
     sales["id"] = [f"VEN{i:09d}" for i in range(1, len(sales) + 1)]
     return sales[["id", "date_time", "recipe_id", "quantity", "unit_price"]]
+
+
+def _sale_records_summary(
+    records: list[dict[str, Any]], existing_sales: int, status: str
+) -> dict[str, Any]:
+    return {
+        "status": status,
+        "sales_created": len(records),
+        "existing_sales": existing_sales,
+        "total_quantity": float(sum(record["quantity"] for record in records)),
+        "total_revenue": float(
+            sum(record["quantity"] * record["unit_price"] for record in records)
+        ),
+    }
+
+
+def _insert_sales(engine, records: list[dict[str, Any]]) -> None:
+    if not records:
+        return
+    with engine.begin() as conn:
+        next_id = int(
+            conn.execute(
+                text("""
+                    SELECT COALESCE(max(CAST(substring(id FROM 4) AS BIGINT)), 0) + 1
+                    FROM vendas
+                    WHERE id ~ '^VEN[0-9]{9}$'
+                    """)
+            ).scalar()
+            or 1
+        )
+        for offset, record in enumerate(records):
+            record["id"] = f"VEN{next_id + offset:09d}"
+        conn.execute(
+            text("""
+                INSERT INTO vendas (id, date_time, recipe_id, quantity, unit_price)
+                VALUES (:id, :date_time, :recipe_id, :quantity, :unit_price)
+                ON CONFLICT (id) DO NOTHING
+                """),
+            records,
+        )
+
+
+# Usada pelo job `ml/jobs/generate_criticality_report.py`: mantém as vendas
+# históricas completas até 02/06/2026 antes de gerar o relatório diário.
+def backfill_historical_sales_until_cutoff(
+    engine, reference_date: date
+) -> dict[str, Any]:
+    cutoff = min(HISTORICAL_SALES_END_DATE, reference_date)
+    with engine.begin() as conn:
+        latest_sale_date = conn.execute(
+            text(
+                "SELECT max(date(date_time)) FROM vendas WHERE date(date_time) <= :cutoff"
+            ),
+            {"cutoff": cutoff},
+        ).scalar()
+        if latest_sale_date is None:
+            return {
+                "status": "skipped_no_sales_history",
+                "sales_created": 0,
+                "target_end_date": cutoff.isoformat(),
+            }
+        start_date = latest_sale_date + timedelta(days=1)
+        if start_date > cutoff:
+            return {
+                "status": "skipped_up_to_date",
+                "sales_created": 0,
+                "latest_sale_date": latest_sale_date.isoformat(),
+                "target_end_date": cutoff.isoformat(),
+            }
+
+        recipes = pd.read_sql_query(
+            text("""
+                SELECT id, name, sale_price
+                FROM receitas
+                WHERE sale_price IS NOT NULL
+                AND sale_price > 0
+                """),
+            conn,
+        )
+        history = pd.read_sql_query(
+            text("""
+                SELECT date(date_time) AS sale_date, recipe_id, quantity, unit_price
+                FROM vendas
+                WHERE date_time >= CAST(:start_date AS date) - INTERVAL '90 days'
+                AND date(date_time) < :start_date
+                """),
+            conn,
+            params={"start_date": start_date},
+        )
+
+    if recipes.empty or history.empty:
+        return {
+            "status": "skipped_missing_history_inputs",
+            "sales_created": 0,
+            "target_start_date": start_date.isoformat(),
+            "target_end_date": cutoff.isoformat(),
+        }
+
+    history["sale_date"] = pd.to_datetime(history["sale_date"])
+    history["weekday"] = history["sale_date"].dt.weekday
+    daily_profile = (
+        history.groupby(["sale_date", "weekday"])["quantity"]
+        .sum()
+        .reset_index(name="daily_quantity")
+    )
+    daily_totals = daily_profile.set_index("sale_date")["daily_quantity"]
+    weekday_means = daily_profile.groupby("weekday")["daily_quantity"].mean()
+    recipe_totals = history.groupby("recipe_id")["quantity"].sum()
+    global_daily_mean = max(1.0, float(daily_totals.mean()))
+    recipe_ids = recipes["id"].astype(str).to_numpy()
+    recipe_prices = {
+        str(row.id): float(row.sale_price) for row in recipes.itertuples(index=False)
+    }
+    weights = np.array(
+        [float(recipe_totals.get(recipe_id, 0.0)) for recipe_id in recipe_ids],
+        dtype=float,
+    )
+    if weights.sum() <= 0:
+        weights = np.ones(len(recipe_ids), dtype=float)
+    weights = weights / weights.sum()
+
+    rng = np.random.default_rng(int(cutoff.strftime("%Y%m%d")) + 711)
+    records: list[dict[str, Any]] = []
+    created_days = 0
+    for day in pd.date_range(start_date, cutoff, freq="D"):
+        current_date = day.date()
+        weekday = int(day.weekday())
+        expected_total = max(1.0, float(weekday_means.get(weekday, global_daily_mean)))
+        expected_total = 0.65 * expected_total + 0.35 * global_daily_mean
+        total_quantity = int(
+            max(
+                8,
+                np.round(rng.normal(expected_total, max(2.0, expected_total * 0.18))),
+            )
+        )
+        nonzero_count = int(np.count_nonzero(weights > 0))
+        n_lines = int(min(max(12, total_quantity // 3), len(recipe_ids), nonzero_count))
+        if n_lines <= 0:
+            continue
+        chosen = rng.choice(recipe_ids, size=n_lines, replace=False, p=weights)
+        line_weights = np.array(
+            [weights[np.where(recipe_ids == rid)[0][0]] for rid in chosen]
+        )
+        line_weights = line_weights / line_weights.sum()
+        quantities = np.maximum(1, np.floor(total_quantity * line_weights)).astype(int)
+        remainder = max(0, total_quantity - int(quantities.sum()))
+        if remainder:
+            bump = rng.choice(
+                len(quantities), size=remainder, replace=True, p=line_weights
+            )
+            for idx in bump:
+                quantities[int(idx)] += 1
+
+        for recipe_id, quantity in zip(chosen, quantities):
+            sale_time = pd.Timestamp(current_date) + pd.Timedelta(
+                hours=int(rng.integers(8, 20)),
+                minutes=int(rng.integers(0, 60)),
+                seconds=int(rng.integers(0, 60)),
+            )
+            records.append(
+                {
+                    "id": "",
+                    "date_time": sale_time.to_pydatetime(),
+                    "recipe_id": str(recipe_id),
+                    "quantity": float(quantity),
+                    "unit_price": float(recipe_prices[str(recipe_id)]),
+                }
+            )
+        created_days += 1
+
+    _insert_sales(engine, records)
+    payload = _sale_records_summary(records, 0, "created")
+    payload.update(
+        {
+            "mode": "historical_backfill",
+            "created_days": created_days,
+            "target_start_date": start_date.isoformat(),
+            "target_end_date": cutoff.isoformat(),
+        }
+    )
+    return payload
+
+
+# Usada pelo job `ml/jobs/generate_criticality_report.py`: a partir de
+# 03/06/2026, gera vendas operacionais com base na contagem do dia.
+def generate_operational_sales_from_contagem(
+    engine, reference_date: date, contagem_id: int
+) -> dict[str, Any]:
+    if reference_date <= HISTORICAL_SALES_END_DATE:
+        return {
+            "status": "skipped_historical_period",
+            "sales_created": 0,
+            "cutoff_date": HISTORICAL_SALES_END_DATE.isoformat(),
+        }
+
+    with engine.begin() as conn:
+        existing_sales = int(
+            conn.execute(
+                text("SELECT count(*) FROM vendas WHERE date(date_time) = :reference_date"),
+                {"reference_date": reference_date},
+            ).scalar()
+            or 0
+        )
+        if existing_sales:
+            return {
+                "status": "skipped_existing_sales",
+                "sales_created": 0,
+                "existing_sales": existing_sales,
+            }
+
+        recipes = pd.read_sql_query(
+            text("""
+                SELECT id, name, sale_price
+                FROM receitas
+                WHERE sale_price IS NOT NULL
+                AND sale_price > 0
+                """),
+            conn,
+        )
+        recipe_items = pd.read_sql_query(
+            text("SELECT recipe_id, ingredient_id, qty FROM receitas_ingredientes"),
+            conn,
+        )
+        stock = pd.read_sql_query(
+            text("""
+                SELECT ingrediente_id AS ingredient_id, quantidade_nova AS qtd
+                FROM contagem_log
+                WHERE contagem_id = :contagem_id
+                """),
+            conn,
+            params={"contagem_id": contagem_id},
+        )
+        history = pd.read_sql_query(
+            text("""
+                SELECT recipe_id, avg(quantity) AS avg_quantity
+                FROM vendas
+                WHERE date_time >= CAST(:reference_date AS date) - INTERVAL '28 days'
+                AND date(date_time) < :reference_date
+                GROUP BY recipe_id
+                """),
+            conn,
+            params={"reference_date": reference_date},
+        )
+
+    if recipes.empty or recipe_items.empty or stock.empty:
+        return {
+            "status": "skipped_missing_inputs",
+            "sales_created": 0,
+            "existing_sales": existing_sales,
+        }
+
+    stock_by_ingredient = {
+        str(row.ingredient_id): max(0.0, float(row.qtd or 0.0))
+        for row in stock.itertuples(index=False)
+    }
+    demand_by_recipe = {
+        str(row.recipe_id): max(0.0, float(row.avg_quantity or 0.0))
+        for row in history.itertuples(index=False)
+    }
+    items_by_recipe = {
+        str(recipe_id): group
+        for recipe_id, group in recipe_items.groupby("recipe_id", dropna=False)
+    }
+
+    rng = np.random.default_rng(int(reference_date.strftime("%Y%m%d")))
+    remaining_stock = dict(stock_by_ingredient)
+    records: list[dict[str, Any]] = []
+    candidates = recipes.sample(
+        frac=1.0, random_state=int(reference_date.strftime("%d%m%Y"))
+    )
+    for recipe in candidates.itertuples(index=False):
+        recipe_id = str(recipe.id)
+        ingredients = items_by_recipe.get(recipe_id)
+        if ingredients is None or ingredients.empty:
+            continue
+
+        possible_quantities = []
+        for item in ingredients.itertuples(index=False):
+            qty_per_sale = float(item.qty or 0.0)
+            if qty_per_sale <= 0:
+                continue
+            available = remaining_stock.get(str(item.ingredient_id), 0.0)
+            possible_quantities.append(available / qty_per_sale)
+        if not possible_quantities:
+            continue
+
+        max_possible = int(np.floor(min(possible_quantities)))
+        if max_possible <= 0:
+            continue
+
+        avg_demand = demand_by_recipe.get(recipe_id, 0.0)
+        if avg_demand <= 0:
+            avg_demand = float(rng.integers(1, 4))
+        demand = int(
+            max(1, np.ceil(rng.normal(avg_demand, max(1.0, avg_demand * 0.25))))
+        )
+        quantity = min(max_possible, demand)
+        if quantity <= 0:
+            continue
+
+        for item in ingredients.itertuples(index=False):
+            qty_per_sale = float(item.qty or 0.0)
+            if qty_per_sale > 0:
+                ingredient_id = str(item.ingredient_id)
+                remaining_stock[ingredient_id] = max(
+                    0.0,
+                    remaining_stock.get(ingredient_id, 0.0) - qty_per_sale * quantity,
+                )
+
+        sale_time = pd.Timestamp(reference_date) + pd.Timedelta(
+            hours=int(rng.integers(8, 21)),
+            minutes=int(rng.integers(0, 60)),
+        )
+        records.append(
+            {
+                "id": "",
+                "date_time": sale_time.to_pydatetime(),
+                "recipe_id": recipe_id,
+                "quantity": float(quantity),
+                "unit_price": float(recipe.sale_price),
+            }
+        )
+
+    if not records:
+        return {
+            "status": "skipped_no_feasible_sales",
+            "mode": "from_contagem",
+            "sales_created": 0,
+            "existing_sales": existing_sales,
+        }
+
+    _insert_sales(engine, records)
+    payload = _sale_records_summary(records, existing_sales, "created")
+    payload["mode"] = "from_contagem"
+    payload["contagem_id"] = contagem_id
+    return payload
 
 
 def validate_sales(sales: pd.DataFrame, catalog: pd.DataFrame) -> None:

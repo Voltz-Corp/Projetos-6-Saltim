@@ -1,6 +1,7 @@
 import { useMemo, useState, type ComponentType, type ReactNode } from 'react'
 import { createRoute, Link, useNavigate } from '@tanstack/react-router'
 import {
+  AlertTriangle,
   ArrowLeft,
   CalendarClock,
   CalendarDays,
@@ -91,6 +92,19 @@ const fmt = {
     })}%`,
 }
 
+function todayISO() {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Recife',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date())
+}
+
+function isDeliveryDue(expectedDate: string) {
+  return expectedDate <= todayISO()
+}
+
 function PedidosPage() {
   const [view, setView] = useState<OrdersView>('history')
   const [status, setStatus] = useState('')
@@ -167,10 +181,11 @@ function PedidosPage() {
 
   const items = data?.items ?? []
   const activeTotal = view === 'history' ? data?.total ?? 0 : inTransit.length
+  const dueTransit = inTransit.filter((pedido) => isDeliveryDue(pedido.expected_date))
 
   return (
     <div className="flex h-screen flex-col bg-surface">
-      <header className="flex flex-shrink-0 items-center justify-between border-b border-stone-200 bg-white px-8 py-5">
+      <header className="flex h-[73px] flex-shrink-0 items-center justify-between border-b border-stone-200 bg-white px-8">
         <div>
           <h1 className="text-xl font-semibold text-stone-900">Pedidos</h1>
           <p className="mt-1 text-xs tabular-nums text-stone-400">
@@ -239,6 +254,20 @@ function PedidosPage() {
         <section className="rounded-xl border border-stone-200 bg-white p-4 shadow-sm">
           <SegmentedToggle value={view} onChange={setView} />
         </section>
+
+        {view === 'transit' && dueTransit.length > 0 && (
+          <section className="flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm text-amber-900">
+            <AlertTriangle className="mt-0.5 size-5 flex-shrink-0" strokeWidth={2} />
+            <div>
+              <p className="font-black">
+                {dueTransit.length} pedido{dueTransit.length === 1 ? '' : 's'} precisa{dueTransit.length === 1 ? '' : 'm'} ser conferido{dueTransit.length === 1 ? '' : 's'}.
+              </p>
+              <p className="mt-1 text-xs font-semibold text-amber-800">
+                A previsão de entrega é hoje ou já passou. Entre no pedido e marque como entregue quando o recebimento for confirmado.
+              </p>
+            </div>
+          </section>
+        )}
 
         <DataPanel
           title={view === 'history' ? 'Histórico por fornecedor e dia' : 'Pedidos em trânsito'}
@@ -411,7 +440,7 @@ function PedidoNewPage() {
 
   return (
     <div className="flex h-screen flex-col bg-surface">
-      <header className="flex flex-shrink-0 items-center gap-3 border-b border-stone-200 bg-white px-8 py-4">
+      <header className="flex h-[73px] flex-shrink-0 items-center gap-3 border-b border-stone-200 bg-white px-8">
         <button
           type="button"
           onClick={() => (step === 'review' ? setStep('selection') : navigate({ to: '/pedidos' }))}
@@ -669,7 +698,7 @@ function PedidoGroupDetailPage() {
 
   return (
     <div className="flex h-screen flex-col bg-surface">
-      <header className="flex flex-shrink-0 items-center gap-3 border-b border-stone-200 bg-white px-8 py-4">
+      <header className="flex h-[73px] flex-shrink-0 items-center gap-3 border-b border-stone-200 bg-white px-8">
         <button
           type="button"
           onClick={() => navigate({ to: '/pedidos' })}
@@ -1158,10 +1187,14 @@ function PedidosTable({
     >
       {pedidos.map((pedido, index) => {
         const displayId = `PED-${String(rowOffset + index + 1).padStart(4, '0')}`
+        const deliveryDue = showExpectedDate && isDeliveryDue(pedido.expected_date)
         return (
         <tr
           key={pedido.group_key}
-          className="border-b border-stone-100 transition-colors last:border-0 hover:bg-stone-50"
+          className={[
+            'border-b border-stone-100 transition-colors last:border-0 hover:bg-stone-50',
+            deliveryDue ? 'bg-amber-50/70' : '',
+          ].join(' ')}
         >
           <BodyCell strong>
             <Link
@@ -1182,10 +1215,18 @@ function PedidosTable({
           </BodyCell>
           {showExpectedDate && (
             <BodyCell>
-              <span className="inline-flex items-center gap-1.5 text-stone-700">
-                <CalendarDays className="size-4 text-brand-600" strokeWidth={1.9} />
-                {fmt.date(pedido.expected_date)}
-              </span>
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="inline-flex items-center gap-1.5 text-stone-700">
+                  <CalendarDays className="size-4 text-brand-600" strokeWidth={1.9} />
+                  {fmt.date(pedido.expected_date)}
+                </span>
+                {deliveryDue && (
+                  <span className="inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-100 px-2 py-0.5 text-[11px] font-black text-amber-800">
+                    <AlertTriangle className="size-3" strokeWidth={2} />
+                    Marcar entrega
+                  </span>
+                )}
+              </div>
             </BodyCell>
           )}
         </tr>

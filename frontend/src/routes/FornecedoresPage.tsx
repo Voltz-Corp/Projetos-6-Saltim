@@ -192,7 +192,7 @@ function FornecedorProfilePage() {
   return (
     <div className="flex h-screen flex-col bg-surface">
       <TruckLoading show={showLoading} />
-      <header className="flex flex-shrink-0 items-center gap-3 border-b border-stone-200 bg-white px-8 py-4">
+      <header className="flex h-[73px] flex-shrink-0 items-center gap-3 border-b border-stone-200 bg-white px-8">
         <button
           type="button"
           onClick={() => navigate({ to: '/fornecedores' })}
@@ -283,7 +283,7 @@ function PageHeader({
   action?: React.ReactNode;
 }) {
   return (
-    <header className="flex flex-shrink-0 items-center justify-between border-b border-stone-200 bg-white px-8 py-5">
+    <header className="flex h-[73px] flex-shrink-0 items-center justify-between border-b border-stone-200 bg-white px-8">
       <div>
         <h1 className="text-xl font-semibold text-stone-900">{title}</h1>
         <p className="mt-1 text-xs tabular-nums text-stone-400">{subtitle}</p>

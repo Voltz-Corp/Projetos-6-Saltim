@@ -107,7 +107,7 @@ function FornecedorNewPage() {
 
   return (
     <div className="flex h-screen flex-col bg-surface">
-      <header className="flex flex-shrink-0 items-center gap-3 border-b border-stone-200 bg-white px-8 py-4">
+      <header className="flex h-[73px] flex-shrink-0 items-center gap-3 border-b border-stone-200 bg-white px-8">
         <button
           type="button"
           onClick={() => navigate({ to: '/fornecedores' })}

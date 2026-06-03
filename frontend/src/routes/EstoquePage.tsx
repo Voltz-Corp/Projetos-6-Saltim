@@ -228,7 +228,7 @@ export function EstoquePage() {
       )}
 
       {/* Page header */}
-      <div className="bg-white border-b border-stone-200 px-8 py-4 flex items-center gap-4 flex-shrink-0">
+      <div className="flex h-[73px] flex-shrink-0 items-center gap-4 border-b border-stone-200 bg-white px-8">
         <div className="flex-1 min-w-0">
           <h1 className="text-xl font-semibold text-stone-900">Estoque</h1>
           <p className="text-xs text-stone-400 mt-0.5 tabular-nums">
