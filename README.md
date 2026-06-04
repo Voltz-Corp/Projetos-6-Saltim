@@ -71,6 +71,9 @@ No notebook de exploração, essa ideia aparece na forma de um pipeline com carg
 <a id="tecnologias"></a>
 ## 🧰 **Tecnologias**
 
+<details>
+<summary>Clique para ver as tecnologias usadas</summary>
+
 ### **Frontend**
 
 * React 19
@@ -94,9 +97,14 @@ No notebook de exploração, essa ideia aparece na forma de um pipeline com carg
 * PostgreSQL 16
 * CSVs em `data/`
 * Carga relacional dos CSVs no schema `public` via backend
-* Datasets de ML no schema `ml`
-* Notebooks em `ml/notebooks/`
+* Datasets/saídas de ML no schema `ml` e em `data/ml_dataset/outputs/`
+* Notebooks e utilitários de ML em `ml/notebooks/`
+* Jobs operacionais de ML em `ml/jobs/`
+* MLflow 3.12 (tracking server + Model Registry + artefatos)
+* Modelos/stack: scikit-learn e XGBoost
 * Scripts de geração em `data/scripts/`
+
+</details>
 
 <a id="como-executar"></a>
 ## 🚀 **Como Executar**
@@ -105,7 +113,7 @@ No notebook de exploração, essa ideia aparece na forma de um pipeline com carg
 
 * Bun para o frontend
 * Python 3.11+ para o backend
-* Docker e Docker Compose para o banco
+* Docker e Docker Compose para o banco e para o MLflow
 
 ### **1. Executar em modo desenvolvimento**
 
@@ -113,7 +121,9 @@ No notebook de exploração, essa ideia aparece na forma de um pipeline com carg
 ./scripts/run-dev.sh
 ```
 
-O script sobe o Postgres, instala dependências quando necessário, inicia o backend em `http://localhost:8000` e o frontend em `http://localhost:5173`.
+O script sobe o Postgres (e o MLflow, por padrão), instala dependências quando necessário, inicia o backend em `http://localhost:8000` e o frontend em `http://localhost:5173`.
+
+> Observação: `scripts/run-dev.sh` é um script **Bash** (pensado para Linux/WSL). No Windows “puro”, prefira os passos manuais abaixo ou execute via WSL2.
 
 Ao iniciar, o backend executa os SQLs de `backend/db/` e carrega os CSVs de `data/` no schema `public` e os datasets de `data/ml_dataset/outputs/` no schema `ml`. Para iniciar sem recarregar os CSVs:
 
@@ -145,40 +155,97 @@ bun run dev
 * Backend: `http://localhost:8000`
 * Health check: `http://localhost:8000/health`
 
-### **5. MLflow para os notebooks**
+### **5. ML (modelo de criticidade) e MLflow**
 
-Os notebooks two-stage registram modelos, métricas, predições e gráficos diretamente no MLflow. Para subir o tracking server com backend em PostgreSQL:
+Este repositório inclui um pipeline de **ML para criticidade de estoque**. A ideia é estimar um **limiar dinâmico de “alerta de compra”** por ingrediente e, a partir dele, derivar a criticidade operacional.
+
+**O que o modelo prevê (target):**
+
+* `y_alert_threshold_pct`: percentual (0–1) que representa o limiar de cobertura de estoque a partir do qual o item deve ser classificado como **Alerta de compra**.
+* `y_critical_threshold_pct`: limiar crítico derivado do limiar de alerta (gap fixo no utilitário `two_stage_common.py`).
+
+A classificação final usada nos relatórios/jobs é derivada de `cobertura_estoque_pct` vs. esses limiares (labels: `OK` e `Alerta de compra`).
+
+#### MLflow (tracking server)
+
+Os notebooks registram **métricas, predições, gráficos e o artefato do modelo** no MLflow (não geramos `.pkl` versionados no repositório).
+
+Para subir o MLflow com backend store em PostgreSQL (definido no `docker-compose.yml`):
 
 ```bash
 docker compose up -d --build db mlflow
 ```
 
-Depois acesse:
+* O **backend store** (experimentos/runs/Model Registry) fica no Postgres.
+* Os **artefatos** (modelos, gráficos, CSVs logados) ficam no volume Docker `mlflow_artifacts`.
 
-* MLflow: `http://localhost:5000`
+Acesse:
 
-Por padrão os notebooks usam `MLFLOW_TRACKING_URI=http://localhost:5000`. Os modelos não são salvos como `.pkl` em `ml/artifacts/`; o artefato serializado fica dentro do próprio MLflow.
-Os experimentos ficam organizados por caminho, seguindo `ml/notebooks/`: `notebooks/01_modelos_teste/...` e `notebooks/02_modelos_finais/...`.
-Os modelos finais usam o dataset completo, e o notebook `07_modelos_finais_comparison.ipynb` compara os champions finais incluindo o tamanho do artefato do modelo.
+* MLflow UI: `http://localhost:5000`
 
-<a id="api"></a>
-## 🧪 **API**
+Variáveis relevantes:
 
-### **Estoque**
+* `MLFLOW_TRACKING_URI` (default: `http://localhost:5000`)
 
-* `GET /api/estoque` - lista os ingredientes
-* `GET /api/estoque/paginado` - lista paginada
-* `PATCH /api/estoque` - atualiza o estoque em lote
-* `PATCH /api/ingredientes/{ingrediente_id}` - edita um ingrediente
+> Dica: para rodar o sistema web sem MLflow, use `START_MLFLOW=0 ./scripts/run-dev.sh`.
 
-### **Histórico**
+#### Rodar notebooks de ML
 
-* `GET /api/log` - retorna o histórico geral de contagens
-* `GET /api/log/{ingrediente_id}` - retorna o histórico de um ingrediente
+Pré-requisitos: Python 3.11+ e Jupyter.
 
-### **Saúde**
+```bash
+cd ml
+python -m venv .venv
+# Windows
+.venv\Scripts\activate
+# Linux/macOS
+# source .venv/bin/activate
+pip install -r requirements.txt
+jupyter lab
+```
 
-* `GET /health` - verifica se a API está ativa
+Os notebooks ficam em `ml/notebooks/` e usam, por padrão, `MLFLOW_TRACKING_URI=http://localhost:5000`.
+
+* `01_modelos_teste/`: experimentos e comparações rápidas.
+* `02_modelos_finais/`: tuning e champions (ex.: RandomForest e XGBoost) com dataset completo.
+
+#### Job: relatório diário de criticidade (inferência)
+
+O job `ml/jobs/generate_criticality_report.py` executa uma inferência operacional (por dia), **carrega um modelo do MLflow** e grava o resultado no Postgres (schema `ml`), além de logar uma execução no MLflow.
+
+Pré-condições:
+
+* Postgres rodando e populado (ex.: via `./scripts/run-dev.sh`, que carrega CSVs no startup quando `LOAD_CSV_DATA_ON_STARTUP=1`).
+* MLflow rodando (`docker compose up -d mlflow`).
+
+Variáveis do job:
+
+* `DATABASE_URL` (default: `postgresql://saltim:saltim123@localhost:5432/saltim_db`)
+* `MLFLOW_TRACKING_URI` (default: `http://localhost:5000`)
+* `CRITICIDADE_MODEL_URI` (default: um `runs:/.../model`)
+* `CRITICIDADE_DAILY_MLFLOW_EXPERIMENT` (default: `jobs/criticidade/relatorio_diario`)
+
+Exemplo:
+
+```bash
+python ml/jobs/generate_criticality_report.py --reference-date today
+```
+
+<a id="teste-modelo"></a>
+## 🧪 **Testar o modelo no Frontend**
+
+A forma mais simples de validar o modelo “no projeto” (sem rodar notebook) é pela tela de **Criticidade** no próprio frontend:
+
+* Rota: `http://localhost:5173/ml/criticidade` (menu lateral → **Criticidade**)
+* Ação: clique em **“Rodar modelo”** para disparar a geração do relatório do dia.
+* Resultado: a página atualiza o status (`running/success/failed`), KPIs e as tabelas/gráficos com os itens em **OK** vs **Alerta de compra**.
+
+Pré-condições para funcionar:
+
+* Backend rodando e acessível pelo frontend (por padrão `http://localhost:8000`).
+  * Se necessário, configure `VITE_API_URL` no frontend (ex.: `VITE_API_URL=http://localhost:8000`).
+* Postgres rodando e populado (ex.: `./scripts/run-dev.sh` com `LOAD_CSV_DATA_ON_STARTUP=1`).
+* MLflow rodando para carregar o modelo configurado em `CRITICIDADE_MODEL_URI`.
 
 <a id="entregaveis"></a>
 ## 📁 **Entregáveis**
@@ -189,7 +256,8 @@ Os modelos finais usam o dataset completo, e o notebook `07_modelos_finais_compa
 * [backend/](backend) - API FastAPI, modelos, schemas e integração com o banco.
 * [frontend/](frontend) - interface de controle de estoque com dashboard, estoque, contagem e edição.
 * [data/](data) - bases CSV, notebooks e scripts de apoio.
-* [ml/](ml) - pipeline de análise e baseline preditivo.
+* [ml/](ml) - notebooks/utilitários de ML e jobs de criticidade.
+* [mlflow/](mlflow) - imagem (Dockerfile) do tracking server MLflow.
 * [entregaveis/](entregaveis) - materiais complementares do projeto.
 
 </details>
