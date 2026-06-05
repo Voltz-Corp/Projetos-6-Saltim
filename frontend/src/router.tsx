@@ -11,6 +11,7 @@ import { ingredienteEditRoute } from './routes/IngredienteEditPage'
 import { fornecedorNewRoute } from './routes/FornecedorNewPage'
 import { fornecedorProfileRoute, fornecedoresRoute } from './routes/FornecedoresPage'
 import { pedidoGroupDetailRoute, pedidoNewRoute, pedidosRoute } from './routes/PedidosPage'
+import { aparenciaAliasRoute, aparenciaRoute } from './routes/AparenciaPage'
 
 const routeTree = rootRoute.addChildren([
   dashboardRoute,
@@ -27,6 +28,8 @@ const routeTree = rootRoute.addChildren([
   pedidosRoute,
   pedidoNewRoute,
   pedidoGroupDetailRoute,
+  aparenciaRoute,
+  aparenciaAliasRoute,
 ])
 
 export const router = createRouter({ routeTree })

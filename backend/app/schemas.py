@@ -444,10 +444,19 @@ class PedidoCreateRequest(BaseModel):
     items: List[PedidoCreateItem]
 
 
+class PedidoEmailResult(BaseModel):
+    supplier_id: str
+    supplier_name: str
+    email: Optional[str] = None
+    status: str
+    message: str
+
+
 class PedidoCreateResponse(BaseModel):
     groups: List[PedidoGroupOut]
     created: int
     updated: int
+    email_results: List[PedidoEmailResult] = Field(default_factory=list)
 
 
 class DashboardRankItem(BaseModel):

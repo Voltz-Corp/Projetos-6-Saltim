@@ -37,6 +37,7 @@ import {
   usePedidos,
   usePedidosEmTransito,
   type PedidoDetailItem,
+  type PedidoEmailResult,
   type PedidoFilters,
   type PedidoGroup,
   type PedidoRecommendationItem,
@@ -182,6 +183,7 @@ function PedidosPage() {
   const items = data?.items ?? []
   const activeTotal = view === 'history' ? data?.total ?? 0 : inTransit.length
   const dueTransit = inTransit.filter((pedido) => isDeliveryDue(pedido.expected_date))
+  const dueTransitQty = dueTransit.reduce((total, pedido) => total + pedido.items_qty, 0)
 
   return (
     <div className="flex h-screen flex-col bg-surface">
@@ -256,15 +258,27 @@ function PedidosPage() {
         </section>
 
         {view === 'transit' && dueTransit.length > 0 && (
-          <section className="flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm text-amber-900">
-            <AlertTriangle className="mt-0.5 size-5 flex-shrink-0" strokeWidth={2} />
-            <div>
-              <p className="font-black">
-                {dueTransit.length} pedido{dueTransit.length === 1 ? '' : 's'} precisa{dueTransit.length === 1 ? '' : 'm'} ser conferido{dueTransit.length === 1 ? '' : 's'}.
-              </p>
-              <p className="mt-1 text-xs font-semibold text-amber-800">
-                A previsão de entrega é hoje ou já passou. Entre no pedido e marque como entregue quando o recebimento for confirmado.
-              </p>
+          <section className="flex flex-col gap-4 rounded-lg border border-amber-200 bg-amber-50 px-5 py-4 text-amber-950 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex min-w-0 items-start gap-3">
+              <span className="flex size-10 flex-shrink-0 items-center justify-center rounded-lg bg-amber-100 text-amber-700">
+                <AlertTriangle className="size-5" strokeWidth={2} />
+              </span>
+              <div className="min-w-0">
+                <p className="text-sm font-black">Entregas aguardando recebimento</p>
+                <p className="mt-1 text-xs font-semibold leading-5 text-amber-800">
+                  {dueTransit.length} pedido{dueTransit.length === 1 ? '' : 's'} com previsao vencida ou para hoje. Ao marcar como entregue, os ingredientes entram no estoque atual.
+                </p>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-2 text-center sm:w-56">
+              <span className="rounded-lg bg-white px-3 py-2 shadow-sm">
+                <span className="block text-lg font-black">{dueTransit.length}</span>
+                <span className="text-[11px] font-bold uppercase text-stone-400">pedidos</span>
+              </span>
+              <span className="rounded-lg bg-white px-3 py-2 shadow-sm">
+                <span className="block text-lg font-black">{fmt.number(dueTransitQty, 2)}</span>
+                <span className="text-[11px] font-bold uppercase text-stone-400">itens</span>
+              </span>
             </div>
           </section>
         )}
@@ -322,6 +336,8 @@ function PedidoNewPage() {
   const [recommendation, setRecommendation] = useState<PedidoRecommendationItem[]>([])
   const [supplierByIngredient, setSupplierByIngredient] = useState<Record<string, string>>({})
   const [error, setError] = useState('')
+  const [emailNotice, setEmailNotice] = useState('')
+  const [confirmed, setConfirmed] = useState(false)
 
   const selectedIds = useMemo(
     () => new Set(selected.map((item) => String(item.ingredient.id))),
@@ -399,6 +415,8 @@ function PedidoNewPage() {
 
   async function handleReview() {
     setError('')
+    setEmailNotice('')
+    setConfirmed(false)
     try {
       const response = await recommendPedido.mutateAsync({
         items: selected.map((item) => ({
@@ -422,8 +440,9 @@ function PedidoNewPage() {
 
   async function handleConfirm() {
     setError('')
+    setEmailNotice('')
     try {
-      await createPedido.mutateAsync({
+      const response = await createPedido.mutateAsync({
         items: recommendation
           .filter((item) => supplierByIngredient[item.ingredient_id])
           .map((item) => ({
@@ -432,6 +451,14 @@ function PedidoNewPage() {
             supplier_id: supplierByIngredient[item.ingredient_id],
           })),
       })
+      const emailIssues = (response.email_results ?? []).filter(
+        (result) => result.status !== 'sent',
+      )
+      if (emailIssues.length > 0) {
+        setConfirmed(true)
+        setEmailNotice(formatEmailNotice(emailIssues))
+        return
+      }
       navigate({ to: '/pedidos' })
     } catch {
       setError('Não foi possível confirmar os pedidos.')
@@ -466,6 +493,12 @@ function PedidoNewPage() {
           {error && (
             <section className="rounded-xl border border-red-100 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">
               {error}
+            </section>
+          )}
+
+          {emailNotice && (
+            <section className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-800">
+              {emailNotice}
             </section>
           )}
 
@@ -669,6 +702,7 @@ function PedidoNewPage() {
                   type="button"
                   disabled={
                     createPedido.isPending ||
+                    confirmed ||
                     recommendation.length === 0 ||
                     unresolvedItems.length > 0
                   }
@@ -677,6 +711,15 @@ function PedidoNewPage() {
                 >
                   {createPedido.isPending ? 'Confirmando...' : 'Confirmar pedidos'}
                 </button>
+                {confirmed && (
+                  <button
+                    type="button"
+                    onClick={() => navigate({ to: '/pedidos' })}
+                    className="rounded-lg bg-stone-900 px-4 py-2 text-sm font-bold text-white transition hover:bg-stone-800"
+                  >
+                    Ir para pedidos
+                  </button>
+                )}
               </div>
             </>
           )}
@@ -1336,6 +1379,29 @@ function buildReviewGroups(
   return Array.from(groups.values()).sort((a, b) =>
     a.supplierName.localeCompare(b.supplierName),
   )
+}
+
+function formatEmailNotice(results: PedidoEmailResult[]) {
+  const disabled = results.filter((result) => result.status === 'disabled')
+  const missing = results.filter((result) => result.status === 'missing_email')
+  const failed = results.filter((result) => result.status === 'failed')
+  const parts: string[] = []
+
+  if (disabled.length > 0) {
+    parts.push('SMTP nao configurado; nenhum email foi enviado.')
+  }
+  if (missing.length > 0) {
+    parts.push(
+      `Sem email cadastrado: ${missing.map((result) => result.supplier_name).join(', ')}.`,
+    )
+  }
+  if (failed.length > 0) {
+    parts.push(
+      `Falha no envio: ${failed.map((result) => result.supplier_name).join(', ')}.`,
+    )
+  }
+
+  return `Pedido criado. ${parts.join(' ')}`
 }
 
 function formatStatus(status: string) {

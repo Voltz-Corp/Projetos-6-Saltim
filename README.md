@@ -95,6 +95,7 @@ No notebook de exploração, essa ideia aparece na forma de um pipeline com carg
 ### **Dados e análise**
 
 * PostgreSQL 16
+* Mailpit para captura local de emails de pedidos
 * CSVs em `data/`
 * Carga relacional dos CSVs no schema `public` via backend
 * Datasets/saídas de ML no schema `ml` e em `data/ml_dataset/outputs/`
@@ -113,23 +114,46 @@ No notebook de exploração, essa ideia aparece na forma de um pipeline com carg
 
 * Bun para o frontend
 * Python 3.11+ para o backend
-* Docker e Docker Compose para o banco e para o MLflow
+* Docker e Docker Compose para Postgres, MLflow e Mailpit
+* Bash para executar o script unico:
+  * Linux/WSL: terminal normal
+  * Windows: Git Bash ou WSL2
 
 ### **1. Executar em modo desenvolvimento**
+
+```bash
+./scripts/start-all.sh
+```
+
+O script sobe Postgres, MLflow e Mailpit, instala dependencias quando necessario, inicia o backend em `http://localhost:8000` e o frontend em `http://localhost:5173`.
+
+Tambem funciona chamar diretamente:
 
 ```bash
 ./scripts/run-dev.sh
 ```
 
-O script sobe o Postgres (e o MLflow, por padrão), instala dependências quando necessário, inicia o backend em `http://localhost:8000` e o frontend em `http://localhost:5173`.
-
-> Observação: `scripts/run-dev.sh` é um script **Bash** (pensado para Linux/WSL). No Windows “puro”, prefira os passos manuais abaixo ou execute via WSL2.
+No Windows, execute pelo **Git Bash** ou pelo **WSL2**. O script detecta automaticamente o Python do virtualenv em `.venv/bin/python` ou `.venv/Scripts/python.exe`.
 
 Ao iniciar, o backend executa os SQLs de `backend/db/` e carrega os CSVs de `data/` no schema `public` e os datasets de `data/ml_dataset/outputs/` no schema `ml`. Para iniciar sem recarregar os CSVs:
 
 ```bash
 LOAD_CSV_DATA_ON_STARTUP=0 ./scripts/run-dev.sh
 ```
+
+Servicos opcionais:
+
+```bash
+START_MLFLOW=0 ./scripts/run-dev.sh   # sobe sem MLflow
+START_MAILPIT=0 ./scripts/run-dev.sh  # sobe sem inbox de emails
+START_DB=0 ./scripts/run-dev.sh       # usa um Postgres ja existente
+```
+
+SMTP local de desenvolvimento:
+
+* Inbox de emails: `http://localhost:8025`
+* SMTP local: `localhost:1025`
+* O backend ja inicia com `SMTP_HOST=localhost`, `SMTP_PORT=1025`, `SMTP_FROM_EMAIL=pedidos@saltim.local` e `SMTP_USE_TLS=0`.
 
 ### **2. Executar manualmente o backend**
 
@@ -153,7 +177,21 @@ bun run dev
 
 * Frontend: `http://localhost:5173`
 * Backend: `http://localhost:8000`
+* API docs: `http://localhost:8000/docs`
 * Health check: `http://localhost:8000/health`
+* Inbox de emails de pedidos: `http://localhost:8025`
+* MLflow UI: `http://localhost:5000`
+* Configuracoes de aparencia: `http://localhost:5173/configuracoes/aparencia`
+
+### **Rotas novas de pedidos e emails**
+
+* `POST /api/pedidos`: cria pedidos e tenta enviar um email por fornecedor com os itens e quantidades confirmados.
+* A resposta inclui `email_results`, com um registro por fornecedor:
+  * `sent`: email enviado.
+  * `disabled`: SMTP nao configurado.
+  * `missing_email`: fornecedor sem email cadastrado.
+  * `failed`: falha no envio; o pedido continua salvo.
+* Os emails de desenvolvimento aparecem no Mailpit em `http://localhost:8025`.
 
 ### **5. ML (modelo de criticidade) e MLflow**
 

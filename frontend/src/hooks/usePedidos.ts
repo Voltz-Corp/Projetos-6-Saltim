@@ -114,10 +114,19 @@ export interface PedidoCreateRequest {
   }>
 }
 
+export interface PedidoEmailResult {
+  supplier_id: string
+  supplier_name: string
+  email?: string | null
+  status: 'sent' | 'failed' | 'missing_email' | 'disabled' | string
+  message: string
+}
+
 export interface PedidoCreateResponse {
   groups: PedidoGroup[]
   created: number
   updated: number
+  email_results: PedidoEmailResult[]
 }
 
 function paramsFromFilters(filters: PedidoFilters, includePagination = true) {
@@ -237,6 +246,10 @@ export function useMarkPedidoGroupDelivered() {
     onSuccess: (_data, variables) => {
       queryClient.invalidateQueries({ queryKey: ['pedidos'] })
       queryClient.invalidateQueries({ queryKey: ['pedidos-em-transito'] })
+      queryClient.invalidateQueries({ queryKey: ['estoque'] })
+      queryClient.invalidateQueries({ queryKey: ['estoque-paginado'] })
+      queryClient.invalidateQueries({ queryKey: ['dashboard'] })
+      queryClient.invalidateQueries({ queryKey: ['criticidade-report-latest'] })
       queryClient.invalidateQueries({
         queryKey: ['pedido-grupo', variables.supplierId, variables.orderDate],
       })

@@ -1,4 +1,5 @@
 import math
+import logging
 import os
 import re
 import subprocess
@@ -19,6 +20,12 @@ from sqlalchemy.orm import Session
 from agent import perguntar
 
 from .database import engine, Base, get_db, run_sql_loaders
+from .smtp_mailer import (
+    OrderEmail,
+    OrderEmailItem,
+    get_smtp_settings,
+    send_order_email,
+)
 from .models import (
     Categoria,
     Contagem,
@@ -66,6 +73,7 @@ from .schemas import (
     JobStatusOut,
     PedidoCreateRequest,
     PedidoCreateResponse,
+    PedidoEmailResult,
     PedidoDetailItem,
     PedidoDetailResponse,
     PedidoGroupOut,
@@ -104,6 +112,7 @@ PRODUCTION_CATEGORY_ID = "CAT0015"
 DASHBOARD_STOCK_UNITS = ("KG", "UND", "L")
 AGENT_ROWS_PREVIEW_LIMIT = 5
 RECIFE_TZ = ZoneInfo("America/Recife")
+logger = logging.getLogger(__name__)
 
 
 PURCHASE_NEEDED_FALLBACK_SQL = """
@@ -159,6 +168,7 @@ async def lifespan(app: FastAPI):
     ensure_ml_schema()
     Base.metadata.create_all(bind=engine)
     ensure_contagem_estoque_schema()
+    ensure_pedidos_schema()
     yield
 
 
@@ -270,6 +280,23 @@ def ensure_contagem_estoque_schema() -> None:
             "END IF; "
             "END $$"
         ),
+    )
+    raw_conn = engine.raw_connection()
+    try:
+        with raw_conn.cursor() as cursor:
+            for statement in statements:
+                cursor.execute(statement)
+        raw_conn.commit()
+    except Exception:
+        raw_conn.rollback()
+        raise
+    finally:
+        raw_conn.close()
+
+
+def ensure_pedidos_schema() -> None:
+    statements = (
+        "ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS estoque_aplicado_em TIMESTAMPTZ",
     )
     raw_conn = engine.raw_connection()
     try:
@@ -2765,6 +2792,38 @@ def _next_pedido_id(db: Session, reserved_ids: Optional[set[str]] = None) -> str
     return pedido_id
 
 
+def _add_pedidos_to_estoque_atual(
+    db: Session,
+    pedidos: list[Pedido],
+    delivery_date: date,
+) -> None:
+    received_by_ingredient: dict[str, float] = {}
+    for pedido in pedidos:
+        received_by_ingredient[pedido.ingredient_id] = (
+            received_by_ingredient.get(pedido.ingredient_id, 0.0)
+            + _as_float(pedido.qty)
+        )
+
+    for ingredient_id, received_qty in received_by_ingredient.items():
+        db.execute(
+            text(
+                """
+                INSERT INTO estoque_atual (id, ingrediente, qtd, data)
+                VALUES (:id, :ingrediente, :qtd, :data)
+                ON CONFLICT (ingrediente) DO UPDATE
+                SET qtd = estoque_atual.qtd + EXCLUDED.qtd,
+                    data = EXCLUDED.data
+                """
+            ),
+            {
+                "id": f"CUR-{ingredient_id}",
+                "ingrediente": ingredient_id,
+                "qtd": received_qty,
+                "data": delivery_date,
+            },
+        )
+
+
 def _pedido_base_query(db: Session):
     return (
         db.query(
@@ -2867,6 +2926,100 @@ def _serialize_pedido(row) -> PedidoOut:
         status=row.status,
         expected_date=row.data_prevista,
     )
+
+
+def _send_pedido_emails(
+    email_groups: dict[str, dict],
+    order_date: date,
+) -> list[PedidoEmailResult]:
+    settings_error = None
+    try:
+        settings = get_smtp_settings()
+    except Exception as exc:
+        logger.exception("Configuracao SMTP invalida")
+        settings = None
+        settings_error = str(exc)
+    results: list[PedidoEmailResult] = []
+
+    for supplier_id, group in sorted(
+        email_groups.items(),
+        key=lambda item: item[1]["supplier_name"],
+    ):
+        supplier_name = group["supplier_name"]
+        supplier_email = group.get("email")
+
+        if not supplier_email:
+            results.append(
+                PedidoEmailResult(
+                    supplier_id=supplier_id,
+                    supplier_name=supplier_name,
+                    email=supplier_email,
+                    status="missing_email",
+                    message="Fornecedor sem email cadastrado.",
+                )
+            )
+            continue
+
+        if settings_error is not None:
+            results.append(
+                PedidoEmailResult(
+                    supplier_id=supplier_id,
+                    supplier_name=supplier_name,
+                    email=supplier_email,
+                    status="failed",
+                    message=f"Configuracao SMTP invalida: {settings_error}",
+                )
+            )
+            continue
+
+        if settings is None:
+            results.append(
+                PedidoEmailResult(
+                    supplier_id=supplier_id,
+                    supplier_name=supplier_name,
+                    email=supplier_email,
+                    status="disabled",
+                    message="SMTP nao configurado.",
+                )
+            )
+            continue
+
+        order_email = OrderEmail(
+            supplier_name=supplier_name,
+            supplier_email=supplier_email,
+            order_date=order_date,
+            expected_date=group["expected_date"],
+            items=group["items"],
+        )
+        try:
+            send_order_email(order_email, settings)
+        except Exception as exc:
+            logger.exception(
+                "Falha ao enviar email do pedido para fornecedor %s",
+                supplier_id,
+            )
+            results.append(
+                PedidoEmailResult(
+                    supplier_id=supplier_id,
+                    supplier_name=supplier_name,
+                    email=supplier_email,
+                    status="failed",
+                    message=f"Falha ao enviar email: {exc}",
+                )
+            )
+            continue
+
+        results.append(
+            PedidoEmailResult(
+                supplier_id=supplier_id,
+                supplier_name=supplier_name,
+                email=supplier_email,
+                status="sent",
+                message="Email enviado com sucesso.",
+            )
+        )
+
+    return results
 
 
 @app.post("/api/pedidos/recomendacao", response_model=PedidoRecommendationResponse)
@@ -3042,12 +3195,17 @@ def create_pedidos(payload: PedidoCreateRequest, db: Session = Depends(get_db)):
     updated = 0
     touched_groups: set[tuple[str, date]] = set()
     reserved_pedido_ids: set[str] = set()
+    email_groups: dict[str, dict] = {}
 
     for (supplier_id, ingredient_id), qty in aggregated.items():
         option = (
             db.query(
                 FornecedorIngrediente,
                 Fornecedor.avg_delivery_time.label("avg_delivery_time"),
+                Fornecedor.name.label("supplier_name"),
+                Fornecedor.email.label("supplier_email"),
+                Ingrediente.name.label("ingredient_name"),
+                Ingrediente.unit.label("ingredient_unit"),
             )
             .join(Fornecedor, Fornecedor.id == FornecedorIngrediente.supplier_id)
             .join(Ingrediente, Ingrediente.id == FornecedorIngrediente.ingredient_id)
@@ -3065,15 +3223,48 @@ def create_pedidos(payload: PedidoCreateRequest, db: Session = Depends(get_db)):
                 ),
             )
 
-        fornecedor_ingrediente, avg_delivery_time = option
+        (
+            fornecedor_ingrediente,
+            avg_delivery_time,
+            supplier_name,
+            supplier_email,
+            ingredient_name,
+            ingredient_unit,
+        ) = option
         delivery_days = int(avg_delivery_time or 0)
         expected_date = today + timedelta(days=delivery_days)
+        email_unit_price, _ = _effective_unit_price(
+            fornecedor_ingrediente.price,
+            fornecedor_ingrediente.discount_percent,
+            fornecedor_ingrediente.min_to_discount,
+            qty,
+        )
+        email_group = email_groups.setdefault(
+            supplier_id,
+            {
+                "supplier_name": supplier_name,
+                "email": supplier_email,
+                "expected_date": expected_date,
+                "items": [],
+            },
+        )
+        email_group["expected_date"] = max(email_group["expected_date"], expected_date)
+        email_group["items"].append(
+            OrderEmailItem(
+                name=ingredient_name,
+                qty=qty,
+                unit=ingredient_unit,
+                unit_price=email_unit_price,
+                total_value=round(email_unit_price * qty, 2),
+            )
+        )
 
         existing = (
             db.query(Pedido)
             .filter(Pedido.supplier_id == supplier_id)
             .filter(Pedido.ingredient_id == ingredient_id)
             .filter(Pedido.data_pedido == today)
+            .filter(Pedido.status == "em_transito")
             .first()
         )
 
@@ -3112,6 +3303,7 @@ def create_pedidos(payload: PedidoCreateRequest, db: Session = Depends(get_db)):
         touched_groups.add((supplier_id, today))
 
     db.commit()
+    email_results = _send_pedido_emails(email_groups, today)
 
     groups = [
         group
@@ -3119,7 +3311,12 @@ def create_pedidos(payload: PedidoCreateRequest, db: Session = Depends(get_db)):
         if (group := _get_pedido_group(db, supplier_id, order_date)) is not None
     ]
 
-    return PedidoCreateResponse(groups=groups, created=created, updated=updated)
+    return PedidoCreateResponse(
+        groups=groups,
+        created=created,
+        updated=updated,
+        email_results=email_results,
+    )
 
 
 @app.get("/api/pedidos", response_model=PedidoPaginado)
@@ -3274,7 +3471,13 @@ def mark_pedido_group_delivered(
     if not pedidos:
         raise HTTPException(status_code=404, detail="Pedido não encontrado")
 
+    delivery_time = _now_recife()
+    pending_pedidos = [pedido for pedido in pedidos if pedido.status == "em_transito"]
+    _add_pedidos_to_estoque_atual(db, pending_pedidos, delivery_time.date())
+
     for pedido in pedidos:
+        if pedido.status == "em_transito":
+            pedido.estoque_aplicado_em = delivery_time
         pedido.status = "entregue"
 
     db.commit()

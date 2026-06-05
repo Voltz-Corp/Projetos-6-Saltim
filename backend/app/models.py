@@ -228,6 +228,7 @@ class Pedido(Base):
     data_pedido = Column(Date, nullable=False)
     status = Column(String, nullable=False)
     data_prevista = Column(Date, nullable=False)
+    estoque_aplicado_em = Column(DateTime(timezone=True))
 
     fornecedor_ingrediente = relationship(
         "FornecedorIngrediente", back_populates="pedidos"

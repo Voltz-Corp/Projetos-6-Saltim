@@ -3,39 +3,373 @@
 @theme {
   --font-sans: 'DM Sans', ui-sans-serif, system-ui, sans-serif;
 
-  /* Brand primary — laranja do logo (letra T) */
-  --color-brand-50:  #FEF4E8;
-  --color-brand-100: #FDEBD0;
-  --color-brand-200: #FAD4A8;
-  --color-brand-300: #F5A565;
-  --color-brand-600: #F07820;
-  --color-brand-700: #C5621A;
-  --color-white: #F7F7F7;
+  --color-brand-50: var(--theme-brand-50);
+  --color-brand-100: var(--theme-brand-100);
+  --color-brand-200: var(--theme-brand-200);
+  --color-brand-300: var(--theme-brand-300);
+  --color-brand-600: var(--theme-brand-600);
+  --color-brand-700: var(--theme-brand-700);
 
-  /* Paleta completa do logo Saltim */
-  --color-saltim-dark:   #1A1918;
-  --color-saltim-red:    #E4332B;
-  --color-saltim-green:  #2D7A3A;
-  --color-saltim-blue:   #52B9EB;
-  --color-saltim-orange: #F07820;
-  --color-saltim-cream:  #EDE0B4;
+  --color-stone-50: var(--theme-stone-50);
+  --color-stone-100: var(--theme-stone-100);
+  --color-stone-200: var(--theme-stone-200);
+  --color-stone-300: var(--theme-stone-300);
+  --color-stone-400: var(--theme-stone-400);
+  --color-stone-500: var(--theme-stone-500);
+  --color-stone-600: var(--theme-stone-600);
+  --color-stone-700: var(--theme-stone-700);
+  --color-stone-800: var(--theme-stone-800);
+  --color-stone-900: var(--theme-stone-900);
+  --color-stone-950: var(--theme-stone-950);
 
-  /* Surface */
-  --color-surface: #F5F4F1;
-  --color-ink:     #1A1918;
-  --color-muted:   #888780;
-  --color-subtle:  #5F5E5A;
-  --color-border:  #E8E6E0;
+  --color-saltim-dark: var(--theme-sidebar);
+  --color-saltim-red: var(--theme-red);
+  --color-saltim-green: var(--theme-green);
+  --color-saltim-blue: var(--theme-blue);
+  --color-saltim-orange: var(--theme-brand-600);
+  --color-saltim-cream: var(--theme-cream);
+
+  --color-surface: var(--theme-surface);
+  --color-ink: var(--theme-stone-900);
+  --color-muted: var(--theme-stone-500);
+  --color-subtle: var(--theme-stone-600);
+  --color-border: var(--theme-stone-200);
+}
+
+:root {
+  --theme-surface: #f5f4f1;
+  --theme-card: #ffffff;
+  --theme-sidebar: #1a1918;
+  --theme-on-primary: #ffffff;
+  --theme-brand-50: #fef4e8;
+  --theme-brand-100: #fdebd0;
+  --theme-brand-200: #fad4a8;
+  --theme-brand-300: #f5a565;
+  --theme-brand-600: #f07820;
+  --theme-brand-700: #c5621a;
+  --theme-stone-50: #fafaf9;
+  --theme-stone-100: #f5f5f4;
+  --theme-stone-200: #e7e5e4;
+  --theme-stone-300: #d6d3d1;
+  --theme-stone-400: #a8a29e;
+  --theme-stone-500: #78716c;
+  --theme-stone-600: #57534e;
+  --theme-stone-700: #44403c;
+  --theme-stone-800: #292524;
+  --theme-stone-900: #1c1917;
+  --theme-stone-950: #0c0a09;
+  --theme-red: #e4332b;
+  --theme-green: #2d7a3a;
+  --theme-blue: #52b9eb;
+  --theme-cream: #ede0b4;
+}
+
+html[data-theme='saltim-dark'] {
+  --theme-surface: #11100f;
+  --theme-card: #1c1917;
+  --theme-sidebar: #0c0a09;
+  --theme-brand-50: #431f0b;
+  --theme-brand-100: #5f2d10;
+  --theme-brand-200: #8a4618;
+  --theme-brand-300: #c46522;
+  --theme-brand-600: #f59e42;
+  --theme-brand-700: #ffb86c;
+  --theme-stone-50: #1f1c1a;
+  --theme-stone-100: #292524;
+  --theme-stone-200: #3a342f;
+  --theme-stone-300: #57534e;
+  --theme-stone-400: #a8a29e;
+  --theme-stone-500: #d6d3d1;
+  --theme-stone-600: #e7e5e4;
+  --theme-stone-700: #f5f5f4;
+  --theme-stone-800: #fafaf9;
+  --theme-stone-900: #ffffff;
+  --theme-stone-950: #ffffff;
+  --theme-red: #f87171;
+  --theme-green: #86efac;
+  --theme-blue: #7dd3fc;
+  --theme-cream: #4a3d22;
+}
+
+html[data-theme='dracula'] {
+  --theme-surface: #282a36;
+  --theme-card: #343746;
+  --theme-sidebar: #191a21;
+  --theme-brand-50: #3a2f4f;
+  --theme-brand-100: #4d3b70;
+  --theme-brand-200: #684f9b;
+  --theme-brand-300: #8f6ed5;
+  --theme-brand-600: #bd93f9;
+  --theme-brand-700: #ff79c6;
+  --theme-stone-50: #303241;
+  --theme-stone-100: #3a3d4f;
+  --theme-stone-200: #44475a;
+  --theme-stone-300: #6272a4;
+  --theme-stone-400: #a7abbe;
+  --theme-stone-500: #c4c8d4;
+  --theme-stone-600: #dfe1ea;
+  --theme-stone-700: #f0f1f7;
+  --theme-stone-800: #f8f8f2;
+  --theme-stone-900: #ffffff;
+  --theme-stone-950: #ffffff;
+  --theme-red: #ff5555;
+  --theme-green: #50fa7b;
+  --theme-blue: #8be9fd;
+  --theme-cream: #4a3d5d;
+}
+
+html[data-theme='nord'] {
+  --theme-surface: #2e3440;
+  --theme-card: #3b4252;
+  --theme-sidebar: #242933;
+  --theme-brand-50: #243944;
+  --theme-brand-100: #2d4d5d;
+  --theme-brand-200: #3d6678;
+  --theme-brand-300: #5e91a4;
+  --theme-brand-600: #88c0d0;
+  --theme-brand-700: #a3be8c;
+  --theme-stone-50: #353c4a;
+  --theme-stone-100: #3b4252;
+  --theme-stone-200: #434c5e;
+  --theme-stone-300: #4c566a;
+  --theme-stone-400: #81a1c1;
+  --theme-stone-500: #d8dee9;
+  --theme-stone-600: #e5e9f0;
+  --theme-stone-700: #eceff4;
+  --theme-stone-800: #f5f7fb;
+  --theme-stone-900: #ffffff;
+  --theme-stone-950: #ffffff;
+  --theme-red: #bf616a;
+  --theme-green: #a3be8c;
+  --theme-blue: #88c0d0;
+  --theme-cream: #4b5263;
+}
+
+html[data-theme='solarized-dark'] {
+  --theme-surface: #002b36;
+  --theme-card: #073642;
+  --theme-sidebar: #001f27;
+  --theme-brand-50: #073642;
+  --theme-brand-100: #0d4653;
+  --theme-brand-200: #155b6b;
+  --theme-brand-300: #1f76a0;
+  --theme-brand-600: #268bd2;
+  --theme-brand-700: #b58900;
+  --theme-stone-50: #073642;
+  --theme-stone-100: #0b3f4c;
+  --theme-stone-200: #586e75;
+  --theme-stone-300: #657b83;
+  --theme-stone-400: #839496;
+  --theme-stone-500: #93a1a1;
+  --theme-stone-600: #eee8d5;
+  --theme-stone-700: #fdf6e3;
+  --theme-stone-800: #fff8df;
+  --theme-stone-900: #fffdf4;
+  --theme-stone-950: #ffffff;
+  --theme-red: #dc322f;
+  --theme-green: #859900;
+  --theme-blue: #268bd2;
+  --theme-cream: #51431a;
+}
+
+html[data-theme='solarized-light'] {
+  --theme-surface: #fdf6e3;
+  --theme-card: #fffbea;
+  --theme-sidebar: #eee8d5;
+  --theme-brand-50: #e2f1f4;
+  --theme-brand-100: #c9e5ec;
+  --theme-brand-200: #9bd0e0;
+  --theme-brand-300: #5caed1;
+  --theme-brand-600: #268bd2;
+  --theme-brand-700: #006aa8;
+  --theme-stone-50: #fdf6e3;
+  --theme-stone-100: #eee8d5;
+  --theme-stone-200: #ddd6c1;
+  --theme-stone-300: #c7bda0;
+  --theme-stone-400: #93a1a1;
+  --theme-stone-500: #657b83;
+  --theme-stone-600: #586e75;
+  --theme-stone-700: #073642;
+  --theme-stone-800: #002b36;
+  --theme-stone-900: #001f27;
+  --theme-stone-950: #00171d;
+  --theme-red: #dc322f;
+  --theme-green: #859900;
+  --theme-blue: #268bd2;
+  --theme-cream: #eee8d5;
+}
+
+html[data-theme='monokai'] {
+  --theme-surface: #272822;
+  --theme-card: #34352d;
+  --theme-sidebar: #1f201b;
+  --theme-brand-50: #29320e;
+  --theme-brand-100: #354412;
+  --theme-brand-200: #536914;
+  --theme-brand-300: #7fa516;
+  --theme-brand-600: #a6e22e;
+  --theme-brand-700: #fd971f;
+  --theme-stone-50: #303129;
+  --theme-stone-100: #3e3d32;
+  --theme-stone-200: #555449;
+  --theme-stone-300: #75715e;
+  --theme-stone-400: #a59f85;
+  --theme-stone-500: #d6d0b8;
+  --theme-stone-600: #e6e1c8;
+  --theme-stone-700: #f8f8f2;
+  --theme-stone-800: #fffef8;
+  --theme-stone-900: #ffffff;
+  --theme-stone-950: #ffffff;
+  --theme-red: #f92672;
+  --theme-green: #a6e22e;
+  --theme-blue: #66d9ef;
+  --theme-cream: #4b4529;
+}
+
+html[data-theme='github-dark'] {
+  --theme-surface: #0d1117;
+  --theme-card: #161b22;
+  --theme-sidebar: #010409;
+  --theme-brand-50: #0d2744;
+  --theme-brand-100: #12345c;
+  --theme-brand-200: #174a7d;
+  --theme-brand-300: #1f6feb;
+  --theme-brand-600: #58a6ff;
+  --theme-brand-700: #79c0ff;
+  --theme-stone-50: #161b22;
+  --theme-stone-100: #21262d;
+  --theme-stone-200: #30363d;
+  --theme-stone-300: #484f58;
+  --theme-stone-400: #8b949e;
+  --theme-stone-500: #c9d1d9;
+  --theme-stone-600: #d0d7de;
+  --theme-stone-700: #e6edf3;
+  --theme-stone-800: #f0f6fc;
+  --theme-stone-900: #ffffff;
+  --theme-stone-950: #ffffff;
+  --theme-red: #ff7b72;
+  --theme-green: #3fb950;
+  --theme-blue: #58a6ff;
+  --theme-cream: #332d1e;
+}
+
+html[data-theme='cyberpunk'] {
+  --theme-surface: #09090f;
+  --theme-card: #171421;
+  --theme-sidebar: #050508;
+  --theme-on-primary: #0a0a0f;
+  --theme-brand-50: #3b3700;
+  --theme-brand-100: #565000;
+  --theme-brand-200: #7d7500;
+  --theme-brand-300: #b8ac00;
+  --theme-brand-600: #fcee0a;
+  --theme-brand-700: #ff2a6d;
+  --theme-stone-50: #151321;
+  --theme-stone-100: #201a30;
+  --theme-stone-200: #35294a;
+  --theme-stone-300: #55436f;
+  --theme-stone-400: #a78bfa;
+  --theme-stone-500: #e9d5ff;
+  --theme-stone-600: #f3e8ff;
+  --theme-stone-700: #f8fafc;
+  --theme-stone-800: #ffffff;
+  --theme-stone-900: #ffffff;
+  --theme-stone-950: #ffffff;
+  --theme-red: #ff2a6d;
+  --theme-green: #05ffa1;
+  --theme-blue: #00d9ff;
+  --theme-cream: #3b3700;
+}
+
+html[data-theme='forest'] {
+  --theme-surface: #0f1f17;
+  --theme-card: #173526;
+  --theme-sidebar: #09140e;
+  --theme-brand-50: #16351f;
+  --theme-brand-100: #1f4a2b;
+  --theme-brand-200: #2c6b3b;
+  --theme-brand-300: #4ca85f;
+  --theme-brand-600: #7dd87d;
+  --theme-brand-700: #d6a85b;
+  --theme-stone-50: #16271e;
+  --theme-stone-100: #1d3a2a;
+  --theme-stone-200: #2b4d39;
+  --theme-stone-300: #3f684f;
+  --theme-stone-400: #84a98c;
+  --theme-stone-500: #c7dfc5;
+  --theme-stone-600: #dff0dc;
+  --theme-stone-700: #eff7ed;
+  --theme-stone-800: #fbfff9;
+  --theme-stone-900: #ffffff;
+  --theme-stone-950: #ffffff;
+  --theme-red: #f87171;
+  --theme-green: #7dd87d;
+  --theme-blue: #7dd3fc;
+  --theme-cream: #4b3b1e;
+}
+
+html[data-theme='ocean'] {
+  --theme-surface: #071a2c;
+  --theme-card: #0b2540;
+  --theme-sidebar: #04111f;
+  --theme-brand-50: #082f49;
+  --theme-brand-100: #0c4a6e;
+  --theme-brand-200: #075985;
+  --theme-brand-300: #0284c7;
+  --theme-brand-600: #38bdf8;
+  --theme-brand-700: #2dd4bf;
+  --theme-stone-50: #0b2037;
+  --theme-stone-100: #12304f;
+  --theme-stone-200: #1d4468;
+  --theme-stone-300: #2f5f86;
+  --theme-stone-400: #7dd3fc;
+  --theme-stone-500: #bae6fd;
+  --theme-stone-600: #d5f3ff;
+  --theme-stone-700: #e0f2fe;
+  --theme-stone-800: #f0f9ff;
+  --theme-stone-900: #ffffff;
+  --theme-stone-950: #ffffff;
+  --theme-red: #fb7185;
+  --theme-green: #2dd4bf;
+  --theme-blue: #38bdf8;
+  --theme-cream: #15364f;
 }
 
 @layer base {
   html { font-family: var(--font-sans); }
-  body { background-color: var(--color-surface); color: var(--color-ink); }
+  body {
+    background-color: var(--theme-surface);
+    color: var(--theme-stone-900);
+    transition: background-color 160ms ease, color 160ms ease;
+  }
   * { box-shadow: none !important; }
+  ::selection {
+    background-color: var(--theme-brand-200);
+    color: var(--theme-stone-950);
+  }
+}
+
+@layer utilities {
+  .bg-white { background-color: var(--theme-card) !important; }
+  .text-white { color: var(--theme-on-primary) !important; }
+  .bg-\[\#232323\] { background-color: var(--theme-sidebar) !important; }
+  .hover\:bg-white:hover { background-color: var(--theme-card) !important; }
+  .border-white { border-color: var(--theme-card) !important; }
+  .ring-white { --tw-ring-color: var(--theme-card) !important; }
 }
 
 button {
   cursor: pointer;
+}
+
+input,
+textarea,
+select {
+  color-scheme: inherit;
+}
+
+a {
+  color: inherit;
 }
 
 svg {
@@ -43,14 +377,14 @@ svg {
 }
 
 .saltim-day-picker {
-  --rdp-accent-color: #F07820;
-  --rdp-accent-background-color: #FEF4E8;
+  --rdp-accent-color: var(--theme-brand-600);
+  --rdp-accent-background-color: var(--theme-brand-50);
   --rdp-day_button-border-radius: 8px;
   --rdp-selected-border: 0;
+  color: var(--theme-stone-900);
   font-size: 13px;
 }
 
 .saltim-day-picker .rdp-day_button {
   cursor: pointer;
 }
-
