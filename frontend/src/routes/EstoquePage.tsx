@@ -25,6 +25,7 @@ import { StatusBadge } from '../components/StatusBadge';
 import { CategoryBadge } from '../components/CategoryBadge';
 import { AppSelect } from '../components/AppSelect';
 import { DataTable, type DataTableHeader } from '../components/DataTable';
+import { ExportPanel } from '../components/ExportPanel';
 import {
   FilterDrawer,
   FilterField,
@@ -302,6 +303,14 @@ export function EstoquePage() {
 
       {/* Table card */}
       <div className="flex-1 overflow-auto p-6">
+        <div className="space-y-6">
+          <ExportPanel
+            area="estoque"
+            title="Exportar historico de estoque"
+            subtitle="Baixe as movimentacoes do estoque dentro do periodo selecionado."
+            requiresDateRange
+          />
+
         <DataTable
           headers={stockHeaders(table)}
           colSpan={columns.length}
@@ -357,6 +366,7 @@ export function EstoquePage() {
             );
           })}
         </DataTable>
+        </div>
       </div>
     </div>
   );

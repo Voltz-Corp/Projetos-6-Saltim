@@ -1,3 +1,6 @@
+import csv
+import io
+import json
 import math
 import logging
 import os
@@ -11,9 +14,26 @@ from typing import Optional
 from unicodedata import normalize
 from uuid import uuid4
 from zoneinfo import ZoneInfo
+from xml.etree.ElementTree import Element, SubElement, tostring
 
 from fastapi import FastAPI, Depends, HTTPException, Query, Response
 from fastapi.middleware.cors import CORSMiddleware
+from openpyxl import Workbook
+from openpyxl.styles import Alignment, Font, PatternFill
+from openpyxl.utils import get_column_letter
+from reportlab.lib import colors
+from reportlab.lib.enums import TA_RIGHT
+from reportlab.lib.pagesizes import A4, landscape
+from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+from reportlab.lib.units import mm
+from reportlab.platypus import (
+    Image,
+    Paragraph,
+    SimpleDocTemplate,
+    Spacer,
+    Table,
+    TableStyle,
+)
 from sqlalchemy import asc, case, desc, func, or_, text
 from sqlalchemy.orm import Session
 
@@ -907,6 +927,410 @@ def run_criticidade_report(response: Response, db: Session = Depends(get_db)):
 
 def _as_float(value) -> float:
     return float(value or 0)
+
+
+EXPORT_FORMATS = {
+    "csv": ("text/csv; charset=utf-8", "csv"),
+    "json": ("application/json; charset=utf-8", "json"),
+    "xml": ("application/xml; charset=utf-8", "xml"),
+    "yaml": ("application/x-yaml; charset=utf-8", "yaml"),
+    "excel": (
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "xlsx",
+    ),
+    "pdf": ("application/pdf", "pdf"),
+}
+
+SALTIM_ORANGE = "#F07820"
+SALTIM_DARK = "#232323"
+SALTIM_CREAM = "#FEF4E8"
+SALTIM_STONE = "#5F5E5A"
+SALTIM_LOGO_PATH = (
+    Path(__file__).resolve().parents[2] / "frontend" / "public" / "images" / "saltim_logo.jpg"
+)
+
+EXPORT_COLUMN_LABELS = {
+    "id": "ID",
+    "data_hora": "Data/hora",
+    "ingrediente_id": "ID ingrediente",
+    "ingrediente": "Ingrediente",
+    "categoria": "Categoria",
+    "unidade": "Unidade",
+    "quantidade": "Quantidade",
+    "nome": "Nome",
+    "cnpj": "CNPJ",
+    "email": "Email",
+    "telefone": "Telefone",
+    "prazo_medio_entrega_dias": "Prazo medio entrega (dias)",
+    "itens_fornecidos": "Itens fornecidos",
+    "preco_medio": "Preco medio",
+    "pedido_id": "ID pedido",
+    "data_pedido": "Data pedido",
+    "fornecedor_id": "ID fornecedor",
+    "fornecedor": "Fornecedor",
+    "valor_total": "Valor total",
+    "status": "Status",
+    "data_prevista": "Data prevista",
+}
+
+
+def _normalize_export_format(format_value: str) -> str:
+    normalized = format_value.strip().lower()
+    normalized = {"xlsx": "excel", "xls": "excel", "yml": "yaml"}.get(
+        normalized,
+        normalized,
+    )
+    if normalized not in EXPORT_FORMATS:
+        raise HTTPException(
+            status_code=400,
+            detail="Formato invalido. Use pdf, excel, csv, json, xml ou yaml.",
+        )
+    return normalized
+
+
+def _stringify_export_value(value) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, (date, datetime)):
+        return value.isoformat()
+    if isinstance(value, float):
+        return f"{value:.4f}".rstrip("0").rstrip(".")
+    return str(value)
+
+
+def _export_response(
+    rows: list[dict],
+    filename: str,
+    format_value: str,
+    title: str,
+    columns: Optional[list[str]] = None,
+) -> Response:
+    export_format = _normalize_export_format(format_value)
+    media_type, extension = EXPORT_FORMATS[export_format]
+    content = _serialize_export(rows, export_format, title, columns)
+    return Response(
+        content=content,
+        media_type=media_type,
+        headers={"Content-Disposition": f'attachment; filename="{filename}.{extension}"'},
+    )
+
+
+def _serialize_export(
+    rows: list[dict],
+    export_format: str,
+    title: str,
+    columns: Optional[list[str]] = None,
+):
+    if export_format == "csv":
+        return _serialize_csv(rows, columns)
+    if export_format == "json":
+        return json.dumps(rows, ensure_ascii=False, indent=2, default=str)
+    if export_format == "xml":
+        return _serialize_xml(rows)
+    if export_format == "yaml":
+        return _serialize_yaml(rows)
+    if export_format == "excel":
+        return _serialize_excel(rows, title, columns)
+    if export_format == "pdf":
+        return _serialize_pdf(rows, title, columns)
+    raise AssertionError(export_format)
+
+
+def _export_columns(rows: list[dict], columns: Optional[list[str]]) -> list[str]:
+    return columns or (list(rows[0].keys()) if rows else [])
+
+
+def _export_headers(columns: list[str]) -> list[str]:
+    return [EXPORT_COLUMN_LABELS.get(column, column.replace("_", " ").title()) for column in columns]
+
+
+def _export_cell_value(value):
+    if value is None:
+        return None
+    if isinstance(value, datetime) and value.tzinfo is not None:
+        return value.replace(tzinfo=None)
+    return value
+
+
+def _serialize_csv(rows: list[dict], columns: Optional[list[str]]) -> str:
+    output = io.StringIO()
+    export_columns = _export_columns(rows, columns)
+    writer = csv.DictWriter(output, fieldnames=export_columns)
+    writer.writeheader()
+    for row in rows:
+        writer.writerow({key: _stringify_export_value(value) for key, value in row.items()})
+    return output.getvalue()
+
+
+def _serialize_xml(rows: list[dict]) -> str:
+    root = Element("export")
+    for row in rows:
+        row_el = SubElement(root, "row")
+        for key, value in row.items():
+            field = SubElement(row_el, key)
+            field.text = _stringify_export_value(value)
+    return tostring(root, encoding="unicode", xml_declaration=True)
+
+
+def _serialize_yaml(rows: list[dict]) -> str:
+    if not rows:
+        return "[]\n"
+    lines: list[str] = []
+    for row in rows:
+        lines.append("-")
+        for key, value in row.items():
+            text = _stringify_export_value(value).replace("\\", "\\\\").replace('"', '\\"')
+            lines.append(f'  {key}: "{text}"')
+    return "\n".join(lines) + "\n"
+
+
+def _xml_escape(value: str) -> str:
+    return (
+        value.replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace('"', "&quot;")
+    )
+
+
+def _serialize_excel(rows: list[dict], title: str, columns: Optional[list[str]]) -> bytes:
+    export_columns = _export_columns(rows, columns)
+    headers = _export_headers(export_columns)
+    workbook = Workbook()
+    worksheet = workbook.active
+    worksheet.title = title[:31]
+    workbook.properties.creator = "Saltim Cafe"
+    workbook.properties.title = title
+
+    worksheet.append(headers)
+    for row in rows:
+        worksheet.append([_export_cell_value(row.get(column)) for column in export_columns])
+
+    header_fill = PatternFill("solid", fgColor=SALTIM_ORANGE.replace("#", ""))
+    header_font = Font(color="FFFFFF", bold=True)
+    for cell in worksheet[1]:
+        cell.fill = header_fill
+        cell.font = header_font
+        cell.alignment = Alignment(horizontal="center", vertical="center")
+
+    worksheet.freeze_panes = "A2"
+    if export_columns:
+        last_column = get_column_letter(len(export_columns))
+        last_row = max(1, worksheet.max_row)
+        worksheet.auto_filter.ref = f"A1:{last_column}{last_row}"
+
+    for column_cells in worksheet.columns:
+        column_letter = column_cells[0].column_letter
+        max_length = 0
+        for cell in column_cells:
+            value = "" if cell.value is None else _stringify_export_value(cell.value)
+            max_length = max(max_length, len(value))
+            if isinstance(cell.value, (int, float)):
+                cell.alignment = Alignment(horizontal="right")
+        worksheet.column_dimensions[column_letter].width = min(max(max_length + 2, 12), 48)
+
+    output = io.BytesIO()
+    workbook.save(output)
+    return output.getvalue()
+
+
+def _pdf_header_block(
+    title: str,
+    title_style: ParagraphStyle,
+    meta_style: ParagraphStyle,
+) -> Table:
+    generated_at = _now_recife().strftime("%d/%m/%Y %H:%M")
+    title_cell = [
+        Paragraph("Saltim Cafe", meta_style),
+        Paragraph(_xml_escape(title), title_style),
+        Paragraph(f"Gerado em {generated_at}", meta_style),
+    ]
+    if SALTIM_LOGO_PATH.exists():
+        logo = Image(str(SALTIM_LOGO_PATH), width=18 * mm, height=18 * mm)
+    else:
+        logo = Paragraph("Saltim", title_style)
+
+    table = Table(
+        [[logo, title_cell]],
+        colWidths=[23 * mm, 235 * mm],
+        hAlign="LEFT",
+    )
+    table.setStyle(
+        TableStyle(
+            [
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+                ("LINEBELOW", (0, 0), (-1, -1), 1.4, colors.HexColor(SALTIM_ORANGE)),
+            ]
+        )
+    )
+    return table
+
+
+def _pdf_table(
+    rows: list[dict],
+    columns: list[str],
+    header_style: ParagraphStyle,
+    cell_style: ParagraphStyle,
+    number_style: ParagraphStyle,
+    available_width: float,
+) -> Table:
+    headers = [Paragraph(_xml_escape(header), header_style) for header in _export_headers(columns)]
+    data = [headers]
+    numeric_columns = {
+        "quantidade",
+        "valor_total",
+        "preco_medio",
+        "itens_fornecidos",
+        "prazo_medio_entrega_dias",
+    }
+
+    if rows:
+        for row in rows:
+            data.append(
+                [
+                    Paragraph(
+                        _xml_escape(_stringify_export_value(row.get(column))),
+                        number_style if column in numeric_columns else cell_style,
+                    )
+                    for column in columns
+                ]
+            )
+    else:
+        data.append([Paragraph("Nenhum registro encontrado.", cell_style)] + [""] * (len(columns) - 1))
+
+    table = Table(
+        data,
+        colWidths=_pdf_column_widths(rows, columns, available_width),
+        repeatRows=1,
+        splitByRow=1,
+        hAlign="LEFT",
+    )
+    style_commands = [
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor(SALTIM_ORANGE)),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("GRID", (0, 0), (-1, -1), 0.35, colors.HexColor("#DCDAD4")),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor(SALTIM_CREAM)]),
+        ("LEFTPADDING", (0, 0), (-1, -1), 4),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+        ("TOPPADDING", (0, 0), (-1, -1), 4),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+    ]
+    if not rows and columns:
+        style_commands.append(("SPAN", (0, 1), (-1, 1)))
+    table.setStyle(TableStyle(style_commands))
+    return table
+
+
+def _pdf_column_widths(rows: list[dict], columns: list[str], available_width: float) -> list[float]:
+    if not columns:
+        return []
+    weights: list[float] = []
+    for column, header in zip(columns, _export_headers(columns)):
+        sample_lengths = [
+            len(_stringify_export_value(row.get(column)))
+            for row in rows[:80]
+        ]
+        content_length = max(sample_lengths, default=0)
+        weights.append(max(len(header), min(content_length, 26), 5))
+    total_weight = sum(weights) or 1
+    min_width = 20 * mm
+    widths = [max(min_width, available_width * weight / total_weight) for weight in weights]
+    width_total = sum(widths)
+    if width_total > available_width:
+        scale = available_width / width_total
+        widths = [width * scale for width in widths]
+    return widths
+
+
+def _draw_pdf_footer(canvas, document):
+    canvas.saveState()
+    canvas.setStrokeColor(colors.HexColor(SALTIM_ORANGE))
+    canvas.setLineWidth(0.6)
+    canvas.line(document.leftMargin, 10 * mm, landscape(A4)[0] - document.rightMargin, 10 * mm)
+    canvas.setFont("Helvetica", 7)
+    canvas.setFillColor(colors.HexColor(SALTIM_STONE))
+    canvas.drawString(document.leftMargin, 6 * mm, "Saltim Cafe")
+    canvas.drawRightString(
+        landscape(A4)[0] - document.rightMargin,
+        6 * mm,
+        f"Pagina {canvas.getPageNumber()}",
+    )
+    canvas.restoreState()
+
+
+def _serialize_pdf(rows: list[dict], title: str, columns: Optional[list[str]]) -> bytes:
+    export_columns = _export_columns(rows, columns)
+    output = io.BytesIO()
+    document = SimpleDocTemplate(
+        output,
+        pagesize=landscape(A4),
+        leftMargin=12 * mm,
+        rightMargin=12 * mm,
+        topMargin=14 * mm,
+        bottomMargin=14 * mm,
+        title=title,
+    )
+    styles = getSampleStyleSheet()
+    title_style = ParagraphStyle(
+        "SaltimTitle",
+        parent=styles["Title"],
+        fontName="Helvetica-Bold",
+        fontSize=18,
+        leading=22,
+        textColor=colors.HexColor(SALTIM_DARK),
+        spaceAfter=4,
+    )
+    meta_style = ParagraphStyle(
+        "SaltimMeta",
+        parent=styles["Normal"],
+        fontSize=8,
+        leading=10,
+        textColor=colors.HexColor(SALTIM_STONE),
+    )
+    header_style = ParagraphStyle(
+        "SaltimTableHeader",
+        parent=styles["Normal"],
+        alignment=1,
+        fontName="Helvetica-Bold",
+        fontSize=7,
+        leading=8,
+        textColor=colors.white,
+    )
+    cell_style = ParagraphStyle(
+        "SaltimTableCell",
+        parent=styles["Normal"],
+        fontSize=6.4,
+        leading=7.4,
+        textColor=colors.HexColor(SALTIM_DARK),
+    )
+    number_style = ParagraphStyle(
+        "SaltimTableNumber",
+        parent=cell_style,
+        alignment=TA_RIGHT,
+    )
+
+    story = [_pdf_header_block(title, title_style, meta_style), Spacer(1, 7 * mm)]
+    if export_columns:
+        story.append(
+            _pdf_table(
+                rows,
+                export_columns,
+                header_style,
+                cell_style,
+                number_style,
+                document.width,
+            )
+        )
+    else:
+        story.append(Paragraph("Nenhum registro encontrado.", cell_style))
+
+    document.build(story, onFirstPage=_draw_pdf_footer, onLaterPages=_draw_pdf_footer)
+    return output.getvalue()
 
 
 def _percent_change(current: float, previous: float) -> Optional[float]:
@@ -2337,6 +2761,63 @@ def get_estoque_paginado(
     )
 
 
+@app.get("/api/export/estoque")
+def export_estoque(
+    format: str = Query(default="csv"),
+    date_from: date = Query(...),
+    date_to: date = Query(...),
+    db: Session = Depends(get_db),
+):
+    if date_from > date_to:
+        raise HTTPException(status_code=400, detail="Data inicial maior que data final")
+
+    rows = (
+        db.query(
+            Estoque.id,
+            Estoque.date_time,
+            Estoque.ingredient_id,
+            Ingrediente.name.label("ingredient_name"),
+            Categoria.name.label("category"),
+            Ingrediente.unit,
+            Estoque.quantity,
+        )
+        .join(Ingrediente, Ingrediente.id == Estoque.ingredient_id)
+        .join(Categoria, Categoria.id == Ingrediente.category_id)
+        .filter(func.date(Estoque.date_time) >= date_from)
+        .filter(func.date(Estoque.date_time) <= date_to)
+        .filter(Ingrediente.category_id != PRODUCTION_CATEGORY_ID)
+        .order_by(Estoque.date_time.asc(), Ingrediente.name.asc())
+        .all()
+    )
+    data = [
+        {
+            "id": row.id,
+            "data_hora": row.date_time,
+            "ingrediente_id": row.ingredient_id,
+            "ingrediente": row.ingredient_name,
+            "categoria": row.category,
+            "unidade": row.unit,
+            "quantidade": _as_float(row.quantity),
+        }
+        for row in rows
+    ]
+    return _export_response(
+        data,
+        f"estoque_{date_from.isoformat()}_{date_to.isoformat()}",
+        format,
+        "Historico de estoque",
+        [
+            "id",
+            "data_hora",
+            "ingrediente_id",
+            "ingrediente",
+            "categoria",
+            "unidade",
+            "quantidade",
+        ],
+    )
+
+
 @app.patch("/api/estoque", response_model=ResultadoLote)
 def update_estoque(lote: AtualizacaoLote, db: Session = Depends(get_db)):
     contagem = None
@@ -2577,6 +3058,58 @@ def get_fornecedores(db: Session = Depends(get_db)):
             ),
         ),
         items=items,
+    )
+
+
+@app.get("/api/export/fornecedores")
+def export_fornecedores(
+    format: str = Query(default="csv"),
+    db: Session = Depends(get_db),
+):
+    rows = (
+        db.query(
+            Fornecedor,
+            func.count(FornecedorIngrediente.ingredient_id).label("item_count"),
+            func.avg(FornecedorIngrediente.price).label("avg_price"),
+        )
+        .outerjoin(
+            FornecedorIngrediente,
+            FornecedorIngrediente.supplier_id == Fornecedor.id,
+        )
+        .group_by(Fornecedor.id)
+        .order_by(Fornecedor.name.asc())
+        .all()
+    )
+    data = [
+        {
+            "id": fornecedor.id,
+            "nome": fornecedor.name,
+            "cnpj": fornecedor.cnpj,
+            "email": fornecedor.email,
+            "telefone": fornecedor.phone,
+            "prazo_medio_entrega_dias": _as_float(fornecedor.avg_delivery_time)
+            if fornecedor.avg_delivery_time is not None
+            else None,
+            "itens_fornecidos": int(item_count or 0),
+            "preco_medio": _as_float(avg_price) if avg_price is not None else None,
+        }
+        for fornecedor, item_count, avg_price in rows
+    ]
+    return _export_response(
+        data,
+        "fornecedores",
+        format,
+        "Fornecedores cadastrados",
+        [
+            "id",
+            "nome",
+            "cnpj",
+            "email",
+            "telefone",
+            "prazo_medio_entrega_dias",
+            "itens_fornecidos",
+            "preco_medio",
+        ],
     )
 
 
@@ -3352,6 +3885,78 @@ def get_pedidos(
         page=page,
         page_size=page_size,
         total_pages=total_pages,
+    )
+
+
+@app.get("/api/export/pedidos")
+def export_pedidos(
+    format: str = Query(default="csv"),
+    date_from: date = Query(...),
+    date_to: date = Query(...),
+    db: Session = Depends(get_db),
+):
+    if date_from > date_to:
+        raise HTTPException(status_code=400, detail="Data inicial maior que data final")
+
+    rows = (
+        db.query(
+            Pedido.id,
+            Pedido.data_pedido,
+            Pedido.supplier_id,
+            Fornecedor.name.label("supplier_name"),
+            Pedido.ingredient_id,
+            Ingrediente.name.label("ingredient_name"),
+            Categoria.name.label("category"),
+            Ingrediente.unit,
+            Pedido.qty,
+            Pedido.valor,
+            Pedido.status,
+            Pedido.data_prevista,
+        )
+        .join(Fornecedor, Fornecedor.id == Pedido.supplier_id)
+        .join(Ingrediente, Ingrediente.id == Pedido.ingredient_id)
+        .join(Categoria, Categoria.id == Ingrediente.category_id)
+        .filter(Pedido.data_pedido >= date_from)
+        .filter(Pedido.data_pedido <= date_to)
+        .order_by(Pedido.data_pedido.asc(), Fornecedor.name.asc(), Ingrediente.name.asc())
+        .all()
+    )
+    data = [
+        {
+            "pedido_id": row.id,
+            "data_pedido": row.data_pedido,
+            "fornecedor_id": row.supplier_id,
+            "fornecedor": row.supplier_name,
+            "ingrediente_id": row.ingredient_id,
+            "ingrediente": row.ingredient_name,
+            "categoria": row.category,
+            "unidade": row.unit,
+            "quantidade": _as_float(row.qty),
+            "valor_total": _as_float(row.valor),
+            "status": row.status,
+            "data_prevista": row.data_prevista,
+        }
+        for row in rows
+    ]
+    return _export_response(
+        data,
+        f"pedidos_{date_from.isoformat()}_{date_to.isoformat()}",
+        format,
+        "Historico de pedidos",
+        [
+            "pedido_id",
+            "data_pedido",
+            "fornecedor_id",
+            "fornecedor",
+            "ingrediente_id",
+            "ingrediente",
+            "categoria",
+            "unidade",
+            "quantidade",
+            "valor_total",
+            "status",
+            "data_prevista",
+        ],
     )
 
 

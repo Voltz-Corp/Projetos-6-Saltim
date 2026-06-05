@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { rootRoute } from './Root';
 import { DataTable, type DataTableHeader } from '../components/DataTable';
+import { ExportPanel } from '../components/ExportPanel';
 import { KpiCard } from '../components/KpiCard';
 import { TruckLoading } from '../components/TruckLoading';
 import {
@@ -130,6 +131,12 @@ function FornecedoresPage() {
                 truncateValue
               />
             </div>
+
+            <ExportPanel
+              area="fornecedores"
+              title="Exportar fornecedores"
+              subtitle="Baixe a lista completa de fornecedores cadastrados."
+            />
 
             <DataPanel
               title="Lista de fornecedores"

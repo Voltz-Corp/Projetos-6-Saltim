@@ -22,6 +22,7 @@ import {
 import { rootRoute } from './Root'
 import { AppSelect } from '../components/AppSelect'
 import { DataTable, type DataTableHeader } from '../components/DataTable'
+import { ExportPanel } from '../components/ExportPanel'
 import { KpiCard } from '../components/KpiCard'
 import {
   DateFilterControl,
@@ -256,6 +257,13 @@ function PedidosPage() {
         <section className="rounded-xl border border-stone-200 bg-white p-4 shadow-sm">
           <SegmentedToggle value={view} onChange={setView} />
         </section>
+
+        <ExportPanel
+          area="pedidos"
+          title="Exportar historico de pedidos"
+          subtitle="Baixe os pedidos realizados dentro do periodo selecionado."
+          requiresDateRange
+        />
 
         {view === 'transit' && dueTransit.length > 0 && (
           <section className="flex flex-col gap-4 rounded-lg border border-amber-200 bg-amber-50 px-5 py-4 text-amber-950 sm:flex-row sm:items-center sm:justify-between">

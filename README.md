@@ -193,6 +193,15 @@ bun run dev
   * `failed`: falha no envio; o pedido continua salvo.
 * Os emails de desenvolvimento aparecem no Mailpit em `http://localhost:8025`.
 
+### **Rotas de exportacao**
+
+Formatos aceitos em todas as rotas: `pdf`, `excel`, `csv`, `json`, `xml`, `yaml`.
+O formato `excel` gera arquivo `.xlsx` com filtros automaticos, colunas ajustadas e cabecalho laranja.
+
+* `GET /api/export/estoque?format=csv&date_from=YYYY-MM-DD&date_to=YYYY-MM-DD`: exporta o historico de movimentacoes do estoque no periodo.
+* `GET /api/export/pedidos?format=csv&date_from=YYYY-MM-DD&date_to=YYYY-MM-DD`: exporta o historico de pedidos realizados no periodo.
+* `GET /api/export/fornecedores?format=csv`: exporta a lista completa de fornecedores cadastrados, sem filtro de data.
+
 ### **5. ML (modelo de criticidade) e MLflow**
 
 Este repositório inclui um pipeline de **ML para criticidade de estoque**. A ideia é estimar um **limiar dinâmico de “alerta de compra”** por ingrediente e, a partir dele, derivar a criticidade operacional.
