@@ -258,11 +258,11 @@ html[data-theme='cyberpunk'] {
   --theme-card: #171421;
   --theme-sidebar: #050508;
   --theme-on-primary: #0a0a0f;
-  --theme-brand-50: #3b3700;
-  --theme-brand-100: #565000;
-  --theme-brand-200: #7d7500;
-  --theme-brand-300: #b8ac00;
-  --theme-brand-600: #fcee0a;
+  --theme-brand-50: #241c36;
+  --theme-brand-100: #32224d;
+  --theme-brand-200: #51306f;
+  --theme-brand-300: #ffd60a;
+  --theme-brand-600: #ffd60a;
   --theme-brand-700: #ff2a6d;
   --theme-stone-50: #151321;
   --theme-stone-100: #201a30;
@@ -374,6 +374,39 @@ a {
 
 svg {
   overflow: visible;
+}
+
+html[data-theme='cyberpunk'] .saltim-sidebar {
+  background-color: #050508 !important;
+  border-color: #35294a !important;
+}
+
+html[data-theme='cyberpunk'] .saltim-sidebar a {
+  color: #ffd60a !important;
+}
+
+html[data-theme='cyberpunk'] .saltim-sidebar .saltim-sidebar-item:hover {
+  background-color: #241c36 !important;
+  color: #ffd60a !important;
+  outline: 1px solid #ffd60a;
+}
+
+html[data-theme='cyberpunk'] .saltim-sidebar .saltim-sidebar-item[data-status='active'] {
+  background-color: #32224d !important;
+  color: #ffd60a !important;
+  outline: 1px solid #ffd60a;
+}
+
+html[data-theme='cyberpunk'] .saltim-sidebar .saltim-sidebar-tooltip {
+  background-color: #09090f !important;
+  border: 1px solid #ffd60a;
+  color: #ffd60a !important;
+}
+
+html[data-theme='cyberpunk'] .saltim-sidebar .saltim-sidebar-tooltip:hover,
+html[data-theme='cyberpunk'] .saltim-sidebar .saltim-sidebar-item:hover .saltim-sidebar-tooltip,
+html[data-theme='cyberpunk'] .saltim-sidebar .saltim-sidebar-item[data-status='active'] .saltim-sidebar-tooltip {
+  color: #ffd60a !important;
 }
 
 .saltim-day-picker {
