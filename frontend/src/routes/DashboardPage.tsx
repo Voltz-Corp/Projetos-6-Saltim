@@ -3,6 +3,7 @@ import type { ReactNode } from 'react';
 import { createRoute } from '@tanstack/react-router';
 import { AnimatePresence, motion } from 'motion/react';
 import {
+  Download,
   Filter,
   Flag,
   Gauge,
@@ -38,6 +39,10 @@ import {
 } from '../components/DateFilterControl';
 import { FilterField } from '../components/FilterPanel';
 import { KpiCard, type KpiTone } from '../components/KpiCard';
+import {
+  downloadDashboardExport,
+  type DashboardExportFormat,
+} from '../lib/exportData';
 import {
   useDashboard,
   useRecipeRanking,
@@ -1158,6 +1163,9 @@ export function DashboardPage() {
     useState<DashboardUnit>('KG');
   const [categoryUsageFiltersOpen, setCategoryUsageFiltersOpen] =
     useState(false);
+  const [exportingFormat, setExportingFormat] =
+    useState<DashboardExportFormat | null>(null);
+  const [exportError, setExportError] = useState('');
 
   const activeCount = activeFilterCount(globalFilters);
 
@@ -1200,6 +1208,20 @@ export function DashboardPage() {
   });
 
   const allIngredientOptions = data?.filters.ingredients ?? [];
+
+  async function handleDashboardExport(format: DashboardExportFormat) {
+    setExportError('');
+    setExportingFormat(format);
+    try {
+      await downloadDashboardExport(format, apiFilters);
+    } catch (err) {
+      setExportError(
+        err instanceof Error ? err.message : 'Nao foi possivel exportar.',
+      );
+    } finally {
+      setExportingFormat(null);
+    }
+  }
 
   const rankingConfig = useMemo(() => {
     if (!data) {
@@ -1322,7 +1344,7 @@ export function DashboardPage() {
         }}
         appliedCount={activeCount}
       />
-      <div className="flex h-[73px] flex-shrink-0 items-center border-b border-stone-200 bg-white px-8">
+      <div className="flex h-[73px] flex-shrink-0 items-center justify-between gap-4 border-b border-stone-200 bg-white px-8">
         <div>
           <h1 className="text-xl font-semibold text-stone-900">
             {period}, Fernanda
@@ -1330,6 +1352,33 @@ export function DashboardPage() {
           <p className="text-sm text-stone-400 mt-0.5 capitalize">
             {dateStr} · Saltim Café
           </p>
+        </div>
+        <div className="flex flex-col items-end gap-1">
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => handleDashboardExport('pdf')}
+              disabled={!data || Boolean(exportingFormat)}
+              className="inline-flex items-center gap-2 rounded-lg border border-stone-200 bg-white px-3 py-2 text-xs font-bold text-stone-700 shadow-sm transition hover:border-brand-200 hover:bg-brand-50 hover:text-brand-700 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <Download className="size-4" strokeWidth={1.9} />
+              {exportingFormat === 'pdf' ? 'PDF...' : 'PDF'}
+            </button>
+            <button
+              type="button"
+              onClick={() => handleDashboardExport('excel')}
+              disabled={!data || Boolean(exportingFormat)}
+              className="inline-flex items-center gap-2 rounded-lg bg-brand-600 px-3 py-2 text-xs font-bold text-white shadow-sm transition hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <Download className="size-4" strokeWidth={1.9} />
+              {exportingFormat === 'excel' ? 'Excel...' : 'Excel'}
+            </button>
+          </div>
+          {exportError && (
+            <span className="text-xs font-medium text-saltim-red">
+              {exportError}
+            </span>
+          )}
         </div>
       </div>
 

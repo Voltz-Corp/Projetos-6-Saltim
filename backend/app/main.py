@@ -28,12 +28,14 @@ from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import mm
 from reportlab.platypus import (
     Image,
+    PageBreak,
     Paragraph,
     SimpleDocTemplate,
     Spacer,
     Table,
     TableStyle,
 )
+from reportlab.graphics.shapes import Drawing, Line as DrawingLine, Rect, String
 from sqlalchemy import asc, case, desc, func, or_, text
 from sqlalchemy.orm import Session
 
@@ -971,6 +973,23 @@ EXPORT_COLUMN_LABELS = {
     "valor_total": "Valor total",
     "status": "Status",
     "data_prevista": "Data prevista",
+    "indicador": "Indicador",
+    "detalhe": "Detalhe",
+    "comparacao": "Comparacao",
+    "direcao": "Direcao",
+    "estoque_atual": "Estoque atual",
+    "uso_dia": "Uso/dia",
+    "cobertura_dias": "Cobertura (dias)",
+    "sugestao_compra": "Sugestao de compra",
+    "posicao": "#",
+    "receita": "Receita",
+    "unidades_vendidas": "Unidades vendidas",
+    "faturamento": "Faturamento",
+    "periodo": "Periodo",
+    "valor": "Valor",
+    "data": "Data",
+    "estoque": "Estoque",
+    "vendas": "Vendas",
 }
 
 
@@ -1331,6 +1350,518 @@ def _serialize_pdf(rows: list[dict], title: str, columns: Optional[list[str]]) -
 
     document.build(story, onFirstPage=_draw_pdf_footer, onLaterPages=_draw_pdf_footer)
     return output.getvalue()
+
+
+DASHBOARD_PDF_TABLE_ROWS = 18
+
+
+def _safe_sheet_title(title: str) -> str:
+    invalid = "[]:*?/\\"
+    cleaned = "".join("_" if char in invalid else char for char in title)
+    return cleaned[:31] or "Dados"
+
+
+def _format_export_number(value: float, digits: int = 2) -> float:
+    return round(_as_float(value), digits)
+
+
+def _dashboard_metric_rows(metrics: list[DashboardNamedMetric]) -> list[dict]:
+    return [
+        {
+            "periodo": metric.label,
+            "valor": _format_export_number(metric.value),
+        }
+        for metric in metrics
+    ]
+
+
+def _dashboard_history_rows(
+    stock: list[DashboardHistoryPoint],
+    sales: list[DashboardHistoryPoint],
+) -> list[dict]:
+    monthly: dict[str, dict] = {}
+    for item in stock:
+        key = item.date.strftime("%Y-%m")
+        month = monthly.setdefault(key, {"data": key, "estoque_values": [], "vendas": 0.0})
+        month["estoque_values"].append(_as_float(item.value))
+    for item in sales:
+        key = item.date.strftime("%Y-%m")
+        month = monthly.setdefault(key, {"data": key, "estoque_values": [], "vendas": 0.0})
+        month["vendas"] += _as_float(item.value)
+
+    return [
+        {
+            "data": key,
+            "periodo": _month_year_label(date(int(key[:4]), int(key[5:7]), 1)),
+            "estoque": _format_export_number(
+                sum(item["estoque_values"]) / max(1, len(item["estoque_values"]))
+            ),
+            "vendas": _format_export_number(item["vendas"]),
+        }
+        for key, item in sorted(monthly.items())
+    ]
+
+
+def _dashboard_alert_rows(alerts: list[DashboardAlert]) -> list[dict]:
+    return [
+        {
+            "ingrediente_id": alert.ingredient_id,
+            "ingrediente": alert.name,
+            "categoria": alert.category,
+            "unidade": alert.unit,
+            "estoque_atual": _format_export_number(alert.current_qty),
+            "uso_dia": _format_export_number(alert.avg_daily_output),
+            "cobertura_dias": _format_export_number(alert.coverage_days),
+            "sugestao_compra": _format_export_number(alert.suggested_qty),
+            "status": alert.severity,
+        }
+        for alert in alerts
+    ]
+
+
+def _dashboard_rank_rows(groups, label: str) -> list[dict]:
+    rows: list[dict] = []
+    for group in groups:
+        for index, item in enumerate(group.items, start=1):
+            rows.append(
+                {
+                    "posicao": index,
+                    "tipo_ranking": label,
+                    "nome": item.name,
+                    "categoria": getattr(item, "category", None),
+                    "unidade": item.unit or group.unit,
+                    "valor": _format_export_number(item.value),
+                }
+            )
+    return rows
+
+
+def _dashboard_recipe_rows(recipes: list[DashboardRecipeItem]) -> list[dict]:
+    return [
+        {
+            "posicao": index,
+            "receita": recipe.name,
+            "unidades_vendidas": _format_export_number(recipe.quantity),
+            "faturamento": _format_export_number(recipe.revenue),
+        }
+        for index, recipe in enumerate(recipes, start=1)
+    ]
+
+
+def _dashboard_kpi_rows(kpis: list[DashboardKpi]) -> list[dict]:
+    return [
+        {
+            "indicador": item.label,
+            "valor": item.value,
+            "detalhe": item.detail,
+            "comparacao": item.trend_label,
+            "direcao": item.trend_direction,
+        }
+        for item in kpis
+    ]
+
+
+def _dashboard_export_tables(
+    db: Session,
+    category_ids: Optional[list[str]] = None,
+    days: int = 90,
+    all_period: bool = False,
+    date_from: Optional[date] = None,
+    date_to: Optional[date] = None,
+    month_keys: Optional[list[str]] = None,
+    years: Optional[list[int]] = None,
+    month_numbers: Optional[list[int]] = None,
+    event_types: Optional[list[str]] = None,
+) -> tuple[list[dict], dict]:
+    event_dates = _event_dates_for_types(db, event_types)
+    common_kwargs = {
+        "category_ids": category_ids,
+        "days": days,
+        "all_period": all_period,
+        "date_from": date_from,
+        "date_to": date_to,
+        "month_keys": month_keys,
+        "years": years,
+        "months": month_numbers,
+        "event_dates": event_dates,
+    }
+
+    kpis = _dashboard_kpis(db, **common_kwargs)
+    alerts = _dashboard_alerts(db, limit=10000, **common_kwargs)
+    stock_history = get_dashboard_estoque_historico(
+        category_ids=category_ids,
+        days=days,
+        all_period=all_period,
+        date_from=date_from,
+        date_to=date_to,
+        month_keys=month_keys,
+        years=years,
+        month_numbers=month_numbers,
+        event_types=event_types,
+        db=db,
+    )
+    sales_history = get_dashboard_vendas_historico(
+        category_ids=category_ids,
+        days=days,
+        all_period=all_period,
+        date_from=date_from,
+        date_to=date_to,
+        month_keys=month_keys,
+        years=years,
+        month_numbers=month_numbers,
+        event_types=event_types,
+        db=db,
+    )
+    revenue = get_dashboard_faturamento_resumo(
+        months=12,
+        category_ids=category_ids,
+        all_period=all_period,
+        date_from=date_from,
+        date_to=date_to,
+        month_keys=month_keys,
+        years=years,
+        month_numbers=month_numbers,
+        event_types=event_types,
+        db=db,
+    )
+    recipes = get_dashboard_receitas_ranking(
+        category_ids=category_ids,
+        days=days,
+        all_period=all_period,
+        date_from=date_from,
+        date_to=date_to,
+        month_keys=month_keys,
+        years=years,
+        month_numbers=month_numbers,
+        event_types=event_types,
+        limit=10000,
+        db=db,
+    )
+    output_category_groups = _output_category_groups(db, desc, limit=10000, **common_kwargs)
+    stock_product_groups = _stock_product_groups(db, desc, limit=10000, category_ids=category_ids)
+    output_product_groups = _output_product_groups(db, desc, limit=10000, **common_kwargs)
+
+    tables = [
+        {
+            "title": "Indicadores",
+            "rows": _dashboard_kpi_rows(kpis),
+            "columns": ["indicador", "valor", "detalhe", "comparacao", "direcao"],
+        },
+        {
+            "title": "Alertas operacionais",
+            "rows": _dashboard_alert_rows(alerts),
+            "columns": [
+                "ingrediente",
+                "categoria",
+                "unidade",
+                "estoque_atual",
+                "uso_dia",
+                "cobertura_dias",
+                "sugestao_compra",
+                "status",
+            ],
+        },
+        {
+            "title": "Ranking de estoque",
+            "rows": _dashboard_rank_rows(stock_product_groups, "Estoque por ingrediente"),
+            "columns": ["posicao", "nome", "categoria", "unidade", "valor"],
+        },
+        {
+            "title": "Ranking de uso",
+            "rows": _dashboard_rank_rows(output_product_groups, "Uso por ingrediente"),
+            "columns": ["posicao", "nome", "categoria", "unidade", "valor"],
+        },
+        {
+            "title": "Receitas mais vendidas",
+            "rows": _dashboard_recipe_rows(recipes),
+            "columns": ["posicao", "receita", "unidades_vendidas", "faturamento"],
+        },
+    ]
+    chart_data = {
+        "history": _dashboard_history_rows(stock_history, sales_history),
+        "revenue": _dashboard_metric_rows(revenue.monthly),
+        "categories": _dashboard_rank_rows(output_category_groups, "Uso por categoria"),
+    }
+    return tables, chart_data
+
+
+def _sample_chart_rows(rows: list[dict], limit: int) -> list[dict]:
+    if len(rows) <= limit:
+        return rows
+    step = (len(rows) - 1) / max(1, limit - 1)
+    return [rows[round(index * step)] for index in range(limit)]
+
+
+def _line_chart_drawing(rows: list[dict], width: float, height: float) -> Drawing:
+    drawing = Drawing(width, height)
+    left = 42
+    right = 42
+    bottom = 30
+    top = 28
+    chart_width = width - left - right
+    chart_height = height - bottom - top
+    drawing.add(DrawingLine(left, bottom, left, bottom + chart_height, strokeColor=colors.HexColor("#DCDAD4")))
+    drawing.add(DrawingLine(left, bottom, left + chart_width, bottom, strokeColor=colors.HexColor("#DCDAD4")))
+    drawing.add(DrawingLine(left + chart_width, bottom, left + chart_width, bottom + chart_height, strokeColor=colors.HexColor("#DCDAD4")))
+    sampled = _sample_chart_rows(rows, 18)
+    if not sampled:
+        drawing.add(String(width / 2 - 45, height / 2, "Sem dados para exibir", fontSize=9, fillColor=colors.HexColor(SALTIM_STONE)))
+        return drawing
+
+    series = [
+        ("estoque", "Estoque medio", colors.HexColor("#52B9EB"), "left"),
+        ("vendas", "Vendas totais", colors.HexColor(SALTIM_ORANGE), "right"),
+    ]
+    totals = {
+        "estoque": sum(_as_float(row.get("estoque")) for row in sampled) / max(1, len(sampled)),
+        "vendas": sum(_as_float(row.get("vendas")) for row in sampled),
+    }
+    legend_x = left + chart_width - 190
+    for index, (key, label, color, _) in enumerate(series):
+        x = legend_x + index * 98
+        drawing.add(Rect(x, height - 14, 8, 8, fillColor=color, strokeColor=color))
+        drawing.add(
+            String(
+                x + 12,
+                height - 12,
+                f"{label}: {_stringify_export_value(totals[key])}",
+                fontSize=7.2,
+                fillColor=color,
+            )
+        )
+
+    for key, _label, color, axis in series:
+        values = [_as_float(row.get(key)) for row in sampled]
+        max_value = max(values) or 1
+        points = []
+        for index, value in enumerate(values):
+            x = left + (chart_width * index / max(1, len(sampled) - 1))
+            y = bottom + (value / max_value) * chart_height
+            points.append((x, y))
+        for tick in range(5):
+            tick_value = max_value * tick / 4
+            y = bottom + chart_height * tick / 4
+            label = _stringify_export_value(tick_value)
+            drawing.add(DrawingLine(left, y, left + chart_width, y, strokeColor=colors.HexColor("#F0EEE8"), strokeWidth=0.35))
+            if axis == "left":
+                drawing.add(String(left - 34, y - 2, label, fontSize=6.5, fillColor=color))
+            else:
+                drawing.add(String(left + chart_width + 5, y - 2, label, fontSize=6.5, fillColor=color))
+        for start, end in zip(points, points[1:]):
+            drawing.add(DrawingLine(start[0], start[1], end[0], end[1], strokeColor=color, strokeWidth=2))
+        for x, y in points:
+            drawing.add(Rect(x - 1.5, y - 1.5, 3, 3, fillColor=color, strokeColor=color))
+
+    for index, row in enumerate(sampled):
+        label = str(row.get("periodo") or row.get("data", ""))
+        x = left + (chart_width * index / max(1, len(sampled) - 1))
+        drawing.add(String(x - 10, bottom - 14, label, fontSize=6.5, fillColor=colors.HexColor(SALTIM_STONE)))
+    return drawing
+
+
+def _bar_chart_drawing(rows: list[dict], width: float, height: float, value_key: str = "valor") -> Drawing:
+    drawing = Drawing(width, height)
+    left = 32
+    bottom = 28
+    chart_width = width - 52
+    chart_height = height - 48
+    items = rows[:10]
+    if not items:
+        drawing.add(String(width / 2 - 45, height / 2, "Sem dados para exibir", fontSize=9, fillColor=colors.HexColor(SALTIM_STONE)))
+        return drawing
+    max_value = max(_as_float(item.get(value_key)) for item in items) or 1
+    gap = 4
+    bar_width = max(8, (chart_width - gap * (len(items) - 1)) / len(items))
+    drawing.add(DrawingLine(left, bottom, left, bottom + chart_height, strokeColor=colors.HexColor("#DCDAD4")))
+    drawing.add(DrawingLine(left, bottom, left + chart_width, bottom, strokeColor=colors.HexColor("#DCDAD4")))
+    for index, item in enumerate(items):
+        value = _as_float(item.get(value_key))
+        bar_height = (value / max_value) * chart_height
+        x = left + index * (bar_width + gap)
+        drawing.add(Rect(x, bottom, bar_width, bar_height, fillColor=colors.HexColor(SALTIM_ORANGE), strokeColor=colors.HexColor(SALTIM_ORANGE)))
+        label = str(item.get("periodo") or item.get("nome") or item.get("receita") or "")[:12]
+        drawing.add(String(x, bottom - 13, label, fontSize=6.3, fillColor=colors.HexColor(SALTIM_STONE)))
+    return drawing
+
+
+def _dashboard_pdf_paragraph(text: str, style: ParagraphStyle) -> Paragraph:
+    return Paragraph(_xml_escape(text), style)
+
+
+def _serialize_dashboard_excel(tables: list[dict]) -> bytes:
+    workbook = Workbook()
+    workbook.remove(workbook.active)
+    workbook.properties.creator = "Saltim Cafe"
+    workbook.properties.title = "Dashboard Saltim"
+    header_fill = PatternFill("solid", fgColor=SALTIM_ORANGE.replace("#", ""))
+    header_font = Font(color="FFFFFF", bold=True)
+
+    for table in tables:
+        worksheet = workbook.create_sheet(_safe_sheet_title(table["title"]))
+        columns = table["columns"]
+        worksheet.append(_export_headers(columns))
+        for row in table["rows"]:
+            worksheet.append([_export_cell_value(row.get(column)) for column in columns])
+        for cell in worksheet[1]:
+            cell.fill = header_fill
+            cell.font = header_font
+            cell.alignment = Alignment(horizontal="center", vertical="center")
+        worksheet.freeze_panes = "A2"
+        if columns:
+            last_column = get_column_letter(len(columns))
+            worksheet.auto_filter.ref = f"A1:{last_column}{max(1, worksheet.max_row)}"
+        for column_cells in worksheet.columns:
+            column_letter = column_cells[0].column_letter
+            max_length = 0
+            for cell in column_cells:
+                value = "" if cell.value is None else _stringify_export_value(cell.value)
+                max_length = max(max_length, len(value))
+                if isinstance(cell.value, (int, float)):
+                    cell.alignment = Alignment(horizontal="right")
+                    cell.number_format = '#,##0.00'
+            worksheet.column_dimensions[column_letter].width = min(max(max_length + 2, 12), 52)
+
+    output = io.BytesIO()
+    workbook.save(output)
+    return output.getvalue()
+
+
+def _serialize_dashboard_pdf(tables: list[dict], chart_data: dict) -> bytes:
+    output = io.BytesIO()
+    document = SimpleDocTemplate(
+        output,
+        pagesize=landscape(A4),
+        leftMargin=12 * mm,
+        rightMargin=12 * mm,
+        topMargin=14 * mm,
+        bottomMargin=14 * mm,
+        title="Dashboard Saltim",
+    )
+    styles = getSampleStyleSheet()
+    title_style = ParagraphStyle(
+        "DashboardTitle",
+        parent=styles["Title"],
+        fontName="Helvetica-Bold",
+        fontSize=18,
+        leading=22,
+        textColor=colors.HexColor(SALTIM_DARK),
+        spaceAfter=4,
+    )
+    meta_style = ParagraphStyle(
+        "DashboardMeta",
+        parent=styles["Normal"],
+        fontSize=8,
+        leading=10,
+        textColor=colors.HexColor(SALTIM_STONE),
+    )
+    body_style = ParagraphStyle(
+        "DashboardBody",
+        parent=styles["Normal"],
+        fontSize=8.2,
+        leading=11,
+        textColor=colors.HexColor(SALTIM_DARK),
+    )
+    header_style = ParagraphStyle(
+        "DashboardTableHeader",
+        parent=styles["Normal"],
+        alignment=1,
+        fontName="Helvetica-Bold",
+        fontSize=7,
+        leading=8,
+        textColor=colors.white,
+    )
+    cell_style = ParagraphStyle(
+        "DashboardTableCell",
+        parent=styles["Normal"],
+        fontSize=6.4,
+        leading=7.4,
+        textColor=colors.HexColor(SALTIM_DARK),
+    )
+    number_style = ParagraphStyle("DashboardTableNumber", parent=cell_style, alignment=TA_RIGHT)
+
+    story = [
+        _pdf_header_block("Dashboard", title_style, meta_style),
+        Spacer(1, 7 * mm),
+        _line_chart_drawing(chart_data["history"], document.width, 116 * mm),
+        Spacer(1, 5 * mm),
+        _dashboard_pdf_paragraph(
+            "O grafico agrupa o periodo filtrado por mes e compara estoque medio mensal com vendas totais mensais. "
+            "A linha azul usa o eixo da esquerda para estoque, enquanto a linha laranja usa o eixo da direita para vendas. "
+            "A leitura conjunta ajuda a identificar meses em que as saidas cresceram mais rapido do que a reposicao.",
+            body_style,
+        ),
+        PageBreak(),
+        _pdf_header_block("Graficos secundarios", title_style, meta_style),
+        Spacer(1, 7 * mm),
+        Table(
+            [
+                [
+                    _dashboard_pdf_paragraph("Faturamento", body_style),
+                    _dashboard_pdf_paragraph("Categorias mais vendidas", body_style),
+                ],
+                [
+                    _bar_chart_drawing(chart_data["revenue"], document.width / 2 - 8 * mm, 82 * mm),
+                    _bar_chart_drawing(chart_data["categories"], document.width / 2 - 8 * mm, 82 * mm),
+                ],
+                [
+                    _dashboard_pdf_paragraph(
+                        "Mostra a receita estimada por periodo, facilitando a comparacao entre meses.",
+                        body_style,
+                    ),
+                    _dashboard_pdf_paragraph(
+                        "Apresenta as categorias com maior uso no periodo, indicando concentracao de demanda.",
+                        body_style,
+                    ),
+                ],
+            ],
+            colWidths=[document.width / 2 - 4 * mm, document.width / 2 - 4 * mm],
+        ),
+    ]
+
+    for index, table in enumerate(tables):
+        story.append(PageBreak())
+        story.append(_pdf_header_block(table["title"], title_style, meta_style))
+        story.append(Spacer(1, 7 * mm))
+        rows = table["rows"]
+        visible_rows = rows[:DASHBOARD_PDF_TABLE_ROWS]
+        story.append(
+            _pdf_table(
+                visible_rows,
+                table["columns"],
+                header_style,
+                cell_style,
+                number_style,
+                document.width,
+            )
+        )
+        if len(rows) > len(visible_rows):
+            story.append(Spacer(1, 4 * mm))
+            story.append(
+                _dashboard_pdf_paragraph(
+                    "Visualizacao limitada para apresentacao em PDF. Os dados completos estao disponiveis na exportacao em Excel.",
+                    body_style,
+                )
+            )
+
+    document.build(story, onFirstPage=_draw_pdf_footer, onLaterPages=_draw_pdf_footer)
+    return output.getvalue()
+
+
+def _dashboard_export_response(tables: list[dict], chart_data: dict, format_value: str) -> Response:
+    export_format = _normalize_export_format(format_value)
+    if export_format not in {"pdf", "excel"}:
+        raise HTTPException(status_code=400, detail="A exportacao do dashboard aceita apenas pdf ou excel.")
+    media_type, extension = EXPORT_FORMATS[export_format]
+    content = (
+        _serialize_dashboard_pdf(tables, chart_data)
+        if export_format == "pdf"
+        else _serialize_dashboard_excel(tables)
+    )
+    return Response(
+        content=content,
+        media_type=media_type,
+        headers={"Content-Disposition": f'attachment; filename="dashboard.{extension}"'},
+    )
 
 
 def _percent_change(current: float, previous: float) -> Optional[float]:
@@ -2689,6 +3220,37 @@ def get_dashboard_receitas_ranking(
         )
         for row in rows
     ]
+
+
+@app.get("/api/export/dashboard")
+def export_dashboard(
+    format: str = Query(default="pdf"),
+    category_ids: Optional[list[str]] = Query(default=None),
+    days: int = Query(default=90, ge=7, le=730),
+    all_period: bool = False,
+    date_from: Optional[date] = None,
+    date_to: Optional[date] = None,
+    month_keys: Optional[list[str]] = Query(default=None),
+    years: Optional[list[int]] = Query(default=None),
+    month_numbers: Optional[list[int]] = Query(default=None),
+    event_types: Optional[list[str]] = Query(default=None),
+    db: Session = Depends(get_db),
+):
+    if date_from and date_to and date_from > date_to:
+        raise HTTPException(status_code=400, detail="Data inicial maior que data final")
+    tables, chart_data = _dashboard_export_tables(
+        db,
+        category_ids=category_ids,
+        days=days,
+        all_period=all_period,
+        date_from=date_from,
+        date_to=date_to,
+        month_keys=month_keys,
+        years=years,
+        month_numbers=month_numbers,
+        event_types=event_types,
+    )
+    return _dashboard_export_response(tables, chart_data, format)
 
 
 @app.get("/api/estoque", response_model=list[IngredienteOut])
