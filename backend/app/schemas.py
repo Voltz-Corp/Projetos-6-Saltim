@@ -561,3 +561,18 @@ class DashboardRecipeItem(BaseModel):
     name: str
     quantity: float
     revenue: float
+
+
+class AgentChatRequest(BaseModel):
+    message: str = Field(..., min_length=1, max_length=2000)
+    session_id: Optional[str] = None
+
+
+class AgentChatResponse(BaseModel):
+    session_id: str
+    answer: str
+    rows: list[dict[str, Any]] = Field(default_factory=list)
+    columns: list[str] = Field(default_factory=list)
+    row_count: int = 0
+    is_valid: bool
+    error_type: Optional[str] = None

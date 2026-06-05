@@ -1,17 +1,22 @@
 import math
 import os
+import re
 import subprocess
 import sys
 from contextlib import asynccontextmanager
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Optional
+from unicodedata import normalize
+from uuid import uuid4
 from zoneinfo import ZoneInfo
 
 from fastapi import FastAPI, Depends, HTTPException, Query, Response
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import asc, case, desc, func, or_, text
 from sqlalchemy.orm import Session
+
+from agent import perguntar
 
 from .database import engine, Base, get_db, run_sql_loaders
 from .models import (
@@ -35,6 +40,8 @@ from .models import (
     Venda,
 )
 from .schemas import (
+    AgentChatRequest,
+    AgentChatResponse,
     IngredienteOut,
     ContagemCreate,
     ContagemDetalheCategoria,
@@ -95,7 +102,51 @@ from .schemas import (
 
 PRODUCTION_CATEGORY_ID = "CAT0015"
 DASHBOARD_STOCK_UNITS = ("KG", "UND", "L")
+AGENT_ROWS_PREVIEW_LIMIT = 5
 RECIFE_TZ = ZoneInfo("America/Recife")
+
+
+PURCHASE_NEEDED_FALLBACK_SQL = """
+WITH latest_date AS (
+    SELECT max("date") AS reference_date
+    FROM ml.abt_reposicao
+    WHERE y_comprar = 1
+      AND is_compravel = 1
+)
+SELECT
+    abt.ingredient_id,
+    abt.nome_ingrediente AS ingrediente,
+    abt.categoria,
+    abt.unidade,
+    abt.saldo_atual AS estoque_atual,
+    abt.y_qtd_comprar AS qtd_sugerida,
+    abt.y_nivel_criticidade AS criticidade,
+    abt.criticidade_score,
+    abt."date" AS data_referencia
+FROM ml.abt_reposicao abt
+JOIN latest_date latest ON latest.reference_date = abt."date"
+WHERE abt.y_comprar = 1
+  AND abt.is_compravel = 1
+ORDER BY
+    abt.criticidade_score DESC NULLS LAST,
+    abt.y_qtd_comprar DESC NULLS LAST,
+    abt.nome_ingrediente ASC
+LIMIT :limit
+"""
+
+PURCHASE_NEEDED_FALLBACK_COUNT_SQL = """
+WITH latest_date AS (
+    SELECT max("date") AS reference_date
+    FROM ml.abt_reposicao
+    WHERE y_comprar = 1
+      AND is_compravel = 1
+)
+SELECT count(1)
+FROM ml.abt_reposicao abt
+JOIN latest_date latest ON latest.reference_date = abt."date"
+WHERE abt.y_comprar = 1
+  AND abt.is_compravel = 1
+"""
 
 
 def _now_recife() -> datetime:
@@ -787,7 +838,7 @@ def run_criticidade_report(response: Response, db: Session = Depends(get_db)):
     python_path = project_root / ".venv" / "bin" / "python"
     python_executable = str(python_path) if python_path.exists() else sys.executable
     env = os.environ.copy()
-    env.setdefault("DATABASE_URL", "postgresql://saltim:saltim123@localhost:5432/saltim_db")
+    env.setdefault("DATABASE_URL", "postgresql+psycopg://saltim:saltim123@localhost:55432/saltim_db")
     env.setdefault("MLFLOW_TRACKING_URI", "http://localhost:5000")
 
     result = subprocess.run(
@@ -3336,6 +3387,103 @@ def get_log_ingrediente(ingrediente_id: str, db: Session = Depends(get_db)):
         .all()
     )
     return [_serializa_log(e) for e in entries]
+
+
+# ---------------------------------------------------------------------------
+# Agente
+# ---------------------------------------------------------------------------
+
+def _normalize_agent_question(value: str) -> str:
+    ascii_text = normalize("NFKD", value).encode("ascii", "ignore").decode("ascii")
+    return re.sub(r"\s+", " ", ascii_text.lower()).strip()
+
+
+def _is_purchase_needed_question(message: str) -> bool:
+    normalized = _normalize_agent_question(message)
+    has_item = any(term in normalized for term in ("item", "itens", "ingrediente", "insumo"))
+    has_purchase = any(term in normalized for term in ("compra", "comprar", "repor", "reposicao"))
+    has_need = any(term in normalized for term in ("precis", "necess", "alerta", "critico"))
+    return has_item and has_purchase and has_need
+
+
+def _purchase_needed_fallback_rows() -> tuple[list[dict], int]:
+    with engine.connect() as conn:
+        total = int(conn.execute(text(PURCHASE_NEEDED_FALLBACK_COUNT_SQL)).scalar() or 0)
+        result = conn.execute(
+            text(PURCHASE_NEEDED_FALLBACK_SQL),
+            {"limit": AGENT_ROWS_PREVIEW_LIMIT},
+        )
+        return [dict(row._mapping) for row in result], total
+
+
+def _agent_answer(ctx: dict, row_count: int) -> str:
+    if ctx.get("answer"):
+        return str(ctx["answer"])
+
+    if not ctx.get("is_valid"):
+        return (
+            ctx.get("error_message")
+            or "Nao consegui responder essa pergunta com os dados disponiveis."
+        )
+
+    if row_count == 0:
+        return "Nao encontrei registros para essa pergunta."
+    if row_count == 1:
+        return "Encontrei 1 registro relacionado a sua pergunta."
+    return f"Encontrei {row_count} registros relacionados a sua pergunta."
+
+
+@app.post("/api/agent/chat", response_model=AgentChatResponse)
+def chat_with_agent(payload: AgentChatRequest, response: Response):
+    response.headers["Cache-Control"] = "no-store"
+    message = payload.message.strip()
+    if not message:
+        raise HTTPException(status_code=400, detail="Mensagem vazia")
+
+    session_id = payload.session_id or f"agent-{uuid4().hex}"
+
+    try:
+        ctx = perguntar(message, session_id=session_id)
+    except Exception as exc:
+        ctx = {
+            "is_valid": False,
+            "error_type": "erro_execucao",
+            "error_message": f"Erro ao chamar o agente: {exc}",
+            "rows": [],
+        }
+
+    rows = ctx.get("rows") or []
+    fallback_row_count: Optional[int] = None
+    if not rows and _is_purchase_needed_question(message):
+        fallback_rows, fallback_total = _purchase_needed_fallback_rows()
+        if fallback_rows:
+            ctx = {
+                **ctx,
+                "is_valid": True,
+                "error_type": None,
+                "error_message": None,
+                "answer": (
+                    "Encontrei itens com indicacao de compra na base analitica "
+                    "mais recente de reposicao."
+                ),
+                "rows": fallback_rows,
+            }
+            rows = fallback_rows
+            fallback_row_count = fallback_total
+
+    preview_rows = rows[:AGENT_ROWS_PREVIEW_LIMIT]
+    columns = list(preview_rows[0].keys()) if preview_rows else []
+    row_count = fallback_row_count if fallback_row_count is not None else len(rows)
+
+    return AgentChatResponse(
+        session_id=session_id,
+        answer=_agent_answer(ctx, row_count),
+        rows=preview_rows,
+        columns=columns,
+        row_count=row_count,
+        is_valid=bool(ctx.get("is_valid")),
+        error_type=ctx.get("error_type"),
+    )
 
 
 @app.get("/health")

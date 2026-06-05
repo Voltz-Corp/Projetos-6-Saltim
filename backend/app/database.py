@@ -49,8 +49,12 @@ def run_sql_loaders() -> None:
 
     sql_dir = Path(__file__).resolve().parents[1] / "db"
     raw_conn = engine.raw_connection()
+    lock_acquired = False
     try:
         with raw_conn.cursor() as cursor:
+            cursor.execute("SELECT pg_advisory_lock(hashtext('saltim_startup_loader'))")
+            lock_acquired = True
+
             if _force_csv_reload() or not _seed_data_loaded(cursor):
                 script_path = sql_dir / DATA_LOADER_FILE
                 cursor.execute(script_path.read_text(encoding="utf-8"))
@@ -62,4 +66,8 @@ def run_sql_loaders() -> None:
         raw_conn.rollback()
         raise
     finally:
+        if lock_acquired:
+            with raw_conn.cursor() as cursor:
+                cursor.execute("SELECT pg_advisory_unlock(hashtext('saltim_startup_loader'))")
+            raw_conn.commit()
         raw_conn.close()
