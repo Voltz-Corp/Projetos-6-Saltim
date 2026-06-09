@@ -23,11 +23,13 @@ from openpyxl.chart import BarChart as ExcelBarChart, LineChart as ExcelLineChar
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 from reportlab.lib import colors
-from reportlab.lib.enums import TA_RIGHT
+from reportlab.graphics import renderPDF
+from reportlab.lib.enums import TA_CENTER, TA_RIGHT
 from reportlab.lib.pagesizes import A4, landscape
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import mm
 from reportlab.platypus import (
+    Image as PlatypusImage,
     PageBreak,
     Paragraph,
     SimpleDocTemplate,
@@ -1203,9 +1205,26 @@ SALTIM_ORANGE = "#F07820"
 SALTIM_DARK = "#232323"
 SALTIM_CREAM = "#FEF4E8"
 SALTIM_STONE = "#5F5E5A"
-SALTIM_LOGO_PATH = (
+PDF_PAGE_SIZE = landscape(A4)
+PDF_PROJECT_NAME = "Maestro"
+PDF_PROJECT_CONTEXT = "Compras, Estoque & Operacoes"
+PDF_CLIENT_NAME = "Saltim Cafe"
+PDF_SIGNATURE = "Equipe Maestro"
+PDF_GENERATOR_NOTE = "Relatorio oficial do projeto Maestro para Saltim Cafe"
+PDF_PROJECT_LOGO_PATH = (
     Path(__file__).resolve().parents[2] / "frontend" / "public" / "images" / "maestro-logo.svg"
 )
+PDF_CLIENT_LOGO_PATH = (
+    Path(__file__).resolve().parents[2] / "frontend" / "public" / "images" / "saltim_logo.jpg"
+)
+PDF_LAYOUT = {
+    "page_margin_x": 12 * mm,
+    "page_margin_top": 31 * mm,
+    "page_margin_bottom": 18 * mm,
+    "card_radius": 7,
+    "card_padding": 9,
+    "section_gap": 6 * mm,
+}
 
 EXPORT_THEMES = {
     "maestro-light": {
@@ -1271,6 +1290,185 @@ def _export_theme(theme_id: Optional[str]) -> dict[str, str]:
 
 def _hex(value: str) -> str:
     return value.replace("#", "")
+
+
+def _pdf_palette(theme: Optional[dict[str, str]] = None) -> dict[str, str]:
+    source = theme or _export_theme(None)
+    return {
+        **source,
+        "card": "#FFFFFF",
+        "card_border": source.get("grid", "#E4E0EF"),
+        "header_soft": source.get("soft", "#EFEDFF"),
+        "accent_soft": "#FFF2EC",
+        "table_alt": source.get("soft", "#EFEDFF"),
+        "footer_text": source.get("muted", "#6F6787"),
+    }
+
+
+def _apply_drawing_fill(drawing, fill_color: colors.Color) -> None:
+    for child in getattr(drawing, "contents", []):
+        if hasattr(child, "fillColor") and child.fillColor is not None:
+            child.fillColor = fill_color
+        if hasattr(child, "strokeColor") and child.strokeColor is not None:
+            child.strokeColor = fill_color
+        _apply_drawing_fill(child, fill_color)
+
+
+def _fit_svg_logo(
+    path: Path,
+    max_width: float,
+    max_height: float,
+    fill_color: Optional[colors.Color] = None,
+):
+    if svg2rlg is None or not path.exists():
+        return None
+    drawing = svg2rlg(str(path))
+    if drawing is None or not drawing.width or not drawing.height:
+        return None
+    if fill_color is not None:
+        _apply_drawing_fill(drawing, fill_color)
+    scale = min(max_width / drawing.width, max_height / drawing.height)
+    drawing.width *= scale
+    drawing.height *= scale
+    drawing.scale(scale, scale)
+    return drawing
+
+
+def _pdf_logo_flowable(
+    path: Path,
+    max_width: float,
+    max_height: float,
+    fallback: str,
+    style: ParagraphStyle,
+    fill_color: Optional[colors.Color] = None,
+):
+    suffix = path.suffix.lower()
+    if suffix == ".svg":
+        drawing = _fit_svg_logo(path, max_width, max_height, fill_color)
+        if drawing is not None:
+            return drawing
+    if path.exists() and suffix in {".jpg", ".jpeg", ".png"}:
+        image = PlatypusImage(str(path))
+        image._restrictSize(max_width, max_height)
+        return image
+    return Paragraph(_xml_escape(fallback), style)
+
+
+def _draw_pdf_logo(
+    canvas,
+    path: Path,
+    x: float,
+    y: float,
+    max_width: float,
+    max_height: float,
+    fill_color: Optional[colors.Color] = None,
+) -> None:
+    suffix = path.suffix.lower()
+    if suffix == ".svg":
+        drawing = _fit_svg_logo(path, max_width, max_height, fill_color)
+        if drawing is not None:
+            renderPDF.draw(drawing, canvas, x, y)
+            return
+    if path.exists() and suffix in {".jpg", ".jpeg", ".png"}:
+        canvas.drawImage(
+            str(path),
+            x,
+            y,
+            width=max_width,
+            height=max_height,
+            preserveAspectRatio=True,
+            anchor="c",
+            mask="auto",
+        )
+
+
+def _pdf_styles(theme: Optional[dict[str, str]] = None) -> dict[str, ParagraphStyle]:
+    palette = _pdf_palette(theme)
+    styles = getSampleStyleSheet()
+    return {
+        "report_title": ParagraphStyle(
+            "PdfReportTitle",
+            parent=styles["Title"],
+            fontName="Helvetica-Bold",
+            fontSize=18,
+            leading=21,
+            textColor=colors.HexColor(palette["text"]),
+            spaceAfter=3,
+        ),
+        "section_title": ParagraphStyle(
+            "PdfSectionTitle",
+            parent=styles["Heading1"],
+            fontName="Helvetica-Bold",
+            fontSize=14,
+            leading=17,
+            textColor=colors.HexColor(palette["primary"]),
+            spaceAfter=3,
+        ),
+        "chart_title": ParagraphStyle(
+            "PdfChartTitle",
+            parent=styles["Heading2"],
+            fontName="Helvetica-Bold",
+            fontSize=10.5,
+            leading=13,
+            textColor=colors.HexColor(palette["primary"]),
+            spaceAfter=4,
+        ),
+        "meta": ParagraphStyle(
+            "PdfMeta",
+            parent=styles["Normal"],
+            fontSize=8,
+            leading=10,
+            textColor=colors.HexColor(palette["muted"]),
+        ),
+        "body": ParagraphStyle(
+            "PdfBody",
+            parent=styles["Normal"],
+            fontSize=8.2,
+            leading=11,
+            textColor=colors.HexColor(palette["text"]),
+        ),
+        "table_header": ParagraphStyle(
+            "PdfTableHeader",
+            parent=styles["Normal"],
+            alignment=TA_CENTER,
+            fontName="Helvetica-Bold",
+            fontSize=7,
+            leading=8.5,
+            textColor=colors.white,
+        ),
+        "table_cell": ParagraphStyle(
+            "PdfTableCell",
+            parent=styles["Normal"],
+            fontSize=6.5,
+            leading=8,
+            textColor=colors.HexColor(palette["text"]),
+        ),
+        "table_number": ParagraphStyle(
+            "PdfTableNumber",
+            parent=styles["Normal"],
+            alignment=TA_RIGHT,
+            fontSize=6.5,
+            leading=8,
+            textColor=colors.HexColor(palette["text"]),
+        ),
+        "table_date": ParagraphStyle(
+            "PdfTableDate",
+            parent=styles["Normal"],
+            alignment=TA_CENTER,
+            fontSize=6.5,
+            leading=8,
+            textColor=colors.HexColor(palette["text"]),
+        ),
+    }
+
+
+def _rounded_table(data, style_commands, **kwargs) -> Table:
+    try:
+        table = Table(data, cornerRadii=[PDF_LAYOUT["card_radius"]] * 4, **kwargs)
+    except TypeError:
+        table = Table(data, **kwargs)
+    table.setStyle(TableStyle(style_commands))
+    return table
 
 EXPORT_COLUMN_LABELS = {
     "id": "ID",
@@ -1576,39 +1774,52 @@ def _pdf_header_block(
     theme: Optional[dict[str, str]] = None,
 ) -> Table:
     theme = theme or _export_theme(None)
+    palette = _pdf_palette(theme)
     generated_at = _now_recife().strftime("%d/%m/%Y %H:%M")
     title_cell = [
-        Paragraph("Maestro", meta_style),
+        Paragraph(PDF_PROJECT_NAME, meta_style),
         Paragraph(_xml_escape(title), title_style),
-        Paragraph(f"Gerado em {generated_at}", meta_style),
+        Paragraph(f"{PDF_PROJECT_CONTEXT} | Gerado em {generated_at}", meta_style),
     ]
-    logo = Paragraph("Saltim", title_style)
-    if SALTIM_LOGO_PATH.exists() and svg2rlg is not None:
-        drawing = svg2rlg(str(SALTIM_LOGO_PATH))
-        if drawing is not None:
-            scale = min((18 * mm) / drawing.width, (18 * mm) / drawing.height)
-            drawing.width *= scale
-            drawing.height *= scale
-            drawing.scale(scale, scale)
-            logo = drawing
+    logo_style = ParagraphStyle(
+        "PdfFallbackLogo",
+        parent=meta_style,
+        fontName="Helvetica-Bold",
+        fontSize=10,
+        textColor=colors.HexColor(palette["primary"]),
+    )
+    project_logo = _pdf_logo_flowable(
+        PDF_PROJECT_LOGO_PATH,
+        14 * mm,
+        14 * mm,
+        PDF_PROJECT_NAME,
+        logo_style,
+        fill_color=colors.HexColor(palette["primary"]),
+    )
+    client_logo = _pdf_logo_flowable(
+        PDF_CLIENT_LOGO_PATH,
+        16 * mm,
+        16 * mm,
+        PDF_CLIENT_NAME,
+        logo_style,
+    )
 
-    table = Table(
-        [[logo, title_cell]],
-        colWidths=[23 * mm, 235 * mm],
+    return _rounded_table(
+        [[project_logo, title_cell, client_logo]],
+        [
+            ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor(palette["card"])),
+            ("BOX", (0, 0), (-1, -1), 0.7, colors.HexColor(palette["card_border"])),
+            ("LINEBELOW", (0, 0), (-1, -1), 1.3, colors.HexColor(palette["primary"])),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("ALIGN", (2, 0), (2, 0), "RIGHT"),
+            ("LEFTPADDING", (0, 0), (-1, -1), 9),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 9),
+            ("TOPPADDING", (0, 0), (-1, -1), 8),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
+        ],
+        colWidths=[21 * mm, 215 * mm, 22 * mm],
         hAlign="LEFT",
     )
-    table.setStyle(
-        TableStyle(
-            [
-                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-                ("LEFTPADDING", (0, 0), (-1, -1), 0),
-                ("RIGHTPADDING", (0, 0), (-1, -1), 0),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
-                ("LINEBELOW", (0, 0), (-1, -1), 1.4, colors.HexColor(theme["primary"])),
-            ]
-        )
-    )
-    return table
 
 
 def _pdf_table(
@@ -1617,10 +1828,12 @@ def _pdf_table(
     header_style: ParagraphStyle,
     cell_style: ParagraphStyle,
     number_style: ParagraphStyle,
+    date_style: ParagraphStyle,
     available_width: float,
     theme: Optional[dict[str, str]] = None,
 ) -> Table:
     theme = theme or _export_theme(None)
+    palette = _pdf_palette(theme)
     headers = [Paragraph(_xml_escape(header), header_style) for header in _export_headers(columns)]
     data = [headers]
     numeric_columns = {
@@ -1629,6 +1842,25 @@ def _pdf_table(
         "preco_medio",
         "itens_fornecidos",
         "prazo_medio_entrega_dias",
+        "estoque_atual",
+        "uso_dia",
+        "cobertura_dias",
+        "sugestao_compra",
+        "posicao",
+        "unidades_vendidas",
+        "faturamento",
+        "valor",
+        "estoque",
+        "vendas",
+    } | {
+        column
+        for column in columns
+        if any(isinstance(row.get(column), (int, float)) for row in rows)
+    }
+    date_columns = {
+        column
+        for column in columns
+        if "data" in column or any(isinstance(row.get(column), (date, datetime)) for row in rows)
     }
 
     if rows:
@@ -1637,7 +1869,13 @@ def _pdf_table(
                 [
                     Paragraph(
                         _xml_escape(_stringify_export_value(row.get(column))),
-                        number_style if column in numeric_columns else cell_style,
+                        (
+                            number_style
+                            if column in numeric_columns
+                            else date_style
+                            if column in date_columns
+                            else cell_style
+                        ),
                     )
                     for column in columns
                 ]
@@ -1645,29 +1883,44 @@ def _pdf_table(
     else:
         data.append([Paragraph("Nenhum registro encontrado.", cell_style)] + [""] * (len(columns) - 1))
 
-    table = Table(
+    highlight_rows = []
+    for row_index, row in enumerate(rows, start=1):
+        values = " ".join(_stringify_export_value(value).lower() for value in row.values())
+        if any(token in values for token in ("total", "media", "média")):
+            highlight_rows.append(row_index)
+
+    style_commands = [
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor(palette["primary"])),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("LINEBELOW", (0, 0), (-1, 0), 0.9, colors.HexColor(palette["accent"])),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor(palette["table_alt"])]),
+        ("BOX", (0, 0), (-1, -1), 0.55, colors.HexColor(palette["card_border"])),
+        ("INNERGRID", (0, 0), (-1, -1), 0.25, colors.HexColor(palette["grid"])),
+        ("LEFTPADDING", (0, 0), (-1, -1), 6),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+        ("TOPPADDING", (0, 0), (-1, -1), 5),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+    ]
+    for row_index in highlight_rows:
+        style_commands.extend(
+            [
+                ("BACKGROUND", (0, row_index), (-1, row_index), colors.HexColor(palette["accent_soft"])),
+                ("LINEABOVE", (0, row_index), (-1, row_index), 0.7, colors.HexColor(palette["accent"])),
+            ]
+        )
+    if not rows and columns:
+        style_commands.append(("SPAN", (0, 1), (-1, 1)))
+
+    return _rounded_table(
         data,
+        style_commands,
         colWidths=_pdf_column_widths(rows, columns, available_width),
         repeatRows=1,
         splitByRow=1,
         hAlign="LEFT",
     )
-    style_commands = [
-        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor(theme["primary"])),
-        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-        ("VALIGN", (0, 0), (-1, -1), "TOP"),
-        ("GRID", (0, 0), (-1, -1), 0.35, colors.HexColor(theme["grid"])),
-        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor(theme["soft"])]),
-        ("LEFTPADDING", (0, 0), (-1, -1), 4),
-        ("RIGHTPADDING", (0, 0), (-1, -1), 4),
-        ("TOPPADDING", (0, 0), (-1, -1), 4),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
-    ]
-    if not rows and columns:
-        style_commands.append(("SPAN", (0, 1), (-1, 1)))
-    table.setStyle(TableStyle(style_commands))
-    return table
 
 
 def _pdf_column_widths(rows: list[dict], columns: list[str], available_width: float) -> list[float]:
@@ -1691,18 +1944,72 @@ def _pdf_column_widths(rows: list[dict], columns: list[str], available_width: fl
     return widths
 
 
-def _draw_pdf_footer(canvas, document):
+def _draw_pdf_page_frame(canvas, document):
     theme = getattr(document, "export_theme", _export_theme(None))
+    palette = _pdf_palette(theme)
+    page_width, page_height = document.pagesize
+    generated_at = getattr(document, "generated_at_text", _now_recife().strftime("%d/%m/%Y %H:%M"))
+    report_title = getattr(document, "report_title", "Relatorio")
     canvas.saveState()
-    canvas.setStrokeColor(colors.HexColor(theme["primary"]))
-    canvas.setLineWidth(0.6)
-    canvas.line(document.leftMargin, 10 * mm, landscape(A4)[0] - document.rightMargin, 10 * mm)
+
+    header_top = page_height - 7 * mm
+    header_bottom = page_height - 25 * mm
+    canvas.setFillColor(colors.HexColor(palette["card"]))
+    canvas.rect(0, header_bottom, page_width, header_top - header_bottom, stroke=0, fill=1)
+    canvas.setFillColor(colors.HexColor(palette["primary"]))
+    canvas.rect(0, header_bottom - 1.5 * mm, page_width, 1.5 * mm, stroke=0, fill=1)
+    canvas.setStrokeColor(colors.HexColor(palette["grid"]))
+    canvas.setLineWidth(0.35)
+    canvas.line(document.leftMargin, header_bottom, page_width - document.rightMargin, header_bottom)
+
+    _draw_pdf_logo(
+        canvas,
+        PDF_PROJECT_LOGO_PATH,
+        document.leftMargin,
+        page_height - 21 * mm,
+        13 * mm,
+        13 * mm,
+        fill_color=colors.HexColor(palette["primary"]),
+    )
+    _draw_pdf_logo(
+        canvas,
+        PDF_CLIENT_LOGO_PATH,
+        page_width - document.rightMargin - 17 * mm,
+        page_height - 22 * mm,
+        16 * mm,
+        16 * mm,
+    )
+
+    text_x = document.leftMargin + 19 * mm
+    canvas.setFont("Helvetica-Bold", 8.5)
+    canvas.setFillColor(colors.HexColor(palette["primary"]))
+    canvas.drawString(text_x, page_height - 13 * mm, PDF_PROJECT_NAME)
+    canvas.setFont("Helvetica-Bold", 7)
+    canvas.setFillColor(colors.HexColor(palette["accent"]))
+    canvas.drawString(text_x, page_height - 17 * mm, PDF_PROJECT_CONTEXT)
     canvas.setFont("Helvetica", 7)
-    canvas.setFillColor(colors.HexColor(theme["muted"]))
-    canvas.drawString(document.leftMargin, 6 * mm, "Maestro")
+    canvas.setFillColor(colors.HexColor(palette["muted"]))
+    canvas.drawString(text_x, page_height - 21 * mm, str(report_title)[:95])
+
+    footer_y = 11 * mm
+    canvas.setStrokeColor(colors.HexColor(palette["grid"]))
+    canvas.setLineWidth(0.45)
+    canvas.line(document.leftMargin, footer_y, page_width - document.rightMargin, footer_y)
+    canvas.setFillColor(colors.HexColor(palette["accent"]))
+    canvas.roundRect(document.leftMargin, footer_y - 4.8 * mm, 4 * mm, 4 * mm, 1.4 * mm, stroke=0, fill=1)
+    canvas.setFont("Helvetica-Bold", 7)
+    canvas.setFillColor(colors.HexColor(palette["primary"]))
+    canvas.drawString(document.leftMargin + 6 * mm, footer_y - 3.4 * mm, PDF_SIGNATURE)
+    canvas.setFont("Helvetica", 7)
+    canvas.setFillColor(colors.HexColor(palette["footer_text"]))
+    canvas.drawString(
+        document.leftMargin + 36 * mm,
+        footer_y - 3.4 * mm,
+        f"{PDF_GENERATOR_NOTE} | Gerado em {generated_at}",
+    )
     canvas.drawRightString(
-        landscape(A4)[0] - document.rightMargin,
-        6 * mm,
+        page_width - document.rightMargin,
+        footer_y - 3.4 * mm,
         f"Pagina {canvas.getPageNumber()}",
     )
     canvas.restoreState()
@@ -1713,70 +2020,39 @@ def _serialize_pdf(rows: list[dict], title: str, columns: Optional[list[str]], t
     output = io.BytesIO()
     document = SimpleDocTemplate(
         output,
-        pagesize=landscape(A4),
-        leftMargin=12 * mm,
-        rightMargin=12 * mm,
-        topMargin=14 * mm,
-        bottomMargin=14 * mm,
+        pagesize=PDF_PAGE_SIZE,
+        leftMargin=PDF_LAYOUT["page_margin_x"],
+        rightMargin=PDF_LAYOUT["page_margin_x"],
+        topMargin=PDF_LAYOUT["page_margin_top"],
+        bottomMargin=PDF_LAYOUT["page_margin_bottom"],
         title=title,
     )
     document.export_theme = theme
-    styles = getSampleStyleSheet()
-    title_style = ParagraphStyle(
-        "SaltimTitle",
-        parent=styles["Title"],
-        fontName="Helvetica-Bold",
-        fontSize=18,
-        leading=22,
-        textColor=colors.HexColor(theme["text"]),
-        spaceAfter=4,
-    )
-    meta_style = ParagraphStyle(
-        "SaltimMeta",
-        parent=styles["Normal"],
-        fontSize=8,
-        leading=10,
-        textColor=colors.HexColor(theme["muted"]),
-    )
-    header_style = ParagraphStyle(
-        "SaltimTableHeader",
-        parent=styles["Normal"],
-        alignment=1,
-        fontName="Helvetica-Bold",
-        fontSize=7,
-        leading=8,
-        textColor=colors.white,
-    )
-    cell_style = ParagraphStyle(
-        "SaltimTableCell",
-        parent=styles["Normal"],
-        fontSize=6.4,
-        leading=7.4,
-        textColor=colors.HexColor(theme["text"]),
-    )
-    number_style = ParagraphStyle(
-        "SaltimTableNumber",
-        parent=cell_style,
-        alignment=TA_RIGHT,
-    )
+    document.report_title = title
+    document.generated_at_text = _now_recife().strftime("%d/%m/%Y %H:%M")
+    styles = _pdf_styles(theme)
 
-    story = [_pdf_header_block(title, title_style, meta_style, theme), Spacer(1, 7 * mm)]
+    story = [
+        _pdf_header_block(title, styles["report_title"], styles["meta"], theme),
+        Spacer(1, PDF_LAYOUT["section_gap"]),
+    ]
     if export_columns:
         story.append(
             _pdf_table(
                 rows,
                 export_columns,
-                header_style,
-                cell_style,
-                number_style,
+                styles["table_header"],
+                styles["table_cell"],
+                styles["table_number"],
+                styles["table_date"],
                 document.width,
                 theme,
             )
         )
     else:
-        story.append(Paragraph("Nenhum registro encontrado.", cell_style))
+        story.append(Paragraph("Nenhum registro encontrado.", styles["body"]))
 
-    document.build(story, onFirstPage=_draw_pdf_footer, onLaterPages=_draw_pdf_footer)
+    document.build(story, onFirstPage=_draw_pdf_page_frame, onLaterPages=_draw_pdf_page_frame)
     return output.getvalue()
 
 
@@ -2022,25 +2298,39 @@ def _sample_chart_rows(rows: list[dict], limit: int) -> list[dict]:
 
 def _line_chart_drawing(rows: list[dict], width: float, height: float, theme: Optional[dict[str, str]] = None) -> Drawing:
     theme = theme or _export_theme(None)
+    palette = _pdf_palette(theme)
     drawing = Drawing(width, height)
-    left = 42
-    right = 42
-    bottom = 30
-    top = 28
+    left = 44
+    right = 44
+    bottom = 31
+    top = 25
     chart_width = width - left - right
     chart_height = height - bottom - top
-    drawing.add(DrawingLine(left, bottom, left, bottom + chart_height, strokeColor=colors.HexColor(theme["grid"])))
-    drawing.add(DrawingLine(left, bottom, left + chart_width, bottom, strokeColor=colors.HexColor(theme["grid"])))
-    drawing.add(DrawingLine(left + chart_width, bottom, left + chart_width, bottom + chart_height, strokeColor=colors.HexColor(theme["grid"])))
     sampled = _sample_chart_rows(rows, 18)
     if not sampled:
-        drawing.add(String(width / 2 - 45, height / 2, "Sem dados para exibir", fontSize=9, fillColor=colors.HexColor(theme["muted"])))
+        drawing.add(String(width / 2 - 45, height / 2, "Sem dados para exibir", fontSize=9, fillColor=colors.HexColor(palette["muted"])))
         return drawing
 
     series = [
-        ("estoque", "Estoque medio", colors.HexColor(theme["accent"]), "left"),
-        ("vendas", "Vendas totais", colors.HexColor(theme["primary"]), "right"),
+        ("estoque", "Estoque medio", colors.HexColor(palette["accent"]), "left"),
+        ("vendas", "Vendas totais", colors.HexColor(palette["primary"]), "right"),
     ]
+    drawing.add(DrawingLine(left, bottom, left, bottom + chart_height, strokeColor=colors.HexColor(palette["grid"]), strokeWidth=0.65))
+    drawing.add(DrawingLine(left, bottom, left + chart_width, bottom, strokeColor=colors.HexColor(palette["grid"]), strokeWidth=0.65))
+    drawing.add(DrawingLine(left + chart_width, bottom, left + chart_width, bottom + chart_height, strokeColor=colors.HexColor(palette["grid"]), strokeWidth=0.65))
+
+    max_values = {
+        key: max((_as_float(row.get(key)) for row in sampled), default=0) or 1
+        for key, _label, _color, _axis in series
+    }
+    for tick in range(5):
+        y = bottom + chart_height * tick / 4
+        drawing.add(DrawingLine(left, y, left + chart_width, y, strokeColor=colors.HexColor(palette["grid"]), strokeWidth=0.22))
+        left_label = _stringify_export_value(max_values["estoque"] * tick / 4)
+        right_label = _stringify_export_value(max_values["vendas"] * tick / 4)
+        drawing.add(String(left - 35, y - 2, left_label, fontSize=6.2, fillColor=colors.HexColor(palette["muted"])))
+        drawing.add(String(left + chart_width + 5, y - 2, right_label, fontSize=6.2, fillColor=colors.HexColor(palette["muted"])))
+
     totals = {
         "estoque": sum(_as_float(row.get("estoque")) for row in sampled) / max(1, len(sampled)),
         "vendas": sum(_as_float(row.get("vendas")) for row in sampled),
@@ -2059,63 +2349,105 @@ def _line_chart_drawing(rows: list[dict], width: float, height: float, theme: Op
             )
         )
 
-    for key, _label, color, axis in series:
+    for key, _label, color, _axis in series:
         values = [_as_float(row.get(key)) for row in sampled]
-        max_value = max(values) or 1
+        max_value = max_values[key]
         points = []
         for index, value in enumerate(values):
             x = left + (chart_width * index / max(1, len(sampled) - 1))
             y = bottom + (value / max_value) * chart_height
             points.append((x, y))
-        for tick in range(5):
-            tick_value = max_value * tick / 4
-            y = bottom + chart_height * tick / 4
-            label = _stringify_export_value(tick_value)
-            drawing.add(DrawingLine(left, y, left + chart_width, y, strokeColor=colors.HexColor(theme["grid"]), strokeWidth=0.35))
-            if axis == "left":
-                drawing.add(String(left - 34, y - 2, label, fontSize=6.5, fillColor=color))
-            else:
-                drawing.add(String(left + chart_width + 5, y - 2, label, fontSize=6.5, fillColor=color))
         for start, end in zip(points, points[1:]):
-            drawing.add(DrawingLine(start[0], start[1], end[0], end[1], strokeColor=color, strokeWidth=2))
+            drawing.add(DrawingLine(start[0], start[1], end[0], end[1], strokeColor=color, strokeWidth=2.2))
         for x, y in points:
             drawing.add(Rect(x - 1.5, y - 1.5, 3, 3, fillColor=color, strokeColor=color))
 
     for index, row in enumerate(sampled):
         label = str(row.get("periodo") or row.get("data", ""))
         x = left + (chart_width * index / max(1, len(sampled) - 1))
-        drawing.add(String(x - 10, bottom - 14, label, fontSize=6.5, fillColor=colors.HexColor(theme["muted"])))
+        drawing.add(String(x - 10, bottom - 14, label, fontSize=6.3, fillColor=colors.HexColor(palette["muted"])))
     return drawing
 
 
 def _bar_chart_drawing(rows: list[dict], width: float, height: float, value_key: str = "valor", theme: Optional[dict[str, str]] = None) -> Drawing:
     theme = theme or _export_theme(None)
+    palette = _pdf_palette(theme)
     drawing = Drawing(width, height)
-    left = 32
-    bottom = 28
-    chart_width = width - 52
-    chart_height = height - 48
+    left = 34
+    bottom = 29
+    chart_width = width - 56
+    chart_height = height - 50
     items = rows[:10]
     if not items:
-        drawing.add(String(width / 2 - 45, height / 2, "Sem dados para exibir", fontSize=9, fillColor=colors.HexColor(theme["muted"])))
+        drawing.add(String(width / 2 - 45, height / 2, "Sem dados para exibir", fontSize=9, fillColor=colors.HexColor(palette["muted"])))
         return drawing
     max_value = max(_as_float(item.get(value_key)) for item in items) or 1
     gap = 4
     bar_width = max(8, (chart_width - gap * (len(items) - 1)) / len(items))
-    drawing.add(DrawingLine(left, bottom, left, bottom + chart_height, strokeColor=colors.HexColor(theme["grid"])))
-    drawing.add(DrawingLine(left, bottom, left + chart_width, bottom, strokeColor=colors.HexColor(theme["grid"])))
+    drawing.add(DrawingLine(left, bottom, left, bottom + chart_height, strokeColor=colors.HexColor(palette["grid"]), strokeWidth=0.65))
+    drawing.add(DrawingLine(left, bottom, left + chart_width, bottom, strokeColor=colors.HexColor(palette["grid"]), strokeWidth=0.65))
+    for tick in range(1, 5):
+        y = bottom + chart_height * tick / 4
+        drawing.add(DrawingLine(left, y, left + chart_width, y, strokeColor=colors.HexColor(palette["grid"]), strokeWidth=0.22))
     for index, item in enumerate(items):
         value = _as_float(item.get(value_key))
         bar_height = (value / max_value) * chart_height
         x = left + index * (bar_width + gap)
-        drawing.add(Rect(x, bottom, bar_width, bar_height, fillColor=colors.HexColor(theme["primary"]), strokeColor=colors.HexColor(theme["primary"])))
+        bar_color = colors.HexColor(palette["primary"] if index % 2 == 0 else palette["accent"])
+        drawing.add(Rect(x, bottom, bar_width, bar_height, fillColor=bar_color, strokeColor=bar_color))
+        drawing.add(String(x, bottom + bar_height + 4, _stringify_export_value(value), fontSize=6.1, fillColor=colors.HexColor(palette["muted"])))
         label = str(item.get("periodo") or item.get("nome") or item.get("receita") or "")[:12]
-        drawing.add(String(x, bottom - 13, label, fontSize=6.3, fillColor=colors.HexColor(theme["muted"])))
+        drawing.add(String(x, bottom - 13, label, fontSize=6.2, fillColor=colors.HexColor(palette["muted"])))
     return drawing
 
 
 def _dashboard_pdf_paragraph(text: str, style: ParagraphStyle) -> Paragraph:
     return Paragraph(_xml_escape(text), style)
+
+
+def _pdf_card(
+    content: list,
+    available_width: float,
+    theme: Optional[dict[str, str]] = None,
+    padding: Optional[float] = None,
+) -> Table:
+    palette = _pdf_palette(theme)
+    inner_padding = PDF_LAYOUT["card_padding"] if padding is None else padding
+    return _rounded_table(
+        [[content]],
+        [
+            ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor(palette["card"])),
+            ("BOX", (0, 0), (-1, -1), 0.65, colors.HexColor(palette["card_border"])),
+            ("LINEBEFORE", (0, 0), (0, -1), 2.3, colors.HexColor(palette["accent"])),
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ("LEFTPADDING", (0, 0), (-1, -1), inner_padding),
+            ("RIGHTPADDING", (0, 0), (-1, -1), inner_padding),
+            ("TOPPADDING", (0, 0), (-1, -1), inner_padding),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), inner_padding),
+        ],
+        colWidths=[available_width],
+        hAlign="LEFT",
+    )
+
+
+def _pdf_chart_card(
+    title: str,
+    description: str,
+    drawing: Drawing,
+    available_width: float,
+    styles: dict[str, ParagraphStyle],
+    theme: Optional[dict[str, str]] = None,
+) -> Table:
+    return _pdf_card(
+        [
+            Paragraph(_xml_escape(title), styles["chart_title"]),
+            drawing,
+            Spacer(1, 3 * mm),
+            Paragraph(_xml_escape(description), styles["body"]),
+        ],
+        available_width,
+        theme,
+    )
 
 
 def _add_dashboard_chart_sheet(
@@ -2214,108 +2546,81 @@ def _serialize_dashboard_pdf(tables: list[dict], chart_data: dict, theme: dict[s
     output = io.BytesIO()
     document = SimpleDocTemplate(
         output,
-        pagesize=landscape(A4),
-        leftMargin=12 * mm,
-        rightMargin=12 * mm,
-        topMargin=14 * mm,
-        bottomMargin=14 * mm,
+        pagesize=PDF_PAGE_SIZE,
+        leftMargin=PDF_LAYOUT["page_margin_x"],
+        rightMargin=PDF_LAYOUT["page_margin_x"],
+        topMargin=PDF_LAYOUT["page_margin_top"],
+        bottomMargin=PDF_LAYOUT["page_margin_bottom"],
         title="Dashboard Maestro",
     )
     document.export_theme = theme
-    styles = getSampleStyleSheet()
-    title_style = ParagraphStyle(
-        "DashboardTitle",
-        parent=styles["Title"],
-        fontName="Helvetica-Bold",
-        fontSize=18,
-        leading=22,
-        textColor=colors.HexColor(theme["text"]),
-        spaceAfter=4,
-    )
-    meta_style = ParagraphStyle(
-        "DashboardMeta",
-        parent=styles["Normal"],
-        fontSize=8,
-        leading=10,
-        textColor=colors.HexColor(theme["muted"]),
-    )
-    body_style = ParagraphStyle(
-        "DashboardBody",
-        parent=styles["Normal"],
-        fontSize=8.2,
-        leading=11,
-        textColor=colors.HexColor(theme["text"]),
-    )
-    header_style = ParagraphStyle(
-        "DashboardTableHeader",
-        parent=styles["Normal"],
-        alignment=1,
-        fontName="Helvetica-Bold",
-        fontSize=7,
-        leading=8,
-        textColor=colors.white,
-    )
-    cell_style = ParagraphStyle(
-        "DashboardTableCell",
-        parent=styles["Normal"],
-        fontSize=6.4,
-        leading=7.4,
-        textColor=colors.HexColor(SALTIM_DARK),
-    )
-    number_style = ParagraphStyle("DashboardTableNumber", parent=cell_style, alignment=TA_RIGHT)
+    document.report_title = "Dashboard Maestro"
+    document.generated_at_text = _now_recife().strftime("%d/%m/%Y %H:%M")
+    styles = _pdf_styles(theme)
 
     story = [
-        _pdf_header_block("Dashboard", title_style, meta_style, theme),
-        Spacer(1, 7 * mm),
-        _line_chart_drawing(chart_data["history"], document.width, 116 * mm, theme),
-        Spacer(1, 5 * mm),
-        _dashboard_pdf_paragraph(
+        _pdf_header_block("Dashboard", styles["report_title"], styles["meta"], theme),
+        Spacer(1, PDF_LAYOUT["section_gap"]),
+        _pdf_chart_card(
+            "Estoque medio x vendas totais",
             "O grafico agrupa o periodo filtrado por mes e compara estoque medio mensal com vendas totais mensais. "
-            "A linha azul usa o eixo da esquerda para estoque, enquanto a linha laranja usa o eixo da direita para vendas. "
+            "A linha secundaria usa o eixo da esquerda para estoque, enquanto a linha principal usa o eixo da direita para vendas. "
             "A leitura conjunta ajuda a identificar meses em que as saidas cresceram mais rapido do que a reposicao.",
-            body_style,
+            _line_chart_drawing(chart_data["history"], document.width - 18 * mm, 105 * mm, theme),
+            document.width,
+            styles,
+            theme,
         ),
         PageBreak(),
-        _pdf_header_block("Graficos secundarios", title_style, meta_style, theme),
-        Spacer(1, 7 * mm),
+        _pdf_header_block("Graficos secundarios", styles["report_title"], styles["meta"], theme),
+        Spacer(1, PDF_LAYOUT["section_gap"]),
         Table(
             [
                 [
-                    _dashboard_pdf_paragraph("Faturamento", body_style),
-                    _dashboard_pdf_paragraph("Categorias mais vendidas", body_style),
-                ],
-                [
-                    _bar_chart_drawing(chart_data["revenue"], document.width / 2 - 8 * mm, 82 * mm, theme=theme),
-                    _bar_chart_drawing(chart_data["categories"], document.width / 2 - 8 * mm, 82 * mm, theme=theme),
-                ],
-                [
-                    _dashboard_pdf_paragraph(
+                    _pdf_chart_card(
+                        "Faturamento",
                         "Mostra a receita estimada por periodo, facilitando a comparacao entre meses.",
-                        body_style,
+                        _bar_chart_drawing(chart_data["revenue"], document.width / 2 - 19 * mm, 78 * mm, theme=theme),
+                        document.width / 2 - 5 * mm,
+                        styles,
+                        theme,
                     ),
-                    _dashboard_pdf_paragraph(
+                    _pdf_chart_card(
+                        "Categorias mais vendidas",
                         "Apresenta as categorias com maior uso no periodo, indicando concentracao de demanda.",
-                        body_style,
+                        _bar_chart_drawing(chart_data["categories"], document.width / 2 - 19 * mm, 78 * mm, theme=theme),
+                        document.width / 2 - 5 * mm,
+                        styles,
+                        theme,
                     ),
                 ],
             ],
-            colWidths=[document.width / 2 - 4 * mm, document.width / 2 - 4 * mm],
+            colWidths=[document.width / 2 - 2.5 * mm, document.width / 2 - 2.5 * mm],
+            hAlign="LEFT",
+            style=[
+                ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+                ("TOPPADDING", (0, 0), (-1, -1), 0),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ],
         ),
     ]
 
     for index, table in enumerate(tables):
         story.append(PageBreak())
-        story.append(_pdf_header_block(table["title"], title_style, meta_style, theme))
-        story.append(Spacer(1, 7 * mm))
+        story.append(_pdf_header_block(table["title"], styles["report_title"], styles["meta"], theme))
+        story.append(Spacer(1, PDF_LAYOUT["section_gap"]))
         rows = table["rows"]
         visible_rows = rows[:DASHBOARD_PDF_TABLE_ROWS]
         story.append(
             _pdf_table(
                 visible_rows,
                 table["columns"],
-                header_style,
-                cell_style,
-                number_style,
+                styles["table_header"],
+                styles["table_cell"],
+                styles["table_number"],
+                styles["table_date"],
                 document.width,
                 theme,
             )
@@ -2325,11 +2630,11 @@ def _serialize_dashboard_pdf(tables: list[dict], chart_data: dict, theme: dict[s
             story.append(
                 _dashboard_pdf_paragraph(
                     "Visualizacao limitada para apresentacao em PDF. Os dados completos estao disponiveis na exportacao em Excel.",
-                    body_style,
+                    styles["body"],
                 )
             )
 
-    document.build(story, onFirstPage=_draw_pdf_footer, onLaterPages=_draw_pdf_footer)
+    document.build(story, onFirstPage=_draw_pdf_page_frame, onLaterPages=_draw_pdf_page_frame)
     return output.getvalue()
 
 
