@@ -41,6 +41,28 @@ Tabela pedidos: id (TEXT PK), supplier_id (TEXT), ingredient_id (TEXT), qty (NUM
 valor (NUMERIC), data_pedido (DATE), status (TEXT), data_prevista (DATE).
 Status comuns: 'entregue', 'em_transito'.
 
+Tabela purchase_plans: id (BIGINT PK), created_at (TIMESTAMPTZ), updated_at (TIMESTAMPTZ),
+status (TEXT), source (TEXT), horizon_days (INTEGER), date_from (DATE), date_to (DATE),
+contagem_id (BIGINT FK->contagens), total_estimated (NUMERIC), approved_total (NUMERIC),
+critical_items_count (INTEGER), avg_coverage_days (DOUBLE), savings_potential (NUMERIC).
+
+Tabela purchase_plan_items: id (BIGINT PK), plan_id (BIGINT FK->purchase_plans),
+ingredient_id (TEXT FK->ingredientes), ingredient_name (TEXT), category (TEXT), unit (TEXT),
+current_qty (NUMERIC), avg_daily_usage (NUMERIC), forecast_qty (NUMERIC),
+in_transit_qty (NUMERIC), recommended_qty (NUMERIC), approved_qty (NUMERIC),
+selected_supplier_id (TEXT), selected_supplier_name (TEXT), estimated_unit_price (NUMERIC),
+estimated_total (NUMERIC), coverage_days (DOUBLE), criticality (TEXT), justification (TEXT), note (TEXT).
+
+Tabela purchase_plan_supplier_options: id (BIGINT PK), item_id (BIGINT FK->purchase_plan_items),
+supplier_id (TEXT FK->fornecedores), supplier_name (TEXT), unit_price (NUMERIC),
+discount_percent (NUMERIC), min_to_discount (NUMERIC), effective_unit_price (NUMERIC),
+delivery_time_days (INTEGER), delay_risk (DOUBLE), score (DOUBLE), recommended (INTEGER), reason (TEXT).
+
+Tabela supplier_quotes: id (BIGINT PK), plan_id (BIGINT FK->purchase_plans),
+supplier_id (TEXT FK->fornecedores), supplier_name (TEXT), email (TEXT), channel (TEXT),
+status (TEXT), sent_at (TIMESTAMPTZ), responded_at (TIMESTAMPTZ), approved_at (TIMESTAMPTZ),
+total_estimated (NUMERIC), notes (TEXT).
+
 Tabela pedidos_log: id (BIGINT PK), data_pedido (DATE), ingredient_id (TEXT FK->ingredientes),
 qty (NUMERIC), data_prevista (DATE), order_type (TEXT).
 
@@ -117,6 +139,13 @@ DOMAIN_KNOWLEDGE = """
 - Receitas/produtos vendidos ficam em receitas e vendas. Insumos que compoem receitas ficam em receitas_ingredientes.
 - Fornecedores, precos, descontos e prazo medio ficam em fornecedores e fornecedores_ingredientes.
 - Pedidos de compra ficam em pedidos. Status comuns: 'entregue' e 'em_transito'.
+- Planos de compra ficam em purchase_plans. Itens recomendados ficam em purchase_plan_items.
+- Opcoes/ranking de fornecedores para cada item ficam em purchase_plan_supplier_options.
+- Cotacoes por fornecedor ficam em supplier_quotes. Para explicar "por que esse fornecedor foi escolhido",
+  use a opcao recommended=1, score menor, reason, effective_unit_price, delivery_time_days e delay_risk.
+- Para responder "e se eu comprar menos", compare approved_qty, avg_daily_usage e coverage_days.
+- Para "qual item ameaca o fim de semana", priorize itens com criticality critica/alerta, menor coverage_days
+  e fornecedor selecionado com prazo maior que cobertura.
 - Criticidade atual vem de ml.criticidade_report_runs e ml.criticidade_report_items.
 - Para o relatorio de criticidade mais recente, use a run bem-sucedida mais recente por generated_at/id.
 - necessita_compra = 1 indica item em alerta de compra no relatorio de criticidade.

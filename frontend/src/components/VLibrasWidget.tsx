@@ -40,7 +40,7 @@ export function VLibrasWidget() {
   }, [])
 
   return (
-    <div {...vlibrasRootAttrs} className="enabled">
+    <div {...vlibrasRootAttrs} className="enabled saltim-vlibras">
       <div
         {...vlibrasAccessButtonAttrs}
         className="active !right-0 !top-[calc(50%+48px)] !z-40"

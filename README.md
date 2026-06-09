@@ -162,7 +162,7 @@ cd backend
 python -m venv .venv
 .venv\Scripts\activate
 pip install -r requirements.txt
-uvicorn app.main:app --reload --port 8000
+uvicorn app.main:app --reload --reload-dir app --reload-dir agent --reload-dir db --reload-exclude ".venv/*" --port 8000
 ```
 
 ### **3. Executar manualmente o frontend**

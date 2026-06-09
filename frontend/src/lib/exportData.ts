@@ -19,6 +19,7 @@ export interface DownloadExportParams {
   format: ExportFormat
   dateFrom?: string
   dateTo?: string
+  themeId?: string
 }
 
 export interface DashboardExportFilters {
@@ -38,8 +39,10 @@ export async function downloadExport({
   format,
   dateFrom,
   dateTo,
+  themeId,
 }: DownloadExportParams) {
   const params = new URLSearchParams({ format })
+  if (themeId) params.set('theme', themeId)
   if (dateFrom) params.set('date_from', dateFrom)
   if (dateTo) params.set('date_to', dateTo)
 
@@ -65,8 +68,10 @@ export async function downloadExport({
 export async function downloadDashboardExport(
   format: DashboardExportFormat,
   filters?: DashboardExportFilters,
+  themeId?: string,
 ) {
   const params = new URLSearchParams({ format })
+  if (themeId) params.set('theme', themeId)
   appendDashboardFilters(params, filters)
 
   const response = await fetch(`${API_URL}/api/export/dashboard?${params.toString()}`)
@@ -78,6 +83,35 @@ export async function downloadDashboardExport(
   const blob = await response.blob()
   const filename = filenameFromDisposition(response.headers.get('Content-Disposition'))
     ?? `dashboard.${format === 'excel' ? 'xlsx' : 'pdf'}`
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = filename
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  URL.revokeObjectURL(url)
+}
+
+export async function downloadPurchasePlanExport(
+  planId: number,
+  format: DashboardExportFormat,
+  themeId?: string,
+) {
+  const params = new URLSearchParams({ format })
+  if (themeId) params.set('theme', themeId)
+
+  const response = await fetch(
+    `${API_URL}/api/export/compras/planos/${planId}?${params.toString()}`,
+  )
+  if (!response.ok) {
+    const detail = await readErrorDetail(response)
+    throw new Error(detail || 'Nao foi possivel exportar o plano de compra.')
+  }
+
+  const blob = await response.blob()
+  const filename = filenameFromDisposition(response.headers.get('Content-Disposition'))
+    ?? `plano_compra_${planId}.${format === 'excel' ? 'xlsx' : 'pdf'}`
   const url = URL.createObjectURL(blob)
   const link = document.createElement('a')
   link.href = url

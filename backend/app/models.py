@@ -451,3 +451,108 @@ class CriticalityReportItem(Base):
     rank_position = Column(Integer, nullable=False)
 
     run = relationship("CriticalityReportRun", back_populates="items")
+
+
+class PurchasePlan(Base):
+    __tablename__ = "purchase_plans"
+    __table_args__ = (
+        Index("idx_purchase_plans_created_at", "created_at"),
+        Index("idx_purchase_plans_status", "status"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    status = Column(String, nullable=False, default="rascunho")
+    source = Column(String, nullable=False, default="manual")
+    horizon_days = Column(Integer, nullable=False, default=7)
+    date_from = Column(Date)
+    date_to = Column(Date)
+    contagem_id = Column(Integer, ForeignKey("contagens.id"))
+    total_estimated = Column(Numeric(14, 4), nullable=False, default=0)
+    approved_total = Column(Numeric(14, 4), nullable=False, default=0)
+    critical_items_count = Column(Integer, nullable=False, default=0)
+    avg_coverage_days = Column(Float, nullable=False, default=0)
+    savings_potential = Column(Numeric(14, 4), nullable=False, default=0)
+
+    items = relationship("PurchasePlanItem", back_populates="plan", cascade="all, delete-orphan")
+    quotes = relationship("SupplierQuote", back_populates="plan", cascade="all, delete-orphan")
+
+
+class PurchasePlanItem(Base):
+    __tablename__ = "purchase_plan_items"
+    __table_args__ = (
+        UniqueConstraint("plan_id", "ingredient_id", name="uq_purchase_plan_item"),
+        Index("idx_purchase_plan_items_plan", "plan_id"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    plan_id = Column(Integer, ForeignKey("purchase_plans.id", ondelete="CASCADE"), nullable=False)
+    ingredient_id = Column(String, ForeignKey("ingredientes.id"), nullable=False)
+    ingredient_name = Column(String, nullable=False)
+    category = Column(String)
+    unit = Column(String)
+    current_qty = Column(Numeric(14, 4), nullable=False, default=0)
+    avg_daily_usage = Column(Numeric(14, 4), nullable=False, default=0)
+    forecast_qty = Column(Numeric(14, 4), nullable=False, default=0)
+    in_transit_qty = Column(Numeric(14, 4), nullable=False, default=0)
+    recommended_qty = Column(Numeric(14, 4), nullable=False, default=0)
+    approved_qty = Column(Numeric(14, 4), nullable=False, default=0)
+    selected_supplier_id = Column(String)
+    selected_supplier_name = Column(String)
+    estimated_unit_price = Column(Numeric(14, 4), nullable=False, default=0)
+    estimated_total = Column(Numeric(14, 4), nullable=False, default=0)
+    coverage_days = Column(Float, nullable=False, default=0)
+    criticality = Column(String, nullable=False, default="OK")
+    justification = Column(String)
+    note = Column(String)
+
+    plan = relationship("PurchasePlan", back_populates="items")
+    options = relationship("PurchasePlanSupplierOption", back_populates="item", cascade="all, delete-orphan")
+
+
+class PurchasePlanSupplierOption(Base):
+    __tablename__ = "purchase_plan_supplier_options"
+    __table_args__ = (
+        Index("idx_purchase_plan_supplier_options_item", "item_id"),
+        Index("idx_purchase_plan_supplier_options_supplier", "supplier_id"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    item_id = Column(Integer, ForeignKey("purchase_plan_items.id", ondelete="CASCADE"), nullable=False)
+    supplier_id = Column(String, ForeignKey("fornecedores.id"), nullable=False)
+    supplier_name = Column(String, nullable=False)
+    unit_price = Column(Numeric(14, 4), nullable=False, default=0)
+    discount_percent = Column(Numeric(8, 4), nullable=False, default=0)
+    min_to_discount = Column(Numeric(14, 4), nullable=False, default=0)
+    effective_unit_price = Column(Numeric(14, 4), nullable=False, default=0)
+    delivery_time_days = Column(Integer, nullable=False, default=0)
+    delay_risk = Column(Float, nullable=False, default=0)
+    score = Column(Float, nullable=False, default=0)
+    recommended = Column(Integer, nullable=False, default=0)
+    reason = Column(String)
+
+    item = relationship("PurchasePlanItem", back_populates="options")
+
+
+class SupplierQuote(Base):
+    __tablename__ = "supplier_quotes"
+    __table_args__ = (
+        UniqueConstraint("plan_id", "supplier_id", name="uq_supplier_quote_plan_supplier"),
+        Index("idx_supplier_quotes_plan", "plan_id"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    plan_id = Column(Integer, ForeignKey("purchase_plans.id", ondelete="CASCADE"), nullable=False)
+    supplier_id = Column(String, ForeignKey("fornecedores.id"), nullable=False)
+    supplier_name = Column(String, nullable=False)
+    email = Column(String)
+    channel = Column(String, nullable=False, default="email")
+    status = Column(String, nullable=False, default="rascunho")
+    sent_at = Column(DateTime(timezone=True))
+    responded_at = Column(DateTime(timezone=True))
+    approved_at = Column(DateTime(timezone=True))
+    total_estimated = Column(Numeric(14, 4), nullable=False, default=0)
+    notes = Column(String)
+
+    plan = relationship("PurchasePlan", back_populates="quotes")

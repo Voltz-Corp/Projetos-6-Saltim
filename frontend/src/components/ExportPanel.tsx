@@ -7,6 +7,7 @@ import {
   type ExportArea,
   type ExportFormat,
 } from '../lib/exportData'
+import { useAppearance } from '../theme/appearance'
 
 interface ExportPanelProps {
   area: ExportArea
@@ -22,6 +23,7 @@ export function ExportPanel({
   requiresDateRange = false,
 }: ExportPanelProps) {
   const defaults = useMemo(() => defaultDateRange(), [])
+  const { themeId } = useAppearance()
   const [format, setFormat] = useState<ExportFormat>('csv')
   const [dateFrom, setDateFrom] = useState(defaults.dateFrom)
   const [dateTo, setDateTo] = useState(defaults.dateTo)
@@ -46,6 +48,7 @@ export function ExportPanel({
         format,
         dateFrom: requiresDateRange ? dateFrom : undefined,
         dateTo: requiresDateRange ? dateTo : undefined,
+        themeId,
       })
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Nao foi possivel exportar.')

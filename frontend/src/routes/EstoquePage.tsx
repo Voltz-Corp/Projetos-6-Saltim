@@ -13,6 +13,7 @@ import {
   createColumnHelper,
   type SortingState,
 } from '@tanstack/react-table';
+import { PackagePlus } from 'lucide-react';
 import { rootRoute } from './Root';
 import {
   useEstoquePaginado,
@@ -212,19 +213,27 @@ export function EstoquePage() {
     <div className="flex flex-col h-screen bg-surface">
       {/* Success banner */}
       {counted && (
-        <div className="bg-green-50 border-b border-green-200 px-8 py-3 flex items-center justify-between">
-          <span className="text-sm text-green-800 font-medium">
-            ✓ Contagem de <strong>{counted}</strong> finalizada e estoque
-            atualizado.
+        <div className="saltim-success-soft border-b px-8 py-3 flex flex-wrap items-center justify-between gap-3">
+          <span className="text-sm font-bold">
+            Contagem de <strong>{counted}</strong> finalizada e estoque atualizado.
           </span>
-          <button
-            onClick={() =>
-              navigate({ to: '/estoque', search: {}, replace: true })
-            }
-            className="text-green-600 hover:text-green-800 text-sm"
-          >
-            Fechar
-          </button>
+          <div className="flex items-center gap-2">
+            <Link
+              to="/compras/planejamento"
+              className="inline-flex items-center gap-2 rounded-lg bg-brand-600 px-3 py-2 text-xs font-black text-white transition hover:bg-brand-700"
+            >
+              <PackagePlus className="size-4" strokeWidth={2.1} />
+              Gerar plano de compra
+            </Link>
+            <button
+              onClick={() =>
+                navigate({ to: '/estoque', search: {}, replace: true })
+              }
+              className="text-sm font-black text-stone-600 hover:text-stone-900"
+            >
+              Fechar
+            </button>
+          </div>
         </div>
       )}
 
