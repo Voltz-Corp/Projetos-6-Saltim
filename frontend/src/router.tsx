@@ -12,6 +12,7 @@ import { fornecedorNewRoute } from './routes/FornecedorNewPage'
 import { fornecedorProfileRoute, fornecedoresRoute } from './routes/FornecedoresPage'
 import { pedidoGroupDetailRoute, pedidoNewRoute, pedidosRoute } from './routes/PedidosPage'
 import { aparenciaAliasRoute, aparenciaRoute } from './routes/AparenciaPage'
+import { comprasPlanejamentoRoute } from './routes/ComprasPlanejamentoPage'
 
 const routeTree = rootRoute.addChildren([
   dashboardRoute,
@@ -28,6 +29,7 @@ const routeTree = rootRoute.addChildren([
   pedidosRoute,
   pedidoNewRoute,
   pedidoGroupDetailRoute,
+  comprasPlanejamentoRoute,
   aparenciaRoute,
   aparenciaAliasRoute,
 ])

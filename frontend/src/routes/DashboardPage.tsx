@@ -43,6 +43,7 @@ import {
   downloadDashboardExport,
   type DashboardExportFormat,
 } from '../lib/exportData';
+import { useAppearance } from '../theme/appearance';
 import {
   useDashboard,
   useRecipeRanking,
@@ -1162,6 +1163,7 @@ function severityClass(severity: DashboardAlert['severity']) {
 }
 
 export function DashboardPage() {
+  const { themeId } = useAppearance();
   const [globalFiltersOpen, setGlobalFiltersOpen] = useState(false);
   const [draftFilters, setDraftFilters] =
     useState<DashboardGlobalFilterState>(DEFAULT_GLOBAL_FILTERS);
@@ -1237,7 +1239,7 @@ export function DashboardPage() {
     setExportError('');
     setExportingFormat(format);
     try {
-      await downloadDashboardExport(format, apiFilters);
+      await downloadDashboardExport(format, apiFilters, themeId);
     } catch (err) {
       setExportError(
         err instanceof Error ? err.message : 'Nao foi possivel exportar.',

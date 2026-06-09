@@ -460,6 +460,118 @@ class PedidoCreateResponse(BaseModel):
     email_results: List[PedidoEmailResult] = Field(default_factory=list)
 
 
+class PurchasePlanGenerateRequest(BaseModel):
+    contagem_id: Optional[int] = None
+    horizon_days: int = Field(default=7, ge=1, le=30)
+    date_from: Optional[date] = None
+    date_to: Optional[date] = None
+
+
+class PurchasePlanItemUpdateRequest(BaseModel):
+    approved_qty: Optional[float] = Field(default=None, ge=0)
+    selected_supplier_id: Optional[str] = None
+    note: Optional[str] = None
+
+
+class PurchasePlanSimulationItem(BaseModel):
+    ingredient_id: str
+    approved_qty: float = Field(ge=0)
+    selected_supplier_id: Optional[str] = None
+
+
+class PurchasePlanSimulationRequest(BaseModel):
+    items: List[PurchasePlanSimulationItem] = Field(default_factory=list)
+
+
+class PurchasePlanSupplierOptionOut(BaseModel):
+    id: int
+    supplier_id: str
+    supplier_name: str
+    unit_price: float
+    discount_percent: float
+    min_to_discount: float
+    effective_unit_price: float
+    delivery_time_days: int
+    delay_risk: float
+    score: float
+    recommended: bool
+    reason: Optional[str] = None
+
+
+class PurchasePlanItemOut(BaseModel):
+    id: int
+    ingredient_id: str
+    ingredient_name: str
+    category: Optional[str] = None
+    unit: Optional[str] = None
+    current_qty: float
+    avg_daily_usage: float
+    forecast_qty: float
+    in_transit_qty: float
+    recommended_qty: float
+    approved_qty: float
+    selected_supplier_id: Optional[str] = None
+    selected_supplier_name: Optional[str] = None
+    estimated_unit_price: float
+    estimated_total: float
+    coverage_days: float
+    criticality: str
+    justification: Optional[str] = None
+    note: Optional[str] = None
+    options: List[PurchasePlanSupplierOptionOut] = Field(default_factory=list)
+
+
+class SupplierQuoteOut(BaseModel):
+    id: int
+    supplier_id: str
+    supplier_name: str
+    email: Optional[str] = None
+    channel: str
+    status: str
+    sent_at: Optional[datetime] = None
+    responded_at: Optional[datetime] = None
+    approved_at: Optional[datetime] = None
+    total_estimated: float
+    notes: Optional[str] = None
+
+    @field_serializer("sent_at", "responded_at", "approved_at", when_used="json")
+    def serialize_quote_datetime(self, value: Optional[datetime]) -> Optional[str]:
+        return _to_recife_datetime(value)
+
+
+class PurchasePlanOut(BaseModel):
+    id: int
+    created_at: datetime
+    updated_at: datetime
+    status: str
+    source: str
+    horizon_days: int
+    date_from: Optional[date] = None
+    date_to: Optional[date] = None
+    contagem_id: Optional[int] = None
+    total_estimated: float
+    approved_total: float
+    critical_items_count: int
+    avg_coverage_days: float
+    savings_potential: float
+    items: List[PurchasePlanItemOut] = Field(default_factory=list)
+    quotes: List[SupplierQuoteOut] = Field(default_factory=list)
+
+    @field_serializer("created_at", "updated_at", when_used="json")
+    def serialize_plan_datetime(self, value: datetime) -> Optional[str]:
+        return _to_recife_datetime(value)
+
+
+class PurchasePlanSimulationOut(BaseModel):
+    total_estimated: float
+    approved_total: float
+    projected_coverage_days: float
+    rupture_risk_items: int
+    critical_items_count: int
+    savings_potential: float
+    notes: List[str] = Field(default_factory=list)
+
+
 class DashboardRankItem(BaseModel):
     id: str
     name: str

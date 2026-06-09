@@ -19,7 +19,8 @@ from xml.etree.ElementTree import Element, SubElement, tostring
 from fastapi import FastAPI, Depends, HTTPException, Query, Response
 from fastapi.middleware.cors import CORSMiddleware
 from openpyxl import Workbook
-from openpyxl.styles import Alignment, Font, PatternFill
+from openpyxl.chart import BarChart as ExcelBarChart, LineChart as ExcelLineChart, Reference
+from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 from reportlab.lib import colors
 from reportlab.lib.enums import TA_RIGHT
@@ -66,9 +67,13 @@ from .models import (
     JobStatus,
     LogContagem,
     Pedido,
+    PurchasePlan,
+    PurchasePlanItem,
+    PurchasePlanSupplierOption,
     Receita,
     ReceitaIngrediente,
     ResumoDiarioVenda,
+    SupplierQuote,
     Venda,
 )
 from .schemas import (
@@ -98,6 +103,7 @@ from .schemas import (
     JobStatusOut,
     PedidoCreateRequest,
     PedidoCreateResponse,
+    PedidoCreateItem,
     PedidoEmailResult,
     PedidoDetailItem,
     PedidoDetailResponse,
@@ -107,9 +113,17 @@ from .schemas import (
     PedidoRecommendationItem,
     PedidoRecommendationRequest,
     PedidoRecommendationResponse,
+    PurchasePlanGenerateRequest,
+    PurchasePlanItemOut,
+    PurchasePlanItemUpdateRequest,
+    PurchasePlanOut,
+    PurchasePlanSimulationOut,
+    PurchasePlanSimulationRequest,
+    PurchasePlanSupplierOptionOut,
     RecommendedOrderGroup,
     RecommendedOrderItem,
     SupplierOption,
+    SupplierQuoteOut,
     AtualizacaoLote,
     AtualizacaoIngrediente,
     LogContagemOut,
@@ -194,6 +208,7 @@ async def lifespan(app: FastAPI):
     Base.metadata.create_all(bind=engine)
     ensure_contagem_estoque_schema()
     ensure_pedidos_schema()
+    ensure_purchase_plan_schema()
     yield
 
 
@@ -322,6 +337,104 @@ def ensure_contagem_estoque_schema() -> None:
 def ensure_pedidos_schema() -> None:
     statements = (
         "ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS estoque_aplicado_em TIMESTAMPTZ",
+    )
+    raw_conn = engine.raw_connection()
+    try:
+        with raw_conn.cursor() as cursor:
+            for statement in statements:
+                cursor.execute(statement)
+        raw_conn.commit()
+    except Exception:
+        raw_conn.rollback()
+        raise
+    finally:
+        raw_conn.close()
+
+
+def ensure_purchase_plan_schema() -> None:
+    statements = (
+        """
+        CREATE TABLE IF NOT EXISTS purchase_plans (
+            id SERIAL PRIMARY KEY,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            status VARCHAR NOT NULL DEFAULT 'rascunho',
+            source VARCHAR NOT NULL DEFAULT 'manual',
+            horizon_days INTEGER NOT NULL DEFAULT 7,
+            date_from DATE,
+            date_to DATE,
+            contagem_id INTEGER REFERENCES contagens(id),
+            total_estimated NUMERIC(14,4) NOT NULL DEFAULT 0,
+            approved_total NUMERIC(14,4) NOT NULL DEFAULT 0,
+            critical_items_count INTEGER NOT NULL DEFAULT 0,
+            avg_coverage_days DOUBLE PRECISION NOT NULL DEFAULT 0,
+            savings_potential NUMERIC(14,4) NOT NULL DEFAULT 0
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS purchase_plan_items (
+            id SERIAL PRIMARY KEY,
+            plan_id INTEGER NOT NULL REFERENCES purchase_plans(id) ON DELETE CASCADE,
+            ingredient_id VARCHAR NOT NULL REFERENCES ingredientes(id),
+            ingredient_name VARCHAR NOT NULL,
+            category VARCHAR,
+            unit VARCHAR,
+            current_qty NUMERIC(14,4) NOT NULL DEFAULT 0,
+            avg_daily_usage NUMERIC(14,4) NOT NULL DEFAULT 0,
+            forecast_qty NUMERIC(14,4) NOT NULL DEFAULT 0,
+            in_transit_qty NUMERIC(14,4) NOT NULL DEFAULT 0,
+            recommended_qty NUMERIC(14,4) NOT NULL DEFAULT 0,
+            approved_qty NUMERIC(14,4) NOT NULL DEFAULT 0,
+            selected_supplier_id VARCHAR,
+            selected_supplier_name VARCHAR,
+            estimated_unit_price NUMERIC(14,4) NOT NULL DEFAULT 0,
+            estimated_total NUMERIC(14,4) NOT NULL DEFAULT 0,
+            coverage_days DOUBLE PRECISION NOT NULL DEFAULT 0,
+            criticality VARCHAR NOT NULL DEFAULT 'OK',
+            justification VARCHAR,
+            note VARCHAR,
+            CONSTRAINT uq_purchase_plan_item UNIQUE (plan_id, ingredient_id)
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS purchase_plan_supplier_options (
+            id SERIAL PRIMARY KEY,
+            item_id INTEGER NOT NULL REFERENCES purchase_plan_items(id) ON DELETE CASCADE,
+            supplier_id VARCHAR NOT NULL REFERENCES fornecedores(id),
+            supplier_name VARCHAR NOT NULL,
+            unit_price NUMERIC(14,4) NOT NULL DEFAULT 0,
+            discount_percent NUMERIC(8,4) NOT NULL DEFAULT 0,
+            min_to_discount NUMERIC(14,4) NOT NULL DEFAULT 0,
+            effective_unit_price NUMERIC(14,4) NOT NULL DEFAULT 0,
+            delivery_time_days INTEGER NOT NULL DEFAULT 0,
+            delay_risk DOUBLE PRECISION NOT NULL DEFAULT 0,
+            score DOUBLE PRECISION NOT NULL DEFAULT 0,
+            recommended INTEGER NOT NULL DEFAULT 0,
+            reason VARCHAR
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS supplier_quotes (
+            id SERIAL PRIMARY KEY,
+            plan_id INTEGER NOT NULL REFERENCES purchase_plans(id) ON DELETE CASCADE,
+            supplier_id VARCHAR NOT NULL REFERENCES fornecedores(id),
+            supplier_name VARCHAR NOT NULL,
+            email VARCHAR,
+            channel VARCHAR NOT NULL DEFAULT 'email',
+            status VARCHAR NOT NULL DEFAULT 'rascunho',
+            sent_at TIMESTAMPTZ,
+            responded_at TIMESTAMPTZ,
+            approved_at TIMESTAMPTZ,
+            total_estimated NUMERIC(14,4) NOT NULL DEFAULT 0,
+            notes VARCHAR,
+            CONSTRAINT uq_supplier_quote_plan_supplier UNIQUE (plan_id, supplier_id)
+        )
+        """,
+        "CREATE INDEX IF NOT EXISTS idx_purchase_plans_created_at ON purchase_plans(created_at)",
+        "CREATE INDEX IF NOT EXISTS idx_purchase_plans_status ON purchase_plans(status)",
+        "CREATE INDEX IF NOT EXISTS idx_purchase_plan_items_plan ON purchase_plan_items(plan_id)",
+        "CREATE INDEX IF NOT EXISTS idx_purchase_plan_supplier_options_item ON purchase_plan_supplier_options(item_id)",
+        "CREATE INDEX IF NOT EXISTS idx_supplier_quotes_plan ON supplier_quotes(plan_id)",
     )
     raw_conn = engine.raw_connection()
     try:
@@ -887,8 +1000,13 @@ def run_criticidade_report(response: Response, db: Session = Depends(get_db)):
     _upsert_job_status(db, reference_date, "running")
     project_root = Path(__file__).resolve().parents[2]
     script_path = project_root / "ml" / "jobs" / "generate_criticality_report.py"
-    python_path = project_root / ".venv" / "bin" / "python"
-    python_executable = str(python_path) if python_path.exists() else sys.executable
+    python_candidates = (
+        project_root / ".venv" / "bin" / "python",
+        project_root / ".venv" / "Scripts" / "python.exe",
+        project_root / "backend" / ".venv" / "bin" / "python",
+        project_root / "backend" / ".venv" / "Scripts" / "python.exe",
+    )
+    python_executable = str(next((path for path in python_candidates if path.exists()), sys.executable))
     env = os.environ.copy()
     env.setdefault("DATABASE_URL", "postgresql+psycopg://saltim:saltim123@localhost:55432/saltim_db")
     env.setdefault("MLFLOW_TRACKING_URI", "http://localhost:5000")
@@ -953,6 +1071,71 @@ SALTIM_STONE = "#5F5E5A"
 SALTIM_LOGO_PATH = (
     Path(__file__).resolve().parents[2] / "frontend" / "public" / "images" / "maestro-logo.svg"
 )
+
+EXPORT_THEMES = {
+    "maestro-light": {
+        "primary": "#1B1464",
+        "accent": "#F15A24",
+        "soft": "#EFEDFF",
+        "surface": "#F6F5FB",
+        "text": "#211F33",
+        "muted": "#6F6787",
+        "grid": "#E4E0EF",
+    },
+    "maestro-dark": {
+        "primary": "#F15A24",
+        "accent": "#8E7CFF",
+        "soft": "#2A1931",
+        "surface": "#141127",
+        "text": "#F5F3FF",
+        "muted": "#C9C3DC",
+        "grid": "#37304F",
+    },
+    "saltim-light": {
+        "primary": "#F07820",
+        "accent": "#2D7A3A",
+        "soft": "#FEF4E8",
+        "surface": "#F5F4F1",
+        "text": "#1C1917",
+        "muted": "#78716C",
+        "grid": "#E8E6E0",
+    },
+    "saltim-dark": {
+        "primary": "#F59E42",
+        "accent": "#7DD3FC",
+        "soft": "#431F0B",
+        "surface": "#11100F",
+        "text": "#F5F5F4",
+        "muted": "#D6D3D1",
+        "grid": "#3A342F",
+    },
+    "mossy-forest-light-green": {
+        "primary": "#3D5436",
+        "accent": "#A46122",
+        "soft": "#E8EED4",
+        "surface": "#F1F5E0",
+        "text": "#2C3320",
+        "muted": "#6B7D52",
+        "grid": "#D2DDBA",
+    },
+    "anime-trinity-one-piece-dark": {
+        "primary": "#EF4444",
+        "accent": "#FBBF24",
+        "soft": "#3B1620",
+        "surface": "#0F172A",
+        "text": "#E2E8F0",
+        "muted": "#CBD5E1",
+        "grid": "#334155",
+    },
+}
+
+
+def _export_theme(theme_id: Optional[str]) -> dict[str, str]:
+    return EXPORT_THEMES.get(theme_id or "", EXPORT_THEMES["maestro-light"])
+
+
+def _hex(value: str) -> str:
+    return value.replace("#", "")
 
 EXPORT_COLUMN_LABELS = {
     "id": "ID",
@@ -1026,10 +1209,12 @@ def _export_response(
     format_value: str,
     title: str,
     columns: Optional[list[str]] = None,
+    theme_id: Optional[str] = None,
 ) -> Response:
     export_format = _normalize_export_format(format_value)
     media_type, extension = EXPORT_FORMATS[export_format]
-    content = _serialize_export(rows, export_format, title, columns)
+    theme = _export_theme(theme_id)
+    content = _serialize_export(rows, export_format, title, columns, theme)
     return Response(
         content=content,
         media_type=media_type,
@@ -1042,7 +1227,9 @@ def _serialize_export(
     export_format: str,
     title: str,
     columns: Optional[list[str]] = None,
+    theme: Optional[dict[str, str]] = None,
 ):
+    theme = theme or _export_theme(None)
     if export_format == "csv":
         return _serialize_csv(rows, columns)
     if export_format == "json":
@@ -1052,9 +1239,9 @@ def _serialize_export(
     if export_format == "yaml":
         return _serialize_yaml(rows)
     if export_format == "excel":
-        return _serialize_excel(rows, title, columns)
+        return _serialize_excel(rows, title, columns, theme)
     if export_format == "pdf":
-        return _serialize_pdf(rows, title, columns)
+        return _serialize_pdf(rows, title, columns, theme)
     raise AssertionError(export_format)
 
 
@@ -1115,31 +1302,38 @@ def _xml_escape(value: str) -> str:
     )
 
 
-def _serialize_excel(rows: list[dict], title: str, columns: Optional[list[str]]) -> bytes:
-    export_columns = _export_columns(rows, columns)
-    headers = _export_headers(export_columns)
-    workbook = Workbook()
-    worksheet = workbook.active
-    worksheet.title = title[:31]
-    workbook.properties.creator = "Saltim Cafe"
-    workbook.properties.title = title
+def _numeric_export_columns(rows: list[dict], columns: list[str]) -> list[str]:
+    return [
+        column
+        for column in columns
+        if any(isinstance(row.get(column), (int, float)) for row in rows)
+    ]
 
-    worksheet.append(headers)
-    for row in rows:
-        worksheet.append([_export_cell_value(row.get(column)) for column in export_columns])
 
-    header_fill = PatternFill("solid", fgColor=SALTIM_ORANGE.replace("#", ""))
+def _style_export_worksheet(worksheet, columns: list[str], theme: dict[str, str]) -> None:
+    header_fill = PatternFill("solid", fgColor=_hex(theme["primary"]))
     header_font = Font(color="FFFFFF", bold=True)
+    thin = Side(style="thin", color=_hex(theme["grid"]))
     for cell in worksheet[1]:
         cell.fill = header_fill
         cell.font = header_font
         cell.alignment = Alignment(horizontal="center", vertical="center")
+        cell.border = Border(bottom=thin)
 
     worksheet.freeze_panes = "A2"
-    if export_columns:
-        last_column = get_column_letter(len(export_columns))
-        last_row = max(1, worksheet.max_row)
-        worksheet.auto_filter.ref = f"A1:{last_column}{last_row}"
+    if columns:
+        last_column = get_column_letter(len(columns))
+        worksheet.auto_filter.ref = f"A1:{last_column}{max(1, worksheet.max_row)}"
+
+    for row_index, row_cells in enumerate(worksheet.iter_rows(min_row=2), start=2):
+        fill = PatternFill("solid", fgColor=_hex(theme["soft"] if row_index % 2 == 0 else "#FFFFFF"))
+        for cell in row_cells:
+            cell.fill = fill
+            cell.border = Border(bottom=thin)
+            cell.alignment = Alignment(vertical="top")
+            if isinstance(cell.value, (int, float)):
+                cell.alignment = Alignment(horizontal="right", vertical="top")
+                cell.number_format = '#,##0.00'
 
     for column_cells in worksheet.columns:
         column_letter = column_cells[0].column_letter
@@ -1147,9 +1341,93 @@ def _serialize_excel(rows: list[dict], title: str, columns: Optional[list[str]])
         for cell in column_cells:
             value = "" if cell.value is None else _stringify_export_value(cell.value)
             max_length = max(max_length, len(value))
-            if isinstance(cell.value, (int, float)):
-                cell.alignment = Alignment(horizontal="right")
-        worksheet.column_dimensions[column_letter].width = min(max(max_length + 2, 12), 48)
+        worksheet.column_dimensions[column_letter].width = min(max(max_length + 2, 12), 54)
+
+
+def _add_cover_sheet(workbook: Workbook, title: str, row_count: int, theme: dict[str, str]) -> None:
+    worksheet = workbook.create_sheet("Capa", 0)
+    worksheet.sheet_view.showGridLines = False
+    worksheet["B2"] = "Maestro"
+    worksheet["B2"].font = Font(size=14, bold=True, color=_hex(theme["accent"]))
+    worksheet["B3"] = title
+    worksheet["B3"].font = Font(size=24, bold=True, color=_hex(theme["primary"]))
+    worksheet["B5"] = "Gerado em"
+    worksheet["C5"] = _now_recife().strftime("%d/%m/%Y %H:%M")
+    worksheet["B6"] = "Registros"
+    worksheet["C6"] = row_count
+    worksheet["B8"] = "Observacao"
+    worksheet["C8"] = "Use os filtros da aba Dados e confira o Resumo para uma leitura executiva."
+    for cell in ("B5", "B6", "B8"):
+        worksheet[cell].font = Font(bold=True, color=_hex(theme["muted"]))
+    for column in ("B", "C", "D"):
+        worksheet.column_dimensions[column].width = 24
+    worksheet["C8"].alignment = Alignment(wrap_text=True)
+
+
+def _add_summary_sheet(
+    workbook: Workbook,
+    rows: list[dict],
+    columns: list[str],
+    theme: dict[str, str],
+) -> None:
+    worksheet = workbook.create_sheet("Resumo")
+    worksheet.sheet_view.showGridLines = False
+    numeric_columns = _numeric_export_columns(rows, columns)
+    worksheet.append(["Metrica", "Valor"])
+    worksheet.append(["Registros", len(rows)])
+    worksheet.append(["Colunas", len(columns)])
+    for column in numeric_columns:
+        values = [_as_float(row.get(column)) for row in rows if row.get(column) is not None]
+        worksheet.append([f"Soma - {_export_headers([column])[0]}", sum(values)])
+        worksheet.append([f"Media - {_export_headers([column])[0]}", sum(values) / max(1, len(values))])
+    _style_export_worksheet(worksheet, ["metrica", "valor"], theme)
+    worksheet.column_dimensions["A"].width = 34
+    worksheet.column_dimensions["B"].width = 18
+
+
+def _add_numeric_chart(worksheet, rows: list[dict], columns: list[str], theme: dict[str, str]) -> None:
+    numeric_columns = _numeric_export_columns(rows, columns)
+    if not numeric_columns or not rows:
+        return
+    numeric_index = columns.index(numeric_columns[0]) + 1
+    label_index = 1
+    for candidate in ("ingrediente", "fornecedor", "nome", "categoria", "receita", "data_pedido", "data_hora"):
+        if candidate in columns:
+            label_index = columns.index(candidate) + 1
+            break
+    chart = ExcelBarChart()
+    chart.title = f"{_export_headers([numeric_columns[0]])[0]} por registro"
+    chart.style = 10
+    chart.height = 8
+    chart.width = 18
+    max_row = min(worksheet.max_row, 16)
+    data = Reference(worksheet, min_col=numeric_index, min_row=1, max_row=max_row)
+    cats = Reference(worksheet, min_col=label_index, min_row=2, max_row=max_row)
+    chart.add_data(data, titles_from_data=True)
+    chart.set_categories(cats)
+    chart.y_axis.majorGridlines = None
+    if chart.series:
+        chart.series[0].graphicalProperties.solidFill = _hex(theme["primary"])
+        chart.series[0].graphicalProperties.line.solidFill = _hex(theme["primary"])
+    worksheet.add_chart(chart, f"{get_column_letter(len(columns) + 2)}2")
+
+
+def _serialize_excel(rows: list[dict], title: str, columns: Optional[list[str]], theme: dict[str, str]) -> bytes:
+    export_columns = _export_columns(rows, columns)
+    headers = _export_headers(export_columns)
+    workbook = Workbook()
+    workbook.remove(workbook.active)
+    workbook.properties.creator = "Maestro"
+    workbook.properties.title = title
+    _add_cover_sheet(workbook, title, len(rows), theme)
+    _add_summary_sheet(workbook, rows, export_columns, theme)
+
+    worksheet = workbook.create_sheet(_safe_sheet_title(title))
+    worksheet.append(headers)
+    for row in rows:
+        worksheet.append([_export_cell_value(row.get(column)) for column in export_columns])
+    _style_export_worksheet(worksheet, export_columns, theme)
+    _add_numeric_chart(worksheet, rows, export_columns, theme)
 
     output = io.BytesIO()
     workbook.save(output)
@@ -1160,10 +1438,12 @@ def _pdf_header_block(
     title: str,
     title_style: ParagraphStyle,
     meta_style: ParagraphStyle,
+    theme: Optional[dict[str, str]] = None,
 ) -> Table:
+    theme = theme or _export_theme(None)
     generated_at = _now_recife().strftime("%d/%m/%Y %H:%M")
     title_cell = [
-        Paragraph("Saltim Cafe", meta_style),
+        Paragraph("Maestro", meta_style),
         Paragraph(_xml_escape(title), title_style),
         Paragraph(f"Gerado em {generated_at}", meta_style),
     ]
@@ -1189,7 +1469,7 @@ def _pdf_header_block(
                 ("LEFTPADDING", (0, 0), (-1, -1), 0),
                 ("RIGHTPADDING", (0, 0), (-1, -1), 0),
                 ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
-                ("LINEBELOW", (0, 0), (-1, -1), 1.4, colors.HexColor(SALTIM_ORANGE)),
+                ("LINEBELOW", (0, 0), (-1, -1), 1.4, colors.HexColor(theme["primary"])),
             ]
         )
     )
@@ -1203,7 +1483,9 @@ def _pdf_table(
     cell_style: ParagraphStyle,
     number_style: ParagraphStyle,
     available_width: float,
+    theme: Optional[dict[str, str]] = None,
 ) -> Table:
+    theme = theme or _export_theme(None)
     headers = [Paragraph(_xml_escape(header), header_style) for header in _export_headers(columns)]
     data = [headers]
     numeric_columns = {
@@ -1236,12 +1518,12 @@ def _pdf_table(
         hAlign="LEFT",
     )
     style_commands = [
-        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor(SALTIM_ORANGE)),
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor(theme["primary"])),
         ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
         ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
         ("VALIGN", (0, 0), (-1, -1), "TOP"),
-        ("GRID", (0, 0), (-1, -1), 0.35, colors.HexColor("#DCDAD4")),
-        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor(SALTIM_CREAM)]),
+        ("GRID", (0, 0), (-1, -1), 0.35, colors.HexColor(theme["grid"])),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor(theme["soft"])]),
         ("LEFTPADDING", (0, 0), (-1, -1), 4),
         ("RIGHTPADDING", (0, 0), (-1, -1), 4),
         ("TOPPADDING", (0, 0), (-1, -1), 4),
@@ -1275,13 +1557,14 @@ def _pdf_column_widths(rows: list[dict], columns: list[str], available_width: fl
 
 
 def _draw_pdf_footer(canvas, document):
+    theme = getattr(document, "export_theme", _export_theme(None))
     canvas.saveState()
-    canvas.setStrokeColor(colors.HexColor(SALTIM_ORANGE))
+    canvas.setStrokeColor(colors.HexColor(theme["primary"]))
     canvas.setLineWidth(0.6)
     canvas.line(document.leftMargin, 10 * mm, landscape(A4)[0] - document.rightMargin, 10 * mm)
     canvas.setFont("Helvetica", 7)
-    canvas.setFillColor(colors.HexColor(SALTIM_STONE))
-    canvas.drawString(document.leftMargin, 6 * mm, "Saltim Cafe")
+    canvas.setFillColor(colors.HexColor(theme["muted"]))
+    canvas.drawString(document.leftMargin, 6 * mm, "Maestro")
     canvas.drawRightString(
         landscape(A4)[0] - document.rightMargin,
         6 * mm,
@@ -1290,7 +1573,7 @@ def _draw_pdf_footer(canvas, document):
     canvas.restoreState()
 
 
-def _serialize_pdf(rows: list[dict], title: str, columns: Optional[list[str]]) -> bytes:
+def _serialize_pdf(rows: list[dict], title: str, columns: Optional[list[str]], theme: dict[str, str]) -> bytes:
     export_columns = _export_columns(rows, columns)
     output = io.BytesIO()
     document = SimpleDocTemplate(
@@ -1302,6 +1585,7 @@ def _serialize_pdf(rows: list[dict], title: str, columns: Optional[list[str]]) -
         bottomMargin=14 * mm,
         title=title,
     )
+    document.export_theme = theme
     styles = getSampleStyleSheet()
     title_style = ParagraphStyle(
         "SaltimTitle",
@@ -1309,7 +1593,7 @@ def _serialize_pdf(rows: list[dict], title: str, columns: Optional[list[str]]) -
         fontName="Helvetica-Bold",
         fontSize=18,
         leading=22,
-        textColor=colors.HexColor(SALTIM_DARK),
+        textColor=colors.HexColor(theme["text"]),
         spaceAfter=4,
     )
     meta_style = ParagraphStyle(
@@ -1317,7 +1601,7 @@ def _serialize_pdf(rows: list[dict], title: str, columns: Optional[list[str]]) -
         parent=styles["Normal"],
         fontSize=8,
         leading=10,
-        textColor=colors.HexColor(SALTIM_STONE),
+        textColor=colors.HexColor(theme["muted"]),
     )
     header_style = ParagraphStyle(
         "SaltimTableHeader",
@@ -1333,7 +1617,7 @@ def _serialize_pdf(rows: list[dict], title: str, columns: Optional[list[str]]) -
         parent=styles["Normal"],
         fontSize=6.4,
         leading=7.4,
-        textColor=colors.HexColor(SALTIM_DARK),
+        textColor=colors.HexColor(theme["text"]),
     )
     number_style = ParagraphStyle(
         "SaltimTableNumber",
@@ -1341,7 +1625,7 @@ def _serialize_pdf(rows: list[dict], title: str, columns: Optional[list[str]]) -
         alignment=TA_RIGHT,
     )
 
-    story = [_pdf_header_block(title, title_style, meta_style), Spacer(1, 7 * mm)]
+    story = [_pdf_header_block(title, title_style, meta_style, theme), Spacer(1, 7 * mm)]
     if export_columns:
         story.append(
             _pdf_table(
@@ -1351,6 +1635,7 @@ def _serialize_pdf(rows: list[dict], title: str, columns: Optional[list[str]]) -
                 cell_style,
                 number_style,
                 document.width,
+                theme,
             )
         )
     else:
@@ -1600,7 +1885,8 @@ def _sample_chart_rows(rows: list[dict], limit: int) -> list[dict]:
     return [rows[round(index * step)] for index in range(limit)]
 
 
-def _line_chart_drawing(rows: list[dict], width: float, height: float) -> Drawing:
+def _line_chart_drawing(rows: list[dict], width: float, height: float, theme: Optional[dict[str, str]] = None) -> Drawing:
+    theme = theme or _export_theme(None)
     drawing = Drawing(width, height)
     left = 42
     right = 42
@@ -1608,17 +1894,17 @@ def _line_chart_drawing(rows: list[dict], width: float, height: float) -> Drawin
     top = 28
     chart_width = width - left - right
     chart_height = height - bottom - top
-    drawing.add(DrawingLine(left, bottom, left, bottom + chart_height, strokeColor=colors.HexColor("#DCDAD4")))
-    drawing.add(DrawingLine(left, bottom, left + chart_width, bottom, strokeColor=colors.HexColor("#DCDAD4")))
-    drawing.add(DrawingLine(left + chart_width, bottom, left + chart_width, bottom + chart_height, strokeColor=colors.HexColor("#DCDAD4")))
+    drawing.add(DrawingLine(left, bottom, left, bottom + chart_height, strokeColor=colors.HexColor(theme["grid"])))
+    drawing.add(DrawingLine(left, bottom, left + chart_width, bottom, strokeColor=colors.HexColor(theme["grid"])))
+    drawing.add(DrawingLine(left + chart_width, bottom, left + chart_width, bottom + chart_height, strokeColor=colors.HexColor(theme["grid"])))
     sampled = _sample_chart_rows(rows, 18)
     if not sampled:
-        drawing.add(String(width / 2 - 45, height / 2, "Sem dados para exibir", fontSize=9, fillColor=colors.HexColor(SALTIM_STONE)))
+        drawing.add(String(width / 2 - 45, height / 2, "Sem dados para exibir", fontSize=9, fillColor=colors.HexColor(theme["muted"])))
         return drawing
 
     series = [
-        ("estoque", "Estoque medio", colors.HexColor("#52B9EB"), "left"),
-        ("vendas", "Vendas totais", colors.HexColor(SALTIM_ORANGE), "right"),
+        ("estoque", "Estoque medio", colors.HexColor(theme["accent"]), "left"),
+        ("vendas", "Vendas totais", colors.HexColor(theme["primary"]), "right"),
     ]
     totals = {
         "estoque": sum(_as_float(row.get("estoque")) for row in sampled) / max(1, len(sampled)),
@@ -1650,7 +1936,7 @@ def _line_chart_drawing(rows: list[dict], width: float, height: float) -> Drawin
             tick_value = max_value * tick / 4
             y = bottom + chart_height * tick / 4
             label = _stringify_export_value(tick_value)
-            drawing.add(DrawingLine(left, y, left + chart_width, y, strokeColor=colors.HexColor("#F0EEE8"), strokeWidth=0.35))
+            drawing.add(DrawingLine(left, y, left + chart_width, y, strokeColor=colors.HexColor(theme["grid"]), strokeWidth=0.35))
             if axis == "left":
                 drawing.add(String(left - 34, y - 2, label, fontSize=6.5, fillColor=color))
             else:
@@ -1663,11 +1949,12 @@ def _line_chart_drawing(rows: list[dict], width: float, height: float) -> Drawin
     for index, row in enumerate(sampled):
         label = str(row.get("periodo") or row.get("data", ""))
         x = left + (chart_width * index / max(1, len(sampled) - 1))
-        drawing.add(String(x - 10, bottom - 14, label, fontSize=6.5, fillColor=colors.HexColor(SALTIM_STONE)))
+        drawing.add(String(x - 10, bottom - 14, label, fontSize=6.5, fillColor=colors.HexColor(theme["muted"])))
     return drawing
 
 
-def _bar_chart_drawing(rows: list[dict], width: float, height: float, value_key: str = "valor") -> Drawing:
+def _bar_chart_drawing(rows: list[dict], width: float, height: float, value_key: str = "valor", theme: Optional[dict[str, str]] = None) -> Drawing:
+    theme = theme or _export_theme(None)
     drawing = Drawing(width, height)
     left = 32
     bottom = 28
@@ -1675,20 +1962,20 @@ def _bar_chart_drawing(rows: list[dict], width: float, height: float, value_key:
     chart_height = height - 48
     items = rows[:10]
     if not items:
-        drawing.add(String(width / 2 - 45, height / 2, "Sem dados para exibir", fontSize=9, fillColor=colors.HexColor(SALTIM_STONE)))
+        drawing.add(String(width / 2 - 45, height / 2, "Sem dados para exibir", fontSize=9, fillColor=colors.HexColor(theme["muted"])))
         return drawing
     max_value = max(_as_float(item.get(value_key)) for item in items) or 1
     gap = 4
     bar_width = max(8, (chart_width - gap * (len(items) - 1)) / len(items))
-    drawing.add(DrawingLine(left, bottom, left, bottom + chart_height, strokeColor=colors.HexColor("#DCDAD4")))
-    drawing.add(DrawingLine(left, bottom, left + chart_width, bottom, strokeColor=colors.HexColor("#DCDAD4")))
+    drawing.add(DrawingLine(left, bottom, left, bottom + chart_height, strokeColor=colors.HexColor(theme["grid"])))
+    drawing.add(DrawingLine(left, bottom, left + chart_width, bottom, strokeColor=colors.HexColor(theme["grid"])))
     for index, item in enumerate(items):
         value = _as_float(item.get(value_key))
         bar_height = (value / max_value) * chart_height
         x = left + index * (bar_width + gap)
-        drawing.add(Rect(x, bottom, bar_width, bar_height, fillColor=colors.HexColor(SALTIM_ORANGE), strokeColor=colors.HexColor(SALTIM_ORANGE)))
+        drawing.add(Rect(x, bottom, bar_width, bar_height, fillColor=colors.HexColor(theme["primary"]), strokeColor=colors.HexColor(theme["primary"])))
         label = str(item.get("periodo") or item.get("nome") or item.get("receita") or "")[:12]
-        drawing.add(String(x, bottom - 13, label, fontSize=6.3, fillColor=colors.HexColor(SALTIM_STONE)))
+        drawing.add(String(x, bottom - 13, label, fontSize=6.3, fillColor=colors.HexColor(theme["muted"])))
     return drawing
 
 
@@ -1696,13 +1983,52 @@ def _dashboard_pdf_paragraph(text: str, style: ParagraphStyle) -> Paragraph:
     return Paragraph(_xml_escape(text), style)
 
 
-def _serialize_dashboard_excel(tables: list[dict]) -> bytes:
+def _add_dashboard_chart_sheet(
+    workbook: Workbook,
+    title: str,
+    rows: list[dict],
+    columns: list[str],
+    label_column: str,
+    value_columns: list[str],
+    theme: dict[str, str],
+    chart_kind: str = "bar",
+) -> None:
+    worksheet = workbook.create_sheet(_safe_sheet_title(title))
+    worksheet.append(_export_headers(columns))
+    for row in rows:
+        worksheet.append([_export_cell_value(row.get(column)) for column in columns])
+    _style_export_worksheet(worksheet, columns, theme)
+    if not rows or not value_columns:
+        return
+    chart = ExcelLineChart() if chart_kind == "line" else ExcelBarChart()
+    chart.title = title
+    chart.style = 10
+    chart.height = 9
+    chart.width = 22
+    max_row = min(worksheet.max_row, 22)
+    for value_column in value_columns:
+        if value_column not in columns:
+            continue
+        col_index = columns.index(value_column) + 1
+        data = Reference(worksheet, min_col=col_index, min_row=1, max_row=max_row)
+        chart.add_data(data, titles_from_data=True)
+    label_index = columns.index(label_column) + 1
+    chart.set_categories(Reference(worksheet, min_col=label_index, min_row=2, max_row=max_row))
+    if chart.series:
+        chart.series[0].graphicalProperties.solidFill = _hex(theme["primary"])
+        chart.series[0].graphicalProperties.line.solidFill = _hex(theme["primary"])
+    if len(chart.series) > 1:
+        chart.series[1].graphicalProperties.solidFill = _hex(theme["accent"])
+        chart.series[1].graphicalProperties.line.solidFill = _hex(theme["accent"])
+    worksheet.add_chart(chart, f"{get_column_letter(len(columns) + 2)}2")
+
+
+def _serialize_dashboard_excel(tables: list[dict], chart_data: dict, theme: dict[str, str]) -> bytes:
     workbook = Workbook()
     workbook.remove(workbook.active)
-    workbook.properties.creator = "Saltim Cafe"
-    workbook.properties.title = "Dashboard Saltim"
-    header_fill = PatternFill("solid", fgColor=SALTIM_ORANGE.replace("#", ""))
-    header_font = Font(color="FFFFFF", bold=True)
+    workbook.properties.creator = "Maestro"
+    workbook.properties.title = "Dashboard Maestro"
+    _add_cover_sheet(workbook, "Dashboard Maestro", sum(len(table["rows"]) for table in tables), theme)
 
     for table in tables:
         worksheet = workbook.create_sheet(_safe_sheet_title(table["title"]))
@@ -1710,31 +2036,46 @@ def _serialize_dashboard_excel(tables: list[dict]) -> bytes:
         worksheet.append(_export_headers(columns))
         for row in table["rows"]:
             worksheet.append([_export_cell_value(row.get(column)) for column in columns])
-        for cell in worksheet[1]:
-            cell.fill = header_fill
-            cell.font = header_font
-            cell.alignment = Alignment(horizontal="center", vertical="center")
-        worksheet.freeze_panes = "A2"
-        if columns:
-            last_column = get_column_letter(len(columns))
-            worksheet.auto_filter.ref = f"A1:{last_column}{max(1, worksheet.max_row)}"
-        for column_cells in worksheet.columns:
-            column_letter = column_cells[0].column_letter
-            max_length = 0
-            for cell in column_cells:
-                value = "" if cell.value is None else _stringify_export_value(cell.value)
-                max_length = max(max_length, len(value))
-                if isinstance(cell.value, (int, float)):
-                    cell.alignment = Alignment(horizontal="right")
-                    cell.number_format = '#,##0.00'
-            worksheet.column_dimensions[column_letter].width = min(max(max_length + 2, 12), 52)
+        _style_export_worksheet(worksheet, columns, theme)
+        _add_numeric_chart(worksheet, table["rows"], columns, theme)
+
+    _add_dashboard_chart_sheet(
+        workbook,
+        "Grafico estoque vendas",
+        chart_data["history"],
+        ["periodo", "estoque", "vendas"],
+        "periodo",
+        ["estoque", "vendas"],
+        theme,
+        "line",
+    )
+    _add_dashboard_chart_sheet(
+        workbook,
+        "Grafico faturamento",
+        chart_data["revenue"],
+        ["periodo", "valor"],
+        "periodo",
+        ["valor"],
+        theme,
+        "bar",
+    )
+    _add_dashboard_chart_sheet(
+        workbook,
+        "Grafico categorias",
+        chart_data["categories"],
+        ["nome", "valor"],
+        "nome",
+        ["valor"],
+        theme,
+        "bar",
+    )
 
     output = io.BytesIO()
     workbook.save(output)
     return output.getvalue()
 
 
-def _serialize_dashboard_pdf(tables: list[dict], chart_data: dict) -> bytes:
+def _serialize_dashboard_pdf(tables: list[dict], chart_data: dict, theme: dict[str, str]) -> bytes:
     output = io.BytesIO()
     document = SimpleDocTemplate(
         output,
@@ -1743,8 +2084,9 @@ def _serialize_dashboard_pdf(tables: list[dict], chart_data: dict) -> bytes:
         rightMargin=12 * mm,
         topMargin=14 * mm,
         bottomMargin=14 * mm,
-        title="Dashboard Saltim",
+        title="Dashboard Maestro",
     )
+    document.export_theme = theme
     styles = getSampleStyleSheet()
     title_style = ParagraphStyle(
         "DashboardTitle",
@@ -1752,7 +2094,7 @@ def _serialize_dashboard_pdf(tables: list[dict], chart_data: dict) -> bytes:
         fontName="Helvetica-Bold",
         fontSize=18,
         leading=22,
-        textColor=colors.HexColor(SALTIM_DARK),
+        textColor=colors.HexColor(theme["text"]),
         spaceAfter=4,
     )
     meta_style = ParagraphStyle(
@@ -1760,14 +2102,14 @@ def _serialize_dashboard_pdf(tables: list[dict], chart_data: dict) -> bytes:
         parent=styles["Normal"],
         fontSize=8,
         leading=10,
-        textColor=colors.HexColor(SALTIM_STONE),
+        textColor=colors.HexColor(theme["muted"]),
     )
     body_style = ParagraphStyle(
         "DashboardBody",
         parent=styles["Normal"],
         fontSize=8.2,
         leading=11,
-        textColor=colors.HexColor(SALTIM_DARK),
+        textColor=colors.HexColor(theme["text"]),
     )
     header_style = ParagraphStyle(
         "DashboardTableHeader",
@@ -1788,9 +2130,9 @@ def _serialize_dashboard_pdf(tables: list[dict], chart_data: dict) -> bytes:
     number_style = ParagraphStyle("DashboardTableNumber", parent=cell_style, alignment=TA_RIGHT)
 
     story = [
-        _pdf_header_block("Dashboard", title_style, meta_style),
+        _pdf_header_block("Dashboard", title_style, meta_style, theme),
         Spacer(1, 7 * mm),
-        _line_chart_drawing(chart_data["history"], document.width, 116 * mm),
+        _line_chart_drawing(chart_data["history"], document.width, 116 * mm, theme),
         Spacer(1, 5 * mm),
         _dashboard_pdf_paragraph(
             "O grafico agrupa o periodo filtrado por mes e compara estoque medio mensal com vendas totais mensais. "
@@ -1799,7 +2141,7 @@ def _serialize_dashboard_pdf(tables: list[dict], chart_data: dict) -> bytes:
             body_style,
         ),
         PageBreak(),
-        _pdf_header_block("Graficos secundarios", title_style, meta_style),
+        _pdf_header_block("Graficos secundarios", title_style, meta_style, theme),
         Spacer(1, 7 * mm),
         Table(
             [
@@ -1808,8 +2150,8 @@ def _serialize_dashboard_pdf(tables: list[dict], chart_data: dict) -> bytes:
                     _dashboard_pdf_paragraph("Categorias mais vendidas", body_style),
                 ],
                 [
-                    _bar_chart_drawing(chart_data["revenue"], document.width / 2 - 8 * mm, 82 * mm),
-                    _bar_chart_drawing(chart_data["categories"], document.width / 2 - 8 * mm, 82 * mm),
+                    _bar_chart_drawing(chart_data["revenue"], document.width / 2 - 8 * mm, 82 * mm, theme=theme),
+                    _bar_chart_drawing(chart_data["categories"], document.width / 2 - 8 * mm, 82 * mm, theme=theme),
                 ],
                 [
                     _dashboard_pdf_paragraph(
@@ -1828,7 +2170,7 @@ def _serialize_dashboard_pdf(tables: list[dict], chart_data: dict) -> bytes:
 
     for index, table in enumerate(tables):
         story.append(PageBreak())
-        story.append(_pdf_header_block(table["title"], title_style, meta_style))
+        story.append(_pdf_header_block(table["title"], title_style, meta_style, theme))
         story.append(Spacer(1, 7 * mm))
         rows = table["rows"]
         visible_rows = rows[:DASHBOARD_PDF_TABLE_ROWS]
@@ -1840,6 +2182,7 @@ def _serialize_dashboard_pdf(tables: list[dict], chart_data: dict) -> bytes:
                 cell_style,
                 number_style,
                 document.width,
+                theme,
             )
         )
         if len(rows) > len(visible_rows):
@@ -1855,15 +2198,21 @@ def _serialize_dashboard_pdf(tables: list[dict], chart_data: dict) -> bytes:
     return output.getvalue()
 
 
-def _dashboard_export_response(tables: list[dict], chart_data: dict, format_value: str) -> Response:
+def _dashboard_export_response(
+    tables: list[dict],
+    chart_data: dict,
+    format_value: str,
+    theme_id: Optional[str] = None,
+) -> Response:
     export_format = _normalize_export_format(format_value)
     if export_format not in {"pdf", "excel"}:
         raise HTTPException(status_code=400, detail="A exportacao do dashboard aceita apenas pdf ou excel.")
     media_type, extension = EXPORT_FORMATS[export_format]
+    theme = _export_theme(theme_id)
     content = (
-        _serialize_dashboard_pdf(tables, chart_data)
+        _serialize_dashboard_pdf(tables, chart_data, theme)
         if export_format == "pdf"
-        else _serialize_dashboard_excel(tables)
+        else _serialize_dashboard_excel(tables, chart_data, theme)
     )
     return Response(
         content=content,
@@ -3233,6 +3582,7 @@ def get_dashboard_receitas_ranking(
 @app.get("/api/export/dashboard")
 def export_dashboard(
     format: str = Query(default="pdf"),
+    theme: Optional[str] = Query(default=None),
     category_ids: Optional[list[str]] = Query(default=None),
     days: int = Query(default=90, ge=7, le=730),
     all_period: bool = False,
@@ -3258,7 +3608,7 @@ def export_dashboard(
         month_numbers=month_numbers,
         event_types=event_types,
     )
-    return _dashboard_export_response(tables, chart_data, format)
+    return _dashboard_export_response(tables, chart_data, format, theme)
 
 
 @app.get("/api/estoque", response_model=list[IngredienteOut])
@@ -3334,6 +3684,7 @@ def get_estoque_paginado(
 @app.get("/api/export/estoque")
 def export_estoque(
     format: str = Query(default="csv"),
+    theme: Optional[str] = Query(default=None),
     date_from: date = Query(...),
     date_to: date = Query(...),
     db: Session = Depends(get_db),
@@ -3385,6 +3736,7 @@ def export_estoque(
             "unidade",
             "quantidade",
         ],
+        theme_id=theme,
     )
 
 
@@ -3634,6 +3986,7 @@ def get_fornecedores(db: Session = Depends(get_db)):
 @app.get("/api/export/fornecedores")
 def export_fornecedores(
     format: str = Query(default="csv"),
+    theme: Optional[str] = Query(default=None),
     db: Session = Depends(get_db),
 ):
     rows = (
@@ -3680,6 +4033,7 @@ def export_fornecedores(
             "itens_fornecidos",
             "preco_medio",
         ],
+        theme_id=theme,
     )
 
 
@@ -4143,6 +4497,698 @@ def _send_pedido_emails(
     return results
 
 
+# ---------------------------------------------------------------------------
+# Centro de Compras Autônomo Maestro
+# ---------------------------------------------------------------------------
+
+
+def _purchase_recent_usage_window(db: Session, days: int, reference_date: date) -> dict[str, float]:
+    horizon_days = max(1, days)
+    end_date = reference_date - timedelta(days=1)
+    start_date = reference_date - timedelta(days=horizon_days)
+    if start_date > end_date:
+        return {}
+    rows = (
+        db.query(
+            ReceitaIngrediente.ingredient_id,
+            func.sum(Venda.quantity * ReceitaIngrediente.qty).label("usage_qty"),
+        )
+        .select_from(Venda)
+        .join(Receita, Receita.id == Venda.recipe_id)
+        .join(ReceitaIngrediente, ReceitaIngrediente.recipe_id == Receita.id)
+        .join(Ingrediente, Ingrediente.id == ReceitaIngrediente.ingredient_id)
+        .filter(func.date(Venda.date_time) >= start_date)
+        .filter(func.date(Venda.date_time) <= end_date)
+        .filter(Ingrediente.category_id != PRODUCTION_CATEGORY_ID)
+        .group_by(ReceitaIngrediente.ingredient_id)
+        .all()
+    )
+    return {
+        ingredient_id: max(0.0, _as_float(usage_qty))
+        for ingredient_id, usage_qty in rows
+    }
+
+
+def _purchase_in_transit_map(db: Session) -> dict[str, float]:
+    rows = (
+        db.query(Pedido.ingredient_id, func.sum(Pedido.qty))
+        .join(Ingrediente, Ingrediente.id == Pedido.ingredient_id)
+        .filter(Pedido.status == "em_transito")
+        .filter(Ingrediente.category_id != PRODUCTION_CATEGORY_ID)
+        .group_by(Pedido.ingredient_id)
+        .all()
+    )
+    return {ingredient_id: _as_float(qty) for ingredient_id, qty in rows}
+
+
+def _purchase_criticality_label(item: Optional[CriticalityReportItem], stock_position: float, forecast_qty: float) -> str:
+    if item is not None and item.criticidade_predita:
+        return item.criticidade_predita
+    if stock_position <= 0:
+        return "Crítico"
+    if forecast_qty > 0 and stock_position < forecast_qty:
+        return "Alerta de compra"
+    return "OK"
+
+
+def _purchase_status_is_critical(label: str) -> bool:
+    normalized = (
+        normalize("NFKD", label or "")
+        .encode("ascii", "ignore")
+        .decode("ascii")
+        .lower()
+    )
+    return any(token in normalized for token in ("critico", "alerta", "zerado", "ruptura"))
+
+
+def _purchase_option_score(
+    effective_unit_price: float,
+    delivery_days: int,
+    delay_risk: float,
+    discount_percent: float,
+) -> float:
+    return round(
+        effective_unit_price
+        + (delivery_days * 0.12)
+        + (delay_risk * 8.0)
+        - (_as_float(discount_percent) * 0.015),
+        4,
+    )
+
+
+def _purchase_option_reason(option: PurchasePlanSupplierOption) -> str:
+    fragments = [
+        f"R$ {_as_float(option.effective_unit_price):.2f}/un",
+        f"{int(option.delivery_time_days or 0)} dias",
+    ]
+    if _as_float(option.discount_percent) > 0:
+        fragments.append(f"{_as_float(option.discount_percent):.1f}% desc.")
+    if _as_float(option.delay_risk) > 0:
+        fragments.append(f"risco {(_as_float(option.delay_risk) * 100):.0f}%")
+    return ", ".join(fragments)
+
+
+def _sync_purchase_plan_quotes(db: Session, plan: PurchasePlan) -> None:
+    selected_totals: dict[str, dict] = {}
+    for item in plan.items:
+        if not item.selected_supplier_id or _as_float(item.approved_qty) <= 0:
+            continue
+        option = _find_item_option(item, item.selected_supplier_id)
+        if option is None:
+            continue
+        supplier = (
+            db.query(Fornecedor.email)
+            .filter(Fornecedor.id == option.supplier_id)
+            .first()
+        )
+        payload = selected_totals.setdefault(
+            option.supplier_id,
+            {
+                "supplier_name": option.supplier_name,
+                "email": supplier.email if supplier else None,
+                "total": 0.0,
+            },
+        )
+        payload["total"] += _as_float(item.approved_qty) * _as_float(option.effective_unit_price)
+
+    existing = {quote.supplier_id: quote for quote in plan.quotes}
+    for supplier_id, payload in selected_totals.items():
+        quote = existing.get(supplier_id)
+        if quote is None:
+            quote = SupplierQuote(
+                supplier_id=supplier_id,
+                supplier_name=payload["supplier_name"],
+                email=payload.get("email"),
+                channel="email",
+                status="rascunho",
+            )
+            plan.quotes.append(quote)
+        quote.supplier_name = payload["supplier_name"]
+        quote.email = payload.get("email")
+        quote.total_estimated = round(payload["total"], 2)
+
+    for quote in plan.quotes:
+        if quote.supplier_id not in selected_totals and quote.status == "rascunho":
+            quote.total_estimated = 0
+
+
+def _recalculate_purchase_plan(plan: PurchasePlan) -> None:
+    items = list(plan.items)
+    plan.total_estimated = round(sum(_as_float(item.estimated_total) for item in items), 2)
+    plan.approved_total = round(
+        sum(_as_float(item.approved_qty) * _as_float(item.estimated_unit_price) for item in items),
+        2,
+    )
+    plan.critical_items_count = sum(1 for item in items if _purchase_status_is_critical(item.criticality))
+    coverages = [
+        min(_as_float(item.coverage_days), 90.0)
+        for item in items
+        if _as_float(item.avg_daily_usage) > 0
+    ]
+    plan.avg_coverage_days = round(sum(coverages) / len(coverages), 2) if coverages else 0
+    best_total = 0.0
+    selected_total = 0.0
+    for item in items:
+        qty = _as_float(item.approved_qty)
+        if qty <= 0 or not item.options:
+            continue
+        best_total += min(_as_float(option.effective_unit_price) * qty for option in item.options)
+        selected_total += _as_float(item.estimated_unit_price) * qty
+    plan.savings_potential = round(max(0.0, selected_total - best_total), 2)
+    plan.updated_at = _now_recife()
+
+
+def _serialize_purchase_option(option: PurchasePlanSupplierOption) -> PurchasePlanSupplierOptionOut:
+    return PurchasePlanSupplierOptionOut(
+        id=option.id,
+        supplier_id=option.supplier_id,
+        supplier_name=option.supplier_name,
+        unit_price=_as_float(option.unit_price),
+        discount_percent=_as_float(option.discount_percent),
+        min_to_discount=_as_float(option.min_to_discount),
+        effective_unit_price=_as_float(option.effective_unit_price),
+        delivery_time_days=int(option.delivery_time_days or 0),
+        delay_risk=_as_float(option.delay_risk),
+        score=_as_float(option.score),
+        recommended=bool(option.recommended),
+        reason=option.reason,
+    )
+
+
+def _serialize_purchase_item(item: PurchasePlanItem) -> PurchasePlanItemOut:
+    options = sorted(item.options, key=lambda option: (option.score, option.supplier_name))
+    return PurchasePlanItemOut(
+        id=item.id,
+        ingredient_id=item.ingredient_id,
+        ingredient_name=item.ingredient_name,
+        category=item.category,
+        unit=item.unit,
+        current_qty=_as_float(item.current_qty),
+        avg_daily_usage=_as_float(item.avg_daily_usage),
+        forecast_qty=_as_float(item.forecast_qty),
+        in_transit_qty=_as_float(item.in_transit_qty),
+        recommended_qty=_as_float(item.recommended_qty),
+        approved_qty=_as_float(item.approved_qty),
+        selected_supplier_id=item.selected_supplier_id,
+        selected_supplier_name=item.selected_supplier_name,
+        estimated_unit_price=_as_float(item.estimated_unit_price),
+        estimated_total=_as_float(item.estimated_total),
+        coverage_days=_as_float(item.coverage_days),
+        criticality=item.criticality,
+        justification=item.justification,
+        note=item.note,
+        options=[_serialize_purchase_option(option) for option in options],
+    )
+
+
+def _serialize_supplier_quote(quote: SupplierQuote) -> SupplierQuoteOut:
+    return SupplierQuoteOut(
+        id=quote.id,
+        supplier_id=quote.supplier_id,
+        supplier_name=quote.supplier_name,
+        email=quote.email,
+        channel=quote.channel,
+        status=quote.status,
+        sent_at=quote.sent_at,
+        responded_at=quote.responded_at,
+        approved_at=quote.approved_at,
+        total_estimated=_as_float(quote.total_estimated),
+        notes=quote.notes,
+    )
+
+
+def _serialize_purchase_plan(plan: PurchasePlan) -> PurchasePlanOut:
+    items = sorted(
+        plan.items,
+        key=lambda item: (
+            0 if _purchase_status_is_critical(item.criticality) else 1,
+            -_as_float(item.recommended_qty),
+            item.ingredient_name,
+        ),
+    )
+    quotes = sorted(plan.quotes, key=lambda quote: quote.supplier_name)
+    return PurchasePlanOut(
+        id=plan.id,
+        created_at=plan.created_at,
+        updated_at=plan.updated_at,
+        status=plan.status,
+        source=plan.source,
+        horizon_days=plan.horizon_days,
+        date_from=plan.date_from,
+        date_to=plan.date_to,
+        contagem_id=plan.contagem_id,
+        total_estimated=_as_float(plan.total_estimated),
+        approved_total=_as_float(plan.approved_total),
+        critical_items_count=int(plan.critical_items_count or 0),
+        avg_coverage_days=_as_float(plan.avg_coverage_days),
+        savings_potential=_as_float(plan.savings_potential),
+        items=[_serialize_purchase_item(item) for item in items],
+        quotes=[_serialize_supplier_quote(quote) for quote in quotes],
+    )
+
+
+def _build_purchase_plan(payload: PurchasePlanGenerateRequest, db: Session) -> PurchasePlan:
+    if payload.contagem_id is not None:
+        contagem = db.query(Contagem).filter(Contagem.id == payload.contagem_id).first()
+        if contagem is None:
+            raise HTTPException(status_code=404, detail="Contagem não encontrada")
+        if contagem.status != "finalizada":
+            raise HTTPException(status_code=400, detail="A contagem precisa estar finalizada")
+
+    today = _now_recife().date()
+    horizon_days = max(1, min(30, payload.horizon_days or 7))
+    date_from = payload.date_from or today
+    date_to = payload.date_to or (date_from + timedelta(days=horizon_days - 1))
+    if date_from > date_to:
+        raise HTTPException(status_code=400, detail="Data inicial maior que data final")
+
+    usage_by_ingredient = _purchase_recent_usage_window(db, horizon_days, date_from)
+    in_transit_by_ingredient = _purchase_in_transit_map(db)
+    criticidade_run, criticidade_by_ingredient = _latest_criticidade_by_ingredient(db)
+    source = "contagem" if payload.contagem_id else ("criticidade" if criticidade_run else "manual")
+
+    rows = (
+        db.query(Ingrediente, Categoria.name.label("category_name"), EstoqueAtual.qtd.label("current_qty"))
+        .join(Categoria, Categoria.id == Ingrediente.category_id)
+        .outerjoin(EstoqueAtual, EstoqueAtual.ingrediente == Ingrediente.id)
+        .filter(Ingrediente.category_id != PRODUCTION_CATEGORY_ID)
+        .order_by(Categoria.name.asc(), Ingrediente.name.asc())
+        .all()
+    )
+
+    plan = PurchasePlan(
+        status="rascunho",
+        source=source,
+        horizon_days=horizon_days,
+        date_from=date_from,
+        date_to=date_to,
+        contagem_id=payload.contagem_id,
+    )
+    db.add(plan)
+
+    quote_totals: dict[str, dict] = {}
+    for ingredient, category_name, current_qty_raw in rows:
+        current_qty = _as_float(current_qty_raw)
+        recent_usage_qty = max(0.0, _as_float(usage_by_ingredient.get(ingredient.id)))
+        avg_daily_usage = round(recent_usage_qty / horizon_days, 4) if horizon_days > 0 else 0.0
+        forecast_qty = round(recent_usage_qty, 4)
+        in_transit_qty = _as_float(in_transit_by_ingredient.get(ingredient.id))
+        stock_position = current_qty + in_transit_qty
+        criticality_item = criticidade_by_ingredient.get(ingredient.id)
+        criticality = _purchase_criticality_label(criticality_item, stock_position, forecast_qty)
+        recommended_qty = max(0.0, forecast_qty)
+        recommended_qty = round(recommended_qty, 2)
+        if recommended_qty <= 0 and not _purchase_status_is_critical(criticality):
+            continue
+
+        coverage_before = (
+            stock_position / avg_daily_usage
+            if avg_daily_usage > 0
+            else (90.0 if stock_position > 0 else 0.0)
+        )
+        supplier_rows = (
+            db.query(
+                FornecedorIngrediente,
+                Fornecedor.name.label("supplier_name"),
+                Fornecedor.email.label("supplier_email"),
+                Fornecedor.avg_delivery_time,
+            )
+            .join(Fornecedor, Fornecedor.id == FornecedorIngrediente.supplier_id)
+            .filter(FornecedorIngrediente.ingredient_id == ingredient.id)
+            .order_by(Fornecedor.name.asc())
+            .all()
+        )
+        option_payloads: list[dict] = []
+        for supplier_option, supplier_name, supplier_email, avg_delivery_time in supplier_rows:
+            delivery_days = int(avg_delivery_time or 0)
+            effective_price, _ = _effective_unit_price(
+                supplier_option.price,
+                supplier_option.discount_percent,
+                supplier_option.min_to_discount,
+                recommended_qty,
+            )
+            delay_risk = 0.0
+            if avg_daily_usage > 0 and coverage_before < delivery_days:
+                delay_risk = min(1.0, (delivery_days - coverage_before) / max(1, delivery_days))
+            score = _purchase_option_score(
+                effective_price,
+                delivery_days,
+                delay_risk,
+                supplier_option.discount_percent,
+            )
+            option_payloads.append(
+                {
+                    "supplier_id": supplier_option.supplier_id,
+                    "supplier_name": supplier_name,
+                    "email": supplier_email,
+                    "unit_price": _as_float(supplier_option.price),
+                    "discount_percent": _as_float(supplier_option.discount_percent),
+                    "min_to_discount": _as_float(supplier_option.min_to_discount),
+                    "effective_unit_price": effective_price,
+                    "delivery_time_days": delivery_days,
+                    "delay_risk": round(delay_risk, 4),
+                    "score": score,
+                }
+            )
+        option_payloads.sort(key=lambda option: (option["score"], option["supplier_name"]))
+        selected = option_payloads[0] if option_payloads else None
+        selected_unit_price = _as_float(selected["effective_unit_price"]) if selected else 0.0
+        coverage_after = (
+            (stock_position + recommended_qty) / avg_daily_usage
+            if avg_daily_usage > 0
+            else (90.0 if stock_position + recommended_qty > 0 else 0.0)
+        )
+        justification = (
+            f"Sugestao baseada no consumo dos {horizon_days} dias anteriores: "
+            f"{forecast_qty:.2f} {ingredient.unit}. "
+            f"Esse total estima a necessidade dos proximos {horizon_days} dias; "
+            f"estoque atual + transito em {stock_position:.2f} {ingredient.unit}."
+        )
+        item = PurchasePlanItem(
+            ingredient_id=ingredient.id,
+            ingredient_name=ingredient.name,
+            category=category_name,
+            unit=ingredient.unit,
+            current_qty=round(current_qty, 4),
+            avg_daily_usage=round(avg_daily_usage, 4),
+            forecast_qty=forecast_qty,
+            in_transit_qty=round(in_transit_qty, 4),
+            recommended_qty=recommended_qty,
+            approved_qty=recommended_qty,
+            selected_supplier_id=selected["supplier_id"] if selected else None,
+            selected_supplier_name=selected["supplier_name"] if selected else None,
+            estimated_unit_price=selected_unit_price,
+            estimated_total=round(selected_unit_price * recommended_qty, 2),
+            coverage_days=round(min(coverage_after, 999.0), 2),
+            criticality=criticality,
+            justification=justification,
+        )
+        plan.items.append(item)
+        for index, option in enumerate(option_payloads):
+            supplier_option = PurchasePlanSupplierOption(
+                supplier_id=option["supplier_id"],
+                supplier_name=option["supplier_name"],
+                unit_price=option["unit_price"],
+                discount_percent=option["discount_percent"],
+                min_to_discount=option["min_to_discount"],
+                effective_unit_price=option["effective_unit_price"],
+                delivery_time_days=option["delivery_time_days"],
+                delay_risk=option["delay_risk"],
+                score=option["score"],
+                recommended=1 if index == 0 else 0,
+            )
+            supplier_option.reason = _purchase_option_reason(supplier_option)
+            item.options.append(supplier_option)
+        if selected:
+            quote = quote_totals.setdefault(
+                selected["supplier_id"],
+                {
+                    "supplier_name": selected["supplier_name"],
+                    "email": selected.get("email"),
+                    "total": 0.0,
+                },
+            )
+            quote["total"] += selected_unit_price * recommended_qty
+
+    for supplier_id, quote in quote_totals.items():
+        plan.quotes.append(
+            SupplierQuote(
+                supplier_id=supplier_id,
+                supplier_name=quote["supplier_name"],
+                email=quote.get("email"),
+                status="rascunho",
+                channel="email",
+                total_estimated=round(quote["total"], 2),
+            )
+        )
+    _sync_purchase_plan_quotes(db, plan)
+    _recalculate_purchase_plan(plan)
+    db.commit()
+    db.refresh(plan)
+    return plan
+
+
+def _get_purchase_plan_or_404(db: Session, plan_id: int) -> PurchasePlan:
+    plan = db.query(PurchasePlan).filter(PurchasePlan.id == plan_id).first()
+    if plan is None:
+        raise HTTPException(status_code=404, detail="Plano de compra não encontrado")
+    return plan
+
+
+def _find_item_option(item: PurchasePlanItem, supplier_id: Optional[str]) -> Optional[PurchasePlanSupplierOption]:
+    if not supplier_id:
+        return None
+    return next((option for option in item.options if option.supplier_id == supplier_id), None)
+
+
+def _purchase_simulation(plan: PurchasePlan, payload: PurchasePlanSimulationRequest) -> PurchasePlanSimulationOut:
+    overrides = {item.ingredient_id: item for item in payload.items}
+    approved_total = 0.0
+    best_total = 0.0
+    coverage_values: list[float] = []
+    rupture_risk_items = 0
+    critical_items_count = 0
+    notes: list[str] = []
+
+    for item in plan.items:
+        override = overrides.get(item.ingredient_id)
+        approved_qty = _as_float(override.approved_qty) if override else _as_float(item.approved_qty)
+        selected_option = (
+            _find_item_option(item, override.selected_supplier_id)
+            if override and override.selected_supplier_id
+            else _find_item_option(item, item.selected_supplier_id)
+        )
+        unit_price = _as_float(selected_option.effective_unit_price) if selected_option else _as_float(item.estimated_unit_price)
+        approved_total += approved_qty * unit_price
+        if item.options and approved_qty > 0:
+            best_total += min(_as_float(option.effective_unit_price) * approved_qty for option in item.options)
+        avg_usage = _as_float(item.avg_daily_usage)
+        stock_after = _as_float(item.current_qty) + _as_float(item.in_transit_qty) + approved_qty
+        coverage = stock_after / avg_usage if avg_usage > 0 else (90.0 if stock_after > 0 else 0.0)
+        if avg_usage > 0:
+            coverage_values.append(min(coverage, 90.0))
+        lead_time = int(selected_option.delivery_time_days or 0) if selected_option else 0
+        if avg_usage > 0 and coverage < lead_time:
+            rupture_risk_items += 1
+            notes.append(f"{item.ingredient_name}: cobertura ({coverage:.1f} dias) menor que prazo ({lead_time} dias).")
+        if _purchase_status_is_critical(item.criticality) or coverage < plan.horizon_days:
+            critical_items_count += 1
+
+    projected_coverage = round(sum(coverage_values) / len(coverage_values), 2) if coverage_values else 0
+    return PurchasePlanSimulationOut(
+        total_estimated=_as_float(plan.total_estimated),
+        approved_total=round(approved_total, 2),
+        projected_coverage_days=projected_coverage,
+        rupture_risk_items=rupture_risk_items,
+        critical_items_count=critical_items_count,
+        savings_potential=round(max(0.0, approved_total - best_total), 2),
+        notes=notes[:8],
+    )
+
+
+@app.post("/api/compras/planos/gerar", response_model=PurchasePlanOut)
+def generate_purchase_plan(payload: PurchasePlanGenerateRequest, db: Session = Depends(get_db)):
+    return _serialize_purchase_plan(_build_purchase_plan(payload, db))
+
+
+@app.get("/api/compras/planos/latest", response_model=Optional[PurchasePlanOut])
+def get_latest_purchase_plan(db: Session = Depends(get_db)):
+    plan = db.query(PurchasePlan).order_by(PurchasePlan.created_at.desc(), PurchasePlan.id.desc()).first()
+    return _serialize_purchase_plan(plan) if plan else None
+
+
+@app.get("/api/compras/planos/{plan_id}", response_model=PurchasePlanOut)
+def get_purchase_plan(plan_id: int, db: Session = Depends(get_db)):
+    return _serialize_purchase_plan(_get_purchase_plan_or_404(db, plan_id))
+
+
+@app.patch("/api/compras/planos/{plan_id}/items/{ingredient_id}", response_model=PurchasePlanOut)
+def update_purchase_plan_item(
+    plan_id: int,
+    ingredient_id: str,
+    payload: PurchasePlanItemUpdateRequest,
+    db: Session = Depends(get_db),
+):
+    plan = _get_purchase_plan_or_404(db, plan_id)
+    item = next((plan_item for plan_item in plan.items if plan_item.ingredient_id == ingredient_id), None)
+    if item is None:
+        raise HTTPException(status_code=404, detail="Item do plano não encontrado")
+    if payload.approved_qty is not None:
+        item.approved_qty = round(payload.approved_qty, 4)
+    if payload.selected_supplier_id is not None:
+        option = _find_item_option(item, payload.selected_supplier_id)
+        if option is None:
+            raise HTTPException(status_code=400, detail="Fornecedor inválido para o item")
+        for item_option in item.options:
+            item_option.recommended = 1 if item_option.supplier_id == option.supplier_id else 0
+        item.selected_supplier_id = option.supplier_id
+        item.selected_supplier_name = option.supplier_name
+        item.estimated_unit_price = option.effective_unit_price
+    if payload.note is not None:
+        item.note = payload.note
+    item.estimated_total = round(_as_float(item.approved_qty) * _as_float(item.estimated_unit_price), 2)
+    avg_usage = _as_float(item.avg_daily_usage)
+    stock_after = _as_float(item.current_qty) + _as_float(item.in_transit_qty) + _as_float(item.approved_qty)
+    item.coverage_days = round(min(stock_after / avg_usage if avg_usage > 0 else 90.0, 999.0), 2)
+    plan.status = "em_revisao" if plan.status == "rascunho" else plan.status
+    _sync_purchase_plan_quotes(db, plan)
+    _recalculate_purchase_plan(plan)
+    db.commit()
+    db.refresh(plan)
+    return _serialize_purchase_plan(plan)
+
+
+@app.post("/api/compras/planos/{plan_id}/simular", response_model=PurchasePlanSimulationOut)
+def simulate_purchase_plan(
+    plan_id: int,
+    payload: PurchasePlanSimulationRequest,
+    db: Session = Depends(get_db),
+):
+    return _purchase_simulation(_get_purchase_plan_or_404(db, plan_id), payload)
+
+
+def _purchase_plan_email_groups(plan: PurchasePlan) -> dict[str, dict]:
+    groups: dict[str, dict] = {}
+    for item in plan.items:
+        if _as_float(item.approved_qty) <= 0 or not item.selected_supplier_id:
+            continue
+        option = _find_item_option(item, item.selected_supplier_id)
+        if option is None:
+            continue
+        quote = next((quote for quote in plan.quotes if quote.supplier_id == option.supplier_id), None)
+        expected_date = _now_recife().date() + timedelta(days=int(option.delivery_time_days or 0))
+        group = groups.setdefault(
+            option.supplier_id,
+            {
+                "supplier_name": option.supplier_name,
+                "email": quote.email if quote else None,
+                "expected_date": expected_date,
+                "items": [],
+            },
+        )
+        group["expected_date"] = max(group["expected_date"], expected_date)
+        group["items"].append(
+            OrderEmailItem(
+                name=f"Plano #{plan.id} - {item.ingredient_name}",
+                qty=_as_float(item.approved_qty),
+                unit=item.unit or "",
+                unit_price=_as_float(option.effective_unit_price),
+                total_value=round(_as_float(option.effective_unit_price) * _as_float(item.approved_qty), 2),
+            )
+        )
+    return groups
+
+
+@app.post("/api/compras/planos/{plan_id}/cotacoes/enviar", response_model=PurchasePlanOut)
+def send_purchase_plan_quotes(plan_id: int, db: Session = Depends(get_db)):
+    plan = _get_purchase_plan_or_404(db, plan_id)
+    _sync_purchase_plan_quotes(db, plan)
+    email_results = _send_pedido_emails(_purchase_plan_email_groups(plan), _now_recife().date())
+    by_supplier = {result.supplier_id: result for result in email_results}
+    sent_any = False
+    for quote in plan.quotes:
+        result = by_supplier.get(quote.supplier_id)
+        if result is None:
+            continue
+        quote.status = "enviada" if result.status == "sent" else result.status
+        quote.notes = result.message
+        if result.status == "sent":
+            quote.sent_at = _now_recife()
+            sent_any = True
+    if sent_any:
+        plan.status = "cotado"
+    _recalculate_purchase_plan(plan)
+    db.commit()
+    db.refresh(plan)
+    return _serialize_purchase_plan(plan)
+
+
+@app.post("/api/compras/planos/{plan_id}/aprovar", response_model=PedidoCreateResponse)
+def approve_purchase_plan(plan_id: int, db: Session = Depends(get_db)):
+    plan = _get_purchase_plan_or_404(db, plan_id)
+    _sync_purchase_plan_quotes(db, plan)
+    items = [
+        PedidoCreateItem(supplier_id=item.selected_supplier_id, ingredient_id=item.ingredient_id, qty=_as_float(item.approved_qty))
+        for item in plan.items
+        if item.selected_supplier_id and _as_float(item.approved_qty) > 0
+    ]
+    if not items:
+        raise HTTPException(status_code=400, detail="Plano sem itens aprovados")
+    response = create_pedidos(PedidoCreateRequest(items=items), db)
+    plan.status = "aprovado"
+    now = _now_recife()
+    selected_suppliers = {item.supplier_id for item in items}
+    for quote in plan.quotes:
+        if quote.supplier_id in selected_suppliers:
+            quote.status = "aprovada"
+            quote.approved_at = now
+    _recalculate_purchase_plan(plan)
+    db.commit()
+    return response
+
+
+@app.get("/api/export/compras/planos/{plan_id}")
+def export_purchase_plan(
+    plan_id: int,
+    format: str = Query(default="excel"),
+    theme: Optional[str] = Query(default=None),
+    db: Session = Depends(get_db),
+):
+    plan = _get_purchase_plan_or_404(db, plan_id)
+    rows = [
+        {
+            "plano_id": plan.id,
+            "status": plan.status,
+            "origem": plan.source,
+            "ingrediente_id": item.ingredient_id,
+            "ingrediente": item.ingredient_name,
+            "categoria": item.category,
+            "unidade": item.unit,
+            "estoque_atual": _as_float(item.current_qty),
+            "consumo_dia": _as_float(item.avg_daily_usage),
+            "previsao_consumo": _as_float(item.forecast_qty),
+            "em_transito": _as_float(item.in_transit_qty),
+            "qtd_recomendada": _as_float(item.recommended_qty),
+            "qtd_aprovada": _as_float(item.approved_qty),
+            "fornecedor": item.selected_supplier_name,
+            "preco_unitario": _as_float(item.estimated_unit_price),
+            "total": _as_float(item.estimated_total),
+            "cobertura_dias": _as_float(item.coverage_days),
+            "criticidade": item.criticality,
+            "justificativa": item.justification,
+        }
+        for item in plan.items
+    ]
+    return _export_response(
+        rows,
+        f"plano_compra_{plan.id}",
+        format,
+        f"Plano de compra Maestro #{plan.id}",
+        [
+            "plano_id",
+            "status",
+            "origem",
+            "ingrediente_id",
+            "ingrediente",
+            "categoria",
+            "unidade",
+            "estoque_atual",
+            "consumo_dia",
+            "previsao_consumo",
+            "em_transito",
+            "qtd_recomendada",
+            "qtd_aprovada",
+            "fornecedor",
+            "preco_unitario",
+            "total",
+            "cobertura_dias",
+            "criticidade",
+            "justificativa",
+        ],
+        theme_id=theme,
+    )
+
+
 @app.post("/api/pedidos/recomendacao", response_model=PedidoRecommendationResponse)
 def recommend_pedidos(
     payload: PedidoRecommendationRequest,
@@ -4479,6 +5525,7 @@ def get_pedidos(
 @app.get("/api/export/pedidos")
 def export_pedidos(
     format: str = Query(default="csv"),
+    theme: Optional[str] = Query(default=None),
     date_from: date = Query(...),
     date_to: date = Query(...),
     db: Session = Depends(get_db),
@@ -4545,6 +5592,7 @@ def export_pedidos(
             "status",
             "data_prevista",
         ],
+        theme_id=theme,
     )
 
 

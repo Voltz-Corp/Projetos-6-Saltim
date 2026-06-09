@@ -184,7 +184,15 @@ echo "Starting backend on http://localhost:$BACKEND_PORT"
     SMTP_FROM_EMAIL="$SMTP_FROM_EMAIL" \
     SMTP_FROM_NAME="$SMTP_FROM_NAME" \
     SMTP_USE_TLS="$SMTP_USE_TLS" \
-    "$BACKEND_PYTHON" -m uvicorn app.main:app --reload --port "$BACKEND_PORT"
+    "$BACKEND_PYTHON" -m uvicorn app.main:app \
+      --reload \
+      --reload-dir app \
+      --reload-dir agent \
+      --reload-dir db \
+      --reload-exclude ".venv/*" \
+      --reload-exclude "__pycache__/*" \
+      --reload-exclude "*.pyc" \
+      --port "$BACKEND_PORT"
 ) &
 BACKEND_PID=$!
 

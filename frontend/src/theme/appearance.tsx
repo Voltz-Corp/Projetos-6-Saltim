@@ -8,12 +8,19 @@ import {
 } from 'react'
 
 export type AppearanceMode = 'light' | 'dark'
+export type ThemeCategory = 'classic' | 'world-cup'
+export type ThemePreviewPattern = 'bands' | 'checker' | 'cross' | 'stripes'
 
 export interface ThemeOption {
   id: string
   name: string
   mode: AppearanceMode
+  category: ThemeCategory
   description: string
+  preview?: {
+    colors: string[]
+    pattern?: ThemePreviewPattern
+  }
   colors: {
     surface: string
     card: string
@@ -23,11 +30,12 @@ export interface ThemeOption {
   }
 }
 
-export const THEME_OPTIONS: ThemeOption[] = [
+export const CLASSIC_THEME_OPTIONS: ThemeOption[] = [
   {
     id: 'maestro-light',
     name: 'Maestro Light',
     mode: 'light',
+    category: 'classic',
     description: 'Identidade Maestro clara',
     colors: {
       surface: '#F6F5FB',
@@ -41,6 +49,7 @@ export const THEME_OPTIONS: ThemeOption[] = [
     id: 'maestro-dark',
     name: 'Maestro Dark',
     mode: 'dark',
+    category: 'classic',
     description: 'Identidade Maestro escura',
     colors: {
       surface: '#141127',
@@ -54,6 +63,7 @@ export const THEME_OPTIONS: ThemeOption[] = [
     id: 'saltim-light',
     name: 'Saltim Light',
     mode: 'light',
+    category: 'classic',
     description: 'Padrao Saltim claro',
     colors: {
       surface: '#F5F4F1',
@@ -67,6 +77,7 @@ export const THEME_OPTIONS: ThemeOption[] = [
     id: 'saltim-dark',
     name: 'Saltim Dark',
     mode: 'dark',
+    category: 'classic',
     description: 'Saltim em modo escuro',
     colors: {
       surface: '#11100F',
@@ -80,6 +91,7 @@ export const THEME_OPTIONS: ThemeOption[] = [
     id: 'mossy-forest-light-green',
     name: 'Mossy Forest Light Green',
     mode: 'light',
+    category: 'classic',
     description: 'Verde claro natural e suave',
     colors: {
       surface: '#F1F5E0',
@@ -93,6 +105,7 @@ export const THEME_OPTIONS: ThemeOption[] = [
     id: 'anime-trinity-one-piece-dark',
     name: 'Anime Trinity One Piece',
     mode: 'dark',
+    category: 'classic',
     description: 'Marinho escuro com vermelho, azul e dourado',
     colors: {
       surface: '#0F172A',
@@ -106,6 +119,7 @@ export const THEME_OPTIONS: ThemeOption[] = [
     id: 'dracula',
     name: 'Dracula',
     mode: 'dark',
+    category: 'classic',
     description: 'Roxo, rosa e contraste alto',
     colors: {
       surface: '#282A36',
@@ -119,6 +133,7 @@ export const THEME_OPTIONS: ThemeOption[] = [
     id: 'nord',
     name: 'Nord',
     mode: 'dark',
+    category: 'classic',
     description: 'Azuis frios e suaves',
     colors: {
       surface: '#2E3440',
@@ -132,6 +147,7 @@ export const THEME_OPTIONS: ThemeOption[] = [
     id: 'solarized-dark',
     name: 'Solarized Dark',
     mode: 'dark',
+    category: 'classic',
     description: 'Base escura solarizada',
     colors: {
       surface: '#002B36',
@@ -145,6 +161,7 @@ export const THEME_OPTIONS: ThemeOption[] = [
     id: 'solarized-light',
     name: 'Solarized Light',
     mode: 'light',
+    category: 'classic',
     description: 'Base clara solarizada',
     colors: {
       surface: '#FDF6E3',
@@ -158,6 +175,7 @@ export const THEME_OPTIONS: ThemeOption[] = [
     id: 'monokai',
     name: 'Monokai',
     mode: 'dark',
+    category: 'classic',
     description: 'Editor classico vibrante',
     colors: {
       surface: '#272822',
@@ -171,6 +189,7 @@ export const THEME_OPTIONS: ThemeOption[] = [
     id: 'github-dark',
     name: 'GitHub Dark',
     mode: 'dark',
+    category: 'classic',
     description: 'Neutro escuro e azul',
     colors: {
       surface: '#0D1117',
@@ -184,6 +203,7 @@ export const THEME_OPTIONS: ThemeOption[] = [
     id: 'cyberpunk',
     name: 'Cyberpunk',
     mode: 'dark',
+    category: 'classic',
     description: 'Neon amarelo e magenta',
     colors: {
       surface: '#09090F',
@@ -197,6 +217,7 @@ export const THEME_OPTIONS: ThemeOption[] = [
     id: 'forest',
     name: 'Forest',
     mode: 'dark',
+    category: 'classic',
     description: 'Verdes profundos',
     colors: {
       surface: '#0F1F17',
@@ -210,6 +231,7 @@ export const THEME_OPTIONS: ThemeOption[] = [
     id: 'ocean',
     name: 'Ocean',
     mode: 'dark',
+    category: 'classic',
     description: 'Azul profundo e ciano',
     colors: {
       surface: '#071A2C',
@@ -219,6 +241,194 @@ export const THEME_OPTIONS: ThemeOption[] = [
       text: '#E0F2FE',
     },
   },
+]
+
+export const WORLD_CUP_THEME_OPTIONS: ThemeOption[] = [
+  {
+    id: 'world-cup-france',
+    name: 'Franca',
+    mode: 'dark',
+    category: 'world-cup',
+    description: 'Azul tradicional com branco e vermelho',
+    preview: { colors: ['#172A68', '#FFFFFF', '#EF3340'], pattern: 'bands' },
+    colors: {
+      surface: '#0C1633',
+      card: '#142350',
+      primary: '#1F3C88',
+      secondary: '#EF3340',
+      text: '#F8FAFC',
+    },
+  },
+  {
+    id: 'world-cup-spain',
+    name: 'Espanha',
+    mode: 'light',
+    category: 'world-cup',
+    description: 'Vermelho vibrante com dourado intenso',
+    preview: { colors: ['#C60B1E', '#FFC400', '#8A0714'], pattern: 'bands' },
+    colors: {
+      surface: '#FFF4D6',
+      card: '#FFFFFF',
+      primary: '#C60B1E',
+      secondary: '#FFC400',
+      text: '#2A1010',
+    },
+  },
+  {
+    id: 'world-cup-argentina',
+    name: 'Argentina',
+    mode: 'light',
+    category: 'world-cup',
+    description: 'Listras celestes e brancas com dourado',
+    preview: { colors: ['#75AADB', '#FFFFFF', '#F6B40E'], pattern: 'stripes' },
+    colors: {
+      surface: '#E9F5FF',
+      card: '#FFFFFF',
+      primary: '#5BA7D9',
+      secondary: '#D6A21F',
+      text: '#14213D',
+    },
+  },
+  {
+    id: 'world-cup-england',
+    name: 'Inglaterra',
+    mode: 'light',
+    category: 'world-cup',
+    description: 'Base branca classica com vermelho e marinho',
+    preview: { colors: ['#FFFFFF', '#CF142B', '#1D2A57'], pattern: 'cross' },
+    colors: {
+      surface: '#F7F8FB',
+      card: '#FFFFFF',
+      primary: '#CF142B',
+      secondary: '#1D2A57',
+      text: '#111827',
+    },
+  },
+  {
+    id: 'world-cup-brazil',
+    name: 'Brasil',
+    mode: 'light',
+    category: 'world-cup',
+    description: 'Amarelo canarinho com verde e azul',
+    preview: { colors: ['#FFDF00', '#009C3B', '#002776'], pattern: 'bands' },
+    colors: {
+      surface: '#FFF8CC',
+      card: '#FFFFFF',
+      primary: '#F7D117',
+      secondary: '#009C3B',
+      text: '#132A13',
+    },
+  },
+  {
+    id: 'world-cup-portugal',
+    name: 'Portugal',
+    mode: 'dark',
+    category: 'world-cup',
+    description: 'Vermelho escuro com verde e dourado',
+    preview: { colors: ['#7A0019', '#006A44', '#D4AF37'], pattern: 'bands' },
+    colors: {
+      surface: '#21070D',
+      card: '#371017',
+      primary: '#9B1028',
+      secondary: '#00835C',
+      text: '#FFF7E6',
+    },
+  },
+  {
+    id: 'world-cup-germany',
+    name: 'Alemanha',
+    mode: 'light',
+    category: 'world-cup',
+    description: 'Branco sobrio com preto, vermelho e dourado',
+    preview: { colors: ['#FFFFFF', '#111111', '#DD0000', '#FFCE00'], pattern: 'bands' },
+    colors: {
+      surface: '#F4F4F2',
+      card: '#FFFFFF',
+      primary: '#111111',
+      secondary: '#D4A000',
+      text: '#18181B',
+    },
+  },
+  {
+    id: 'world-cup-netherlands',
+    name: 'Holanda',
+    mode: 'light',
+    category: 'world-cup',
+    description: 'Laranja forte com marinho e branco',
+    preview: { colors: ['#FF6F00', '#102B5C', '#FFFFFF'], pattern: 'bands' },
+    colors: {
+      surface: '#FFF0E4',
+      card: '#FFFFFF',
+      primary: '#F36C21',
+      secondary: '#102B5C',
+      text: '#23150D',
+    },
+  },
+  {
+    id: 'world-cup-belgium',
+    name: 'Belgica',
+    mode: 'dark',
+    category: 'world-cup',
+    description: 'Vermelho belga com preto e dourado',
+    preview: { colors: ['#E30613', '#111111', '#FFD90C'], pattern: 'bands' },
+    colors: {
+      surface: '#1C0708',
+      card: '#2D0D10',
+      primary: '#E30613',
+      secondary: '#FFD90C',
+      text: '#FFF5F5',
+    },
+  },
+  {
+    id: 'world-cup-uruguay',
+    name: 'Uruguai',
+    mode: 'light',
+    category: 'world-cup',
+    description: 'Celeste tradicional com branco e dourado',
+    preview: { colors: ['#5CBFEB', '#FFFFFF', '#D8A31A'], pattern: 'stripes' },
+    colors: {
+      surface: '#EAF8FF',
+      card: '#FFFFFF',
+      primary: '#4BB6E8',
+      secondary: '#D8A31A',
+      text: '#123047',
+    },
+  },
+  {
+    id: 'world-cup-colombia',
+    name: 'Colombia',
+    mode: 'light',
+    category: 'world-cup',
+    description: 'Amarelo vibrante com azul e vermelho',
+    preview: { colors: ['#FCD116', '#003893', '#CE1126'], pattern: 'bands' },
+    colors: {
+      surface: '#FFF7C2',
+      card: '#FFFFFF',
+      primary: '#F7C600',
+      secondary: '#003893',
+      text: '#1F1B0A',
+    },
+  },
+  {
+    id: 'world-cup-croatia',
+    name: 'Croacia',
+    mode: 'light',
+    category: 'world-cup',
+    description: 'Xadrez vermelho e branco da selecao croata',
+    preview: { colors: ['#F7F7F7', '#D20A11', '#171796'], pattern: 'checker' },
+    colors: {
+      surface: '#FFF1F1',
+      card: '#FFFFFF',
+      primary: '#D20A11',
+      secondary: '#171796',
+      text: '#1F1720',
+    },
+  },
+]
+
+export const THEME_OPTIONS: ThemeOption[] = [
+  ...CLASSIC_THEME_OPTIONS,
+  ...WORLD_CUP_THEME_OPTIONS,
 ]
 
 const STORAGE_KEY = 'saltim-appearance-theme'
