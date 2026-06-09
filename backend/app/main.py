@@ -1000,8 +1000,13 @@ def run_criticidade_report(response: Response, db: Session = Depends(get_db)):
     _upsert_job_status(db, reference_date, "running")
     project_root = Path(__file__).resolve().parents[2]
     script_path = project_root / "ml" / "jobs" / "generate_criticality_report.py"
-    python_path = project_root / ".venv" / "bin" / "python"
-    python_executable = str(python_path) if python_path.exists() else sys.executable
+    python_candidates = (
+        project_root / ".venv" / "bin" / "python",
+        project_root / ".venv" / "Scripts" / "python.exe",
+        project_root / "backend" / ".venv" / "bin" / "python",
+        project_root / "backend" / ".venv" / "Scripts" / "python.exe",
+    )
+    python_executable = str(next((path for path in python_candidates if path.exists()), sys.executable))
     env = os.environ.copy()
     env.setdefault("DATABASE_URL", "postgresql+psycopg://saltim:saltim123@localhost:55432/saltim_db")
     env.setdefault("MLFLOW_TRACKING_URI", "http://localhost:5000")
@@ -4497,11 +4502,12 @@ def _send_pedido_emails(
 # ---------------------------------------------------------------------------
 
 
-def _purchase_usage_window(db: Session, days: int) -> dict[str, float]:
-    max_sale_date = db.query(func.max(func.date(Venda.date_time))).scalar()
-    if max_sale_date is None:
+def _purchase_recent_usage_window(db: Session, days: int, reference_date: date) -> dict[str, float]:
+    horizon_days = max(1, days)
+    end_date = reference_date - timedelta(days=1)
+    start_date = reference_date - timedelta(days=horizon_days)
+    if start_date > end_date:
         return {}
-    start_date = max_sale_date - timedelta(days=max(1, days) - 1)
     rows = (
         db.query(
             ReceitaIngrediente.ingredient_id,
@@ -4512,37 +4518,15 @@ def _purchase_usage_window(db: Session, days: int) -> dict[str, float]:
         .join(ReceitaIngrediente, ReceitaIngrediente.recipe_id == Receita.id)
         .join(Ingrediente, Ingrediente.id == ReceitaIngrediente.ingredient_id)
         .filter(func.date(Venda.date_time) >= start_date)
-        .filter(func.date(Venda.date_time) <= max_sale_date)
+        .filter(func.date(Venda.date_time) <= end_date)
         .filter(Ingrediente.category_id != PRODUCTION_CATEGORY_ID)
         .group_by(ReceitaIngrediente.ingredient_id)
         .all()
     )
     return {
-        ingredient_id: _as_float(usage_qty) / max(1, days)
+        ingredient_id: max(0.0, _as_float(usage_qty))
         for ingredient_id, usage_qty in rows
     }
-
-
-def _purchase_usage_map(db: Session) -> dict[str, float]:
-    windows = [
-        (7, _purchase_usage_window(db, 7)),
-        (14, _purchase_usage_window(db, 14)),
-        (28, _purchase_usage_window(db, 28)),
-    ]
-    ingredient_ids = set().union(*(values.keys() for _, values in windows))
-    usage: dict[str, float] = {}
-    for ingredient_id in ingredient_ids:
-        weighted_total = 0.0
-        weight_sum = 0.0
-        for days, values in windows:
-            value = values.get(ingredient_id)
-            if value is None:
-                continue
-            weight = {7: 0.5, 14: 0.3, 28: 0.2}.get(days, 0.1)
-            weighted_total += value * weight
-            weight_sum += weight
-        usage[ingredient_id] = weighted_total / weight_sum if weight_sum else 0.0
-    return usage
 
 
 def _purchase_in_transit_map(db: Session) -> dict[str, float]:
@@ -4774,11 +4758,11 @@ def _build_purchase_plan(payload: PurchasePlanGenerateRequest, db: Session) -> P
     today = _now_recife().date()
     horizon_days = max(1, min(30, payload.horizon_days or 7))
     date_from = payload.date_from or today
-    date_to = payload.date_to or (date_from + timedelta(days=horizon_days))
+    date_to = payload.date_to or (date_from + timedelta(days=horizon_days - 1))
     if date_from > date_to:
         raise HTTPException(status_code=400, detail="Data inicial maior que data final")
 
-    usage_by_ingredient = _purchase_usage_map(db)
+    usage_by_ingredient = _purchase_recent_usage_window(db, horizon_days, date_from)
     in_transit_by_ingredient = _purchase_in_transit_map(db)
     criticidade_run, criticidade_by_ingredient = _latest_criticidade_by_ingredient(db)
     source = "contagem" if payload.contagem_id else ("criticidade" if criticidade_run else "manual")
@@ -4805,21 +4789,14 @@ def _build_purchase_plan(payload: PurchasePlanGenerateRequest, db: Session) -> P
     quote_totals: dict[str, dict] = {}
     for ingredient, category_name, current_qty_raw in rows:
         current_qty = _as_float(current_qty_raw)
-        avg_daily_usage = _as_float(usage_by_ingredient.get(ingredient.id))
-        forecast_qty = round(avg_daily_usage * horizon_days, 4)
+        recent_usage_qty = max(0.0, _as_float(usage_by_ingredient.get(ingredient.id)))
+        avg_daily_usage = round(recent_usage_qty / horizon_days, 4) if horizon_days > 0 else 0.0
+        forecast_qty = round(recent_usage_qty, 4)
         in_transit_qty = _as_float(in_transit_by_ingredient.get(ingredient.id))
         stock_position = current_qty + in_transit_qty
         criticality_item = criticidade_by_ingredient.get(ingredient.id)
         criticality = _purchase_criticality_label(criticality_item, stock_position, forecast_qty)
-        ml_target = 0.0
-        if criticality_item is not None:
-            ml_target = max(
-                _as_float(criticality_item.baseline_threshold),
-                _as_float(getattr(criticality_item, "score_alerta_compra", 0.0)) * 0,
-            )
-        recommended_qty = max(0.0, forecast_qty - stock_position, ml_target - stock_position)
-        if _purchase_status_is_critical(criticality) and recommended_qty <= 0 and avg_daily_usage > 0:
-            recommended_qty = max(avg_daily_usage * 2, forecast_qty * 0.25)
+        recommended_qty = max(0.0, forecast_qty)
         recommended_qty = round(recommended_qty, 2)
         if recommended_qty <= 0 and not _purchase_status_is_critical(criticality):
             continue
@@ -4882,9 +4859,10 @@ def _build_purchase_plan(payload: PurchasePlanGenerateRequest, db: Session) -> P
             else (90.0 if stock_position + recommended_qty > 0 else 0.0)
         )
         justification = (
-            f"Consumo previsto de {forecast_qty:.2f} {ingredient.unit} em {horizon_days} dias; "
-            f"estoque atual + trânsito em {stock_position:.2f} {ingredient.unit}. "
-            f"Compra sugerida cobre cerca de {min(coverage_after, 90):.1f} dias."
+            f"Sugestao baseada no consumo dos {horizon_days} dias anteriores: "
+            f"{forecast_qty:.2f} {ingredient.unit}. "
+            f"Esse total estima a necessidade dos proximos {horizon_days} dias; "
+            f"estoque atual + transito em {stock_position:.2f} {ingredient.unit}."
         )
         item = PurchasePlanItem(
             ingredient_id=ingredient.id,

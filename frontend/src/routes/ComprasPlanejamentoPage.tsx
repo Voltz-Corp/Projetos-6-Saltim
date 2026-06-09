@@ -46,8 +46,8 @@ const fmt = {
 
 const horizonOptions = [
   { value: '7', label: '7 dias' },
-  { value: '14', label: '14 dias' },
-  { value: '28', label: '28 dias' },
+  { value: '15', label: '15 dias' },
+  { value: '30', label: '30 dias' },
 ]
 
 const exportOptions: Array<{ value: DashboardExportFormat; label: string }> = [
@@ -65,9 +65,11 @@ function criticalTone(label: string) {
 function PlanEmptyState({
   onGenerate,
   pending,
+  horizonDays,
 }: {
   onGenerate: () => void
   pending: boolean
+  horizonDays: number
 }) {
   return (
     <section className="rounded-xl border border-stone-200 bg-white p-8">
@@ -78,8 +80,9 @@ function PlanEmptyState({
         <div className="min-w-0">
           <h2 className="text-lg font-black text-stone-900">Plano de compra Maestro</h2>
           <p className="mt-1 text-sm font-medium leading-relaxed text-stone-500">
-            Gere um plano automatico a partir do estoque atual, consumo recente, pedidos em transito,
-            fornecedores e criticidade. A aprovacao final continua nas suas maos.
+            Gere uma sugestao simples usando o consumo dos ultimos {horizonDays} dias
+            para estimar a necessidade dos proximos {horizonDays} dias. A aprovacao final
+            continua nas suas maos.
           </p>
           <button
             type="button"
@@ -178,7 +181,9 @@ function PurchasePlanTable({
       <div className="border-b border-stone-200 p-5">
         <h2 className="text-base font-black text-stone-900">Itens recomendados</h2>
         <p className="mt-1 text-sm font-semibold text-stone-500">
-          Ajuste quantidade e fornecedor antes de cotar ou aprovar.
+          Esta sugestao considera o consumo dos ultimos {plan.horizon_days} dias para estimar
+          a necessidade dos proximos {plan.horizon_days} dias. Ajuste quantidade e fornecedor
+          antes de cotar ou aprovar.
         </p>
       </div>
       <div className="overflow-x-auto">
@@ -188,7 +193,7 @@ function PurchasePlanTable({
               <th className="px-5 py-3">Ingrediente</th>
               <th className="px-4 py-3">Estoque</th>
               <th className="px-4 py-3">Transito</th>
-              <th className="px-4 py-3">Sugestao</th>
+              <th className="px-4 py-3">Sugestao recente</th>
               <th className="px-4 py-3">Aprovado</th>
               <th className="px-4 py-3">Fornecedor</th>
               <th className="px-4 py-3">Total</th>
@@ -388,6 +393,7 @@ export function ComprasPlanejamentoPage() {
   }
 
   const isBusy = generate.isPending || sendQuotes.isPending || approve.isPending
+  const horizonDays = Number(horizon)
 
   if (latest.isLoading) {
     return <main className="p-8 text-sm font-semibold text-stone-500">Carregando plano de compra...</main>
@@ -402,7 +408,7 @@ export function ComprasPlanejamentoPage() {
           <p className="mt-1 text-sm font-semibold text-stone-500">
             {plan
               ? `Plano #${plan.id} · ${fmt.date(plan.date_from)} a ${fmt.date(plan.date_to)} · ${plan.status}`
-              : 'Da contagem finalizada aos pedidos em transito, sem conta de guardanapo.'}
+              : `Sugestao baseada no consumo dos ultimos ${horizonDays} dias para estimar os proximos ${horizonDays} dias.`}
           </p>
         </div>
 
@@ -446,9 +452,19 @@ export function ComprasPlanejamentoPage() {
       )}
 
       {!plan ? (
-        <PlanEmptyState onGenerate={handleGenerate} pending={generate.isPending} />
+        <PlanEmptyState
+          onGenerate={handleGenerate}
+          pending={generate.isPending}
+          horizonDays={horizonDays}
+        />
       ) : (
         <div className="space-y-6">
+          <section className="rounded-xl border border-brand-100 bg-brand-50 px-5 py-4 text-sm font-semibold leading-relaxed text-stone-700">
+            Esta sugestao considera o consumo dos ultimos {plan.horizon_days} dias para estimar
+            a necessidade dos proximos {plan.horizon_days} dias. Itens sem consumo nesse periodo
+            nao recebem compra artificial.
+          </section>
+
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
             <KpiCard icon={ShoppingCart} label="Custo estimado" value={fmt.currency(plan.approved_total || plan.total_estimated)} detail={`${plan.items.length} itens no plano`} />
             <KpiCard icon={ShieldAlert} label="Itens criticos" value={String(plan.critical_items_count)} detail="Prioridade de revisao" tone="red" />
