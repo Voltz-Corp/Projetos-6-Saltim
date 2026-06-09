@@ -54,12 +54,14 @@ from .smtp_mailer import (
 )
 from .models import (
     Categoria,
+    Cliente,
     Contagem,
     ContagemLog,
     CriticalityReportItem,
     CriticalityReportRun,
     Estoque,
     EstoqueAtual,
+    EstoqueMovimento,
     FeriadoRecife,
     Fornecedor,
     FornecedorIngrediente,
@@ -75,10 +77,16 @@ from .models import (
     ResumoDiarioVenda,
     SupplierQuote,
     Venda,
+    VendaDocumentoFiscal,
+    VendaItem,
+    VendaPagamento,
+    VendaTransacao,
 )
 from .schemas import (
     AgentChatRequest,
     AgentChatResponse,
+    ClienteCreate,
+    ClienteOut,
     IngredienteOut,
     ContagemCreate,
     ContagemDetalheCategoria,
@@ -113,6 +121,16 @@ from .schemas import (
     PedidoRecommendationItem,
     PedidoRecommendationRequest,
     PedidoRecommendationResponse,
+    VendaConfirmRequest,
+    VendaCreateRequest,
+    VendaDetailOut,
+    VendaFiscalDocumentOut,
+    VendaItemOut,
+    VendaListItem,
+    VendaPagamentoCreate,
+    VendaPagamentoOut,
+    VendaPaginado,
+    VendaProdutoOut,
     PurchasePlanGenerateRequest,
     PurchasePlanItemOut,
     PurchasePlanItemUpdateRequest,
@@ -209,6 +227,7 @@ async def lifespan(app: FastAPI):
     ensure_contagem_estoque_schema()
     ensure_pedidos_schema()
     ensure_purchase_plan_schema()
+    ensure_sales_schema()
     yield
 
 
@@ -435,6 +454,122 @@ def ensure_purchase_plan_schema() -> None:
         "CREATE INDEX IF NOT EXISTS idx_purchase_plan_items_plan ON purchase_plan_items(plan_id)",
         "CREATE INDEX IF NOT EXISTS idx_purchase_plan_supplier_options_item ON purchase_plan_supplier_options(item_id)",
         "CREATE INDEX IF NOT EXISTS idx_supplier_quotes_plan ON supplier_quotes(plan_id)",
+    )
+    raw_conn = engine.raw_connection()
+    try:
+        with raw_conn.cursor() as cursor:
+            for statement in statements:
+                cursor.execute(statement)
+        raw_conn.commit()
+    except Exception:
+        raw_conn.rollback()
+        raise
+    finally:
+        raw_conn.close()
+
+
+def ensure_sales_schema() -> None:
+    statements = (
+        """
+        CREATE TABLE IF NOT EXISTS clientes (
+            id VARCHAR PRIMARY KEY,
+            name VARCHAR NOT NULL,
+            document VARCHAR,
+            email VARCHAR,
+            phone VARCHAR,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS venda_transacoes (
+            id VARCHAR PRIMARY KEY,
+            date_time TIMESTAMPTZ NOT NULL,
+            cliente_id VARCHAR REFERENCES clientes(id),
+            status VARCHAR NOT NULL DEFAULT 'aberta',
+            subtotal NUMERIC(14,4) NOT NULL DEFAULT 0,
+            discount_total NUMERIC(14,4) NOT NULL DEFAULT 0,
+            total NUMERIC(14,4) NOT NULL DEFAULT 0,
+            source VARCHAR NOT NULL DEFAULT 'balcao',
+            fiscal_status VARCHAR NOT NULL DEFAULT 'pendente_preparacao',
+            notes VARCHAR,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            confirmed_at TIMESTAMPTZ,
+            canceled_at TIMESTAMPTZ
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS venda_itens (
+            id VARCHAR PRIMARY KEY,
+            venda_id VARCHAR NOT NULL REFERENCES venda_transacoes(id) ON DELETE CASCADE,
+            recipe_id VARCHAR NOT NULL REFERENCES receitas(id),
+            recipe_name VARCHAR NOT NULL,
+            quantity NUMERIC(14,4) NOT NULL,
+            unit_price NUMERIC(14,4) NOT NULL,
+            discount_value NUMERIC(14,4) NOT NULL DEFAULT 0,
+            total_value NUMERIC(14,4) NOT NULL,
+            venda_historica_id VARCHAR REFERENCES vendas(id)
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS venda_pagamentos (
+            id VARCHAR PRIMARY KEY,
+            venda_id VARCHAR NOT NULL REFERENCES venda_transacoes(id) ON DELETE CASCADE,
+            method VARCHAR NOT NULL,
+            amount NUMERIC(14,4) NOT NULL,
+            status VARCHAR NOT NULL DEFAULT 'pago',
+            paid_at TIMESTAMPTZ,
+            change_amount NUMERIC(14,4) NOT NULL DEFAULT 0,
+            external_reference VARCHAR
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS estoque_movimentos (
+            id VARCHAR PRIMARY KEY,
+            ingredient_id VARCHAR NOT NULL REFERENCES ingredientes(id),
+            source_type VARCHAR NOT NULL,
+            source_id VARCHAR NOT NULL,
+            delta_qty NUMERIC(14,4) NOT NULL,
+            previous_qty NUMERIC(14,4) NOT NULL,
+            new_qty NUMERIC(14,4) NOT NULL,
+            unit VARCHAR NOT NULL,
+            reason VARCHAR NOT NULL,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS venda_documentos_fiscais (
+            id VARCHAR PRIMARY KEY,
+            venda_id VARCHAR NOT NULL REFERENCES venda_transacoes(id) ON DELETE CASCADE,
+            document_type VARCHAR NOT NULL DEFAULT 'NFC-e',
+            status VARCHAR NOT NULL DEFAULT 'pendente_preparacao',
+            provider VARCHAR,
+            access_key VARCHAR,
+            protocol VARCHAR,
+            issued_at TIMESTAMPTZ,
+            cancelled_at TIMESTAMPTZ,
+            payload JSON,
+            error_message VARCHAR,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        )
+        """,
+        "CREATE INDEX IF NOT EXISTS idx_clientes_name ON clientes(name)",
+        "CREATE INDEX IF NOT EXISTS idx_clientes_document ON clientes(document)",
+        "CREATE INDEX IF NOT EXISTS idx_venda_transacoes_date ON venda_transacoes(date_time)",
+        "CREATE INDEX IF NOT EXISTS idx_venda_transacoes_status ON venda_transacoes(status)",
+        "CREATE INDEX IF NOT EXISTS idx_venda_transacoes_cliente ON venda_transacoes(cliente_id)",
+        "CREATE INDEX IF NOT EXISTS idx_venda_transacoes_fiscal_status ON venda_transacoes(fiscal_status)",
+        "CREATE INDEX IF NOT EXISTS idx_venda_itens_venda ON venda_itens(venda_id)",
+        "CREATE INDEX IF NOT EXISTS idx_venda_itens_recipe ON venda_itens(recipe_id)",
+        "CREATE INDEX IF NOT EXISTS idx_venda_itens_historical ON venda_itens(venda_historica_id)",
+        "CREATE INDEX IF NOT EXISTS idx_venda_pagamentos_venda ON venda_pagamentos(venda_id)",
+        "CREATE INDEX IF NOT EXISTS idx_venda_pagamentos_status ON venda_pagamentos(status)",
+        "CREATE INDEX IF NOT EXISTS idx_estoque_movimentos_ingredient_date ON estoque_movimentos(ingredient_id, created_at)",
+        "CREATE INDEX IF NOT EXISTS idx_estoque_movimentos_source ON estoque_movimentos(source_type, source_id)",
+        "CREATE INDEX IF NOT EXISTS idx_venda_documentos_fiscais_venda ON venda_documentos_fiscais(venda_id)",
+        "CREATE INDEX IF NOT EXISTS idx_venda_documentos_fiscais_status ON venda_documentos_fiscais(status)",
     )
     raw_conn = engine.raw_connection()
     try:
@@ -4185,6 +4320,813 @@ def get_fornecedor_profile(fornecedor_id: str, db: Session = Depends(get_db)):
         products=products,
         orders=orders,
     )
+
+
+# ---------------------------------------------------------------------------
+# Vendas
+# ---------------------------------------------------------------------------
+
+
+def _next_prefixed_id(
+    db: Session,
+    column,
+    prefix: str,
+    reserved_ids: Optional[set[str]] = None,
+) -> str:
+    reserved_ids = reserved_ids if reserved_ids is not None else set()
+    last_id = (
+        db.query(column)
+        .filter(column.like(f"{prefix}%"))
+        .order_by(column.desc())
+        .first()
+    )
+    next_number = 1
+    if last_id:
+        try:
+            next_number = int(str(last_id[0]).replace(prefix, "")) + 1
+        except ValueError:
+            next_number = (db.query(func.count(column)).scalar() or 0) + 1
+
+    candidate = f"{prefix}{next_number:012d}"
+    while candidate in reserved_ids or db.query(column).filter(column == candidate).first():
+        next_number += 1
+        candidate = f"{prefix}{next_number:012d}"
+    reserved_ids.add(candidate)
+    return candidate
+
+
+def _next_cliente_id(db: Session, reserved_ids: Optional[set[str]] = None) -> str:
+    return _next_prefixed_id(db, Cliente.id, "CLI", reserved_ids)
+
+
+def _next_venda_transacao_id(db: Session, reserved_ids: Optional[set[str]] = None) -> str:
+    return _next_prefixed_id(db, VendaTransacao.id, "VTR", reserved_ids)
+
+
+def _next_venda_item_id(db: Session, reserved_ids: Optional[set[str]] = None) -> str:
+    return _next_prefixed_id(db, VendaItem.id, "VTI", reserved_ids)
+
+
+def _next_venda_pagamento_id(db: Session, reserved_ids: Optional[set[str]] = None) -> str:
+    return _next_prefixed_id(db, VendaPagamento.id, "VPG", reserved_ids)
+
+
+def _next_estoque_movimento_id(db: Session, reserved_ids: Optional[set[str]] = None) -> str:
+    return _next_prefixed_id(db, EstoqueMovimento.id, "MOV", reserved_ids)
+
+
+def _next_venda_documento_fiscal_id(db: Session, reserved_ids: Optional[set[str]] = None) -> str:
+    return _next_prefixed_id(db, VendaDocumentoFiscal.id, "VDF", reserved_ids)
+
+
+def _next_historical_venda_id(db: Session, reserved_ids: Optional[set[str]] = None) -> str:
+    return _next_prefixed_id(db, Venda.id, "VEN", reserved_ids)
+
+
+def _money(value: float) -> float:
+    return round(max(float(value or 0), 0), 2)
+
+
+def _paid_total(venda: VendaTransacao) -> float:
+    return _money(
+        sum(
+            _as_float(payment.amount)
+            for payment in venda.payments
+            if payment.status == "pago"
+        )
+    )
+
+
+def _serialize_cliente(cliente: Optional[Cliente]) -> Optional[ClienteOut]:
+    if cliente is None:
+        return None
+    return ClienteOut(
+        id=cliente.id,
+        name=cliente.name,
+        document=cliente.document,
+        email=cliente.email,
+        phone=cliente.phone,
+        created_at=cliente.created_at,
+    )
+
+
+def _serialize_fiscal_document(
+    document: Optional[VendaDocumentoFiscal],
+) -> Optional[VendaFiscalDocumentOut]:
+    if document is None:
+        return None
+    return VendaFiscalDocumentOut(
+        id=document.id,
+        venda_id=document.venda_id,
+        document_type=document.document_type,
+        status=document.status,
+        provider=document.provider,
+        access_key=document.access_key,
+        protocol=document.protocol,
+        issued_at=document.issued_at,
+        cancelled_at=document.cancelled_at,
+        payload=document.payload,
+        error_message=document.error_message,
+        created_at=document.created_at,
+        updated_at=document.updated_at,
+    )
+
+
+def _latest_fiscal_document(venda: VendaTransacao) -> Optional[VendaDocumentoFiscal]:
+    if not venda.fiscal_documents:
+        return None
+    return sorted(
+        venda.fiscal_documents,
+        key=lambda item: (item.created_at or datetime.min.replace(tzinfo=RECIFE_TZ), item.id),
+    )[-1]
+
+
+def _serialize_venda_detail(venda: VendaTransacao) -> VendaDetailOut:
+    return VendaDetailOut(
+        id=venda.id,
+        date_time=venda.date_time,
+        customer=_serialize_cliente(venda.cliente),
+        status=venda.status,
+        fiscal_status=venda.fiscal_status,
+        subtotal=_as_float(venda.subtotal),
+        discount_total=_as_float(venda.discount_total),
+        total=_as_float(venda.total),
+        source=venda.source,
+        notes=venda.notes,
+        confirmed_at=venda.confirmed_at,
+        canceled_at=venda.canceled_at,
+        items=[
+            VendaItemOut(
+                id=item.id,
+                recipe_id=item.recipe_id,
+                recipe_name=item.recipe_name,
+                quantity=_as_float(item.quantity),
+                unit_price=_as_float(item.unit_price),
+                discount_value=_as_float(item.discount_value),
+                total_value=_as_float(item.total_value),
+                venda_historica_id=item.venda_historica_id,
+            )
+            for item in sorted(venda.items, key=lambda item: item.id)
+        ],
+        payments=[
+            VendaPagamentoOut(
+                id=payment.id,
+                method=payment.method,
+                amount=_as_float(payment.amount),
+                status=payment.status,
+                paid_at=payment.paid_at,
+                change_amount=_as_float(payment.change_amount),
+                external_reference=payment.external_reference,
+            )
+            for payment in sorted(venda.payments, key=lambda payment: payment.id)
+        ],
+        fiscal_document=_serialize_fiscal_document(_latest_fiscal_document(venda)),
+    )
+
+
+def _recipe_stock_profile(db: Session, recipe_id: str) -> tuple[int, bool, Optional[float], list[str]]:
+    rows = (
+        db.query(
+            ReceitaIngrediente.ingredient_id,
+            ReceitaIngrediente.qty,
+            Ingrediente.name,
+            Ingrediente.unit,
+            EstoqueAtual.qtd,
+        )
+        .join(Ingrediente, Ingrediente.id == ReceitaIngrediente.ingredient_id)
+        .outerjoin(EstoqueAtual, EstoqueAtual.ingrediente == ReceitaIngrediente.ingredient_id)
+        .filter(ReceitaIngrediente.recipe_id == recipe_id)
+        .filter(Ingrediente.category_id != PRODUCTION_CATEGORY_ID)
+        .all()
+    )
+    warnings: list[str] = []
+    max_quantity: Optional[float] = None
+    for row in rows:
+        required = _as_float(row.qty)
+        current_qty = _as_float(row.qtd)
+        if required <= 0:
+            warnings.append(f"{row.name}: ficha tecnica sem consumo valido")
+            continue
+        possible = current_qty / required
+        max_quantity = possible if max_quantity is None else min(max_quantity, possible)
+        if current_qty <= 0:
+            warnings.append(f"{row.name}: sem estoque")
+
+    if not rows:
+        warnings.append("Produto sem ficha tecnica de ingredientes")
+    available = bool(rows) and max_quantity is not None and max_quantity >= 1
+    return len(rows), available, round(max_quantity, 2) if max_quantity is not None else None, warnings
+
+
+def _serialize_venda_produto(db: Session, receita: Receita) -> VendaProdutoOut:
+    ingredients_count, available, max_quantity, warnings = _recipe_stock_profile(
+        db,
+        receita.id,
+    )
+    return VendaProdutoOut(
+        id=receita.id,
+        name=receita.name,
+        recipe_type=receita.recipe_type,
+        sale_price=_as_float(receita.sale_price),
+        yield_qty=_as_float(receita.yield_qty) if receita.yield_qty is not None else None,
+        yield_unit=receita.yield_unit,
+        ingredients_count=ingredients_count,
+        available=available,
+        max_quantity=max_quantity,
+        stock_warnings=warnings,
+    )
+
+
+def _resolve_cliente(
+    db: Session,
+    customer_id: Optional[str],
+    customer: Optional[ClienteCreate],
+) -> Optional[Cliente]:
+    if customer_id:
+        cliente = db.query(Cliente).filter(Cliente.id == customer_id).first()
+        if cliente is None:
+            raise HTTPException(status_code=404, detail="Cliente nao encontrado")
+        return cliente
+    if customer is None:
+        return None
+
+    cliente = Cliente(
+        id=_next_cliente_id(db),
+        name=customer.name,
+        document=customer.document,
+        email=customer.email,
+        phone=customer.phone,
+    )
+    db.add(cliente)
+    return cliente
+
+
+def _build_venda_items(
+    db: Session,
+    payload_items: list,
+    discount_total: float,
+) -> tuple[list[dict], float, float]:
+    recipe_ids = {item.recipe_id for item in payload_items}
+    recipes = {
+        receita.id: receita
+        for receita in (
+            db.query(Receita)
+            .filter(Receita.id.in_(recipe_ids))
+            .filter(Receita.recipe_type == "PRODUTO_FINAL")
+            .all()
+        )
+    }
+    missing = sorted(recipe_ids - set(recipes.keys()))
+    if missing:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Produtos invalidos para venda: {', '.join(missing)}",
+        )
+
+    rows: list[dict] = []
+    subtotal = 0.0
+    item_discount_total = 0.0
+    for item in payload_items:
+        receita = recipes[item.recipe_id]
+        unit_price = _as_float(item.unit_price) if item.unit_price is not None else _as_float(receita.sale_price)
+        if unit_price <= 0:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Produto sem preco de venda valido: {receita.name}",
+            )
+        gross_total = _money(unit_price * item.quantity)
+        if item.discount_value > gross_total:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Desconto maior que o item: {receita.name}",
+            )
+        line_total = _money(gross_total - item.discount_value)
+        subtotal += gross_total
+        item_discount_total += item.discount_value
+        rows.append(
+            {
+                "recipe": receita,
+                "quantity": item.quantity,
+                "unit_price": unit_price,
+                "discount_value": item.discount_value,
+                "total_value": line_total,
+            }
+        )
+
+    subtotal = _money(subtotal)
+    total_before_sale_discount = _money(subtotal - item_discount_total)
+    if discount_total > total_before_sale_discount:
+        raise HTTPException(
+            status_code=400,
+            detail="Desconto total maior que o valor da venda",
+        )
+    total = _money(total_before_sale_discount - discount_total)
+    return rows, subtotal, total
+
+
+def _replace_venda_payments(
+    db: Session,
+    venda: VendaTransacao,
+    payments: list[VendaPagamentoCreate],
+) -> None:
+    venda.payments.clear()
+    db.flush()
+    reserved_ids: set[str] = set()
+    paid_at = _now_recife()
+    for payment in payments:
+        venda.payments.append(
+            VendaPagamento(
+                id=_next_venda_pagamento_id(db, reserved_ids),
+                method=payment.method,
+                amount=payment.amount,
+                status=payment.status,
+                paid_at=paid_at if payment.status == "pago" else None,
+                change_amount=payment.change_amount,
+                external_reference=payment.external_reference,
+            )
+        )
+
+
+def _required_ingredients_for_venda(db: Session, venda_id: str):
+    return (
+        db.query(
+            ReceitaIngrediente.ingredient_id,
+            Ingrediente.name.label("ingredient_name"),
+            Ingrediente.unit,
+            func.sum(VendaItem.quantity * ReceitaIngrediente.qty).label("required_qty"),
+        )
+        .join(Ingrediente, Ingrediente.id == ReceitaIngrediente.ingredient_id)
+        .join(VendaItem, VendaItem.recipe_id == ReceitaIngrediente.recipe_id)
+        .filter(VendaItem.venda_id == venda_id)
+        .filter(Ingrediente.category_id != PRODUCTION_CATEGORY_ID)
+        .group_by(ReceitaIngrediente.ingredient_id, Ingrediente.name, Ingrediente.unit)
+        .all()
+    )
+
+
+def _apply_venda_stock_movements(db: Session, venda: VendaTransacao) -> None:
+    requirements = _required_ingredients_for_venda(db, venda.id)
+    if not requirements:
+        raise HTTPException(
+            status_code=400,
+            detail="Venda sem ficha tecnica para baixa de estoque",
+        )
+
+    ingredient_ids = [row.ingredient_id for row in requirements]
+    stock_rows = (
+        db.query(EstoqueAtual)
+        .filter(EstoqueAtual.ingrediente.in_(ingredient_ids))
+        .with_for_update()
+        .all()
+    )
+    stock_by_ingredient = {row.ingrediente: row for row in stock_rows}
+
+    insufficient: list[dict] = []
+    for row in requirements:
+        required_qty = _as_float(row.required_qty)
+        stock = stock_by_ingredient.get(row.ingredient_id)
+        current_qty = _as_float(stock.qtd) if stock else 0.0
+        if required_qty <= 0:
+            insufficient.append(
+                {
+                    "ingredient_id": row.ingredient_id,
+                    "ingredient_name": row.ingredient_name,
+                    "required_qty": required_qty,
+                    "current_qty": current_qty,
+                    "unit": row.unit,
+                    "reason": "consumo invalido",
+                }
+            )
+        elif current_qty + 1e-9 < required_qty:
+            insufficient.append(
+                {
+                    "ingredient_id": row.ingredient_id,
+                    "ingredient_name": row.ingredient_name,
+                    "required_qty": required_qty,
+                    "current_qty": current_qty,
+                    "unit": row.unit,
+                    "reason": "estoque insuficiente",
+                }
+            )
+
+    if insufficient:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "message": "Estoque insuficiente para confirmar a venda",
+                "items": insufficient,
+            },
+        )
+
+    reserved_movement_ids: set[str] = set()
+    movement_date = _now_recife().date()
+    for row in requirements:
+        stock = stock_by_ingredient[row.ingredient_id]
+        required_qty = _as_float(row.required_qty)
+        previous_qty = _as_float(stock.qtd)
+        new_qty = round(previous_qty - required_qty, 4)
+        stock.qtd = new_qty
+        stock.data = movement_date
+        db.add(
+            EstoqueMovimento(
+                id=_next_estoque_movimento_id(db, reserved_movement_ids),
+                ingredient_id=row.ingredient_id,
+                source_type="venda",
+                source_id=venda.id,
+                delta_qty=-required_qty,
+                previous_qty=previous_qty,
+                new_qty=new_qty,
+                unit=row.unit,
+                reason="Baixa por venda de balcao",
+            )
+        )
+
+
+def _insert_historical_sales(db: Session, venda: VendaTransacao) -> None:
+    reserved_historical_ids: set[str] = set()
+    sale_time = venda.date_time
+    if sale_time.tzinfo is not None:
+        sale_time = sale_time.astimezone(RECIFE_TZ).replace(tzinfo=None)
+    for item in venda.items:
+        if item.venda_historica_id:
+            continue
+        historical_id = _next_historical_venda_id(db, reserved_historical_ids)
+        db.add(
+            Venda(
+                id=historical_id,
+                date_time=sale_time,
+                recipe_id=item.recipe_id,
+                quantity=item.quantity,
+                unit_price=item.unit_price,
+            )
+        )
+        item.venda_historica_id = historical_id
+
+
+def _fiscal_payload(venda: VendaTransacao) -> dict:
+    return {
+        "document_type": "NFC-e",
+        "integration_status": "prepared_only",
+        "sale": {
+            "id": venda.id,
+            "date_time": _to_recife_export_datetime(venda.date_time),
+            "subtotal": _as_float(venda.subtotal),
+            "discount_total": _as_float(venda.discount_total),
+            "total": _as_float(venda.total),
+            "source": venda.source,
+        },
+        "customer": (
+            {
+                "id": venda.cliente.id,
+                "name": venda.cliente.name,
+                "document": venda.cliente.document,
+                "email": venda.cliente.email,
+                "phone": venda.cliente.phone,
+            }
+            if venda.cliente
+            else None
+        ),
+        "items": [
+            {
+                "recipe_id": item.recipe_id,
+                "name": item.recipe_name,
+                "quantity": _as_float(item.quantity),
+                "unit_price": _as_float(item.unit_price),
+                "discount_value": _as_float(item.discount_value),
+                "total_value": _as_float(item.total_value),
+            }
+            for item in venda.items
+        ],
+        "payments": [
+            {
+                "method": payment.method,
+                "amount": _as_float(payment.amount),
+                "status": payment.status,
+                "change_amount": _as_float(payment.change_amount),
+            }
+            for payment in venda.payments
+        ],
+    }
+
+
+def _prepare_fiscal_document(db: Session, venda: VendaTransacao) -> None:
+    document = _latest_fiscal_document(venda)
+    now = _now_recife()
+    if document is None:
+        document = VendaDocumentoFiscal(
+            id=_next_venda_documento_fiscal_id(db),
+            venda_id=venda.id,
+            document_type="NFC-e",
+        )
+        venda.fiscal_documents.append(document)
+    document.status = "pronto_para_integracao"
+    document.updated_at = now
+    document.payload = _fiscal_payload(venda)
+    document.error_message = None
+    venda.fiscal_status = document.status
+
+
+def _to_recife_export_datetime(value: Optional[datetime]) -> Optional[str]:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=RECIFE_TZ)
+    return value.astimezone(RECIFE_TZ).isoformat()
+
+
+def _get_venda_or_404(db: Session, venda_id: str) -> VendaTransacao:
+    venda = db.query(VendaTransacao).filter(VendaTransacao.id == venda_id).first()
+    if venda is None:
+        raise HTTPException(status_code=404, detail="Venda nao encontrada")
+    return venda
+
+
+@app.get("/api/vendas/produtos", response_model=list[VendaProdutoOut])
+def get_venda_produtos(
+    q: Optional[str] = None,
+    db: Session = Depends(get_db),
+):
+    query = (
+        db.query(Receita)
+        .filter(Receita.recipe_type == "PRODUTO_FINAL")
+        .filter(Receita.sale_price.isnot(None))
+        .filter(Receita.sale_price > 0)
+        .order_by(Receita.name.asc())
+    )
+    if q:
+        query = query.filter(Receita.name.ilike(f"%{q}%"))
+    receitas = query.limit(250).all()
+    return [_serialize_venda_produto(db, receita) for receita in receitas]
+
+
+@app.get("/api/vendas/clientes", response_model=list[ClienteOut])
+def get_clientes(
+    q: Optional[str] = None,
+    db: Session = Depends(get_db),
+):
+    query = db.query(Cliente).order_by(Cliente.name.asc())
+    if q:
+        like = f"%{q}%"
+        query = query.filter(
+            or_(
+                Cliente.name.ilike(like),
+                Cliente.document.ilike(like),
+                Cliente.email.ilike(like),
+                Cliente.phone.ilike(like),
+            )
+        )
+    return [_serialize_cliente(cliente) for cliente in query.limit(100).all()]
+
+
+@app.post("/api/vendas/clientes", response_model=ClienteOut)
+def create_cliente(payload: ClienteCreate, db: Session = Depends(get_db)):
+    cliente = Cliente(
+        id=_next_cliente_id(db),
+        name=payload.name,
+        document=payload.document,
+        email=payload.email,
+        phone=payload.phone,
+    )
+    db.add(cliente)
+    db.commit()
+    db.refresh(cliente)
+    return _serialize_cliente(cliente)
+
+
+@app.post("/api/vendas", response_model=VendaDetailOut)
+def create_venda(payload: VendaCreateRequest, db: Session = Depends(get_db)):
+    cliente = _resolve_cliente(db, payload.customer_id, payload.customer)
+    item_rows, subtotal, total = _build_venda_items(
+        db,
+        payload.items,
+        payload.discount_total,
+    )
+    now = _now_recife()
+    venda = VendaTransacao(
+        id=_next_venda_transacao_id(db),
+        date_time=now,
+        cliente=cliente,
+        status="aberta",
+        subtotal=subtotal,
+        discount_total=payload.discount_total,
+        total=total,
+        source=payload.source,
+        fiscal_status="pendente_preparacao",
+        notes=payload.notes,
+        created_at=now,
+        updated_at=now,
+    )
+    db.add(venda)
+    db.flush()
+
+    reserved_item_ids: set[str] = set()
+    for row in item_rows:
+        receita = row["recipe"]
+        venda.items.append(
+            VendaItem(
+                id=_next_venda_item_id(db, reserved_item_ids),
+                recipe_id=receita.id,
+                recipe_name=receita.name,
+                quantity=row["quantity"],
+                unit_price=row["unit_price"],
+                discount_value=row["discount_value"],
+                total_value=row["total_value"],
+            )
+        )
+    if payload.payments:
+        _replace_venda_payments(db, venda, payload.payments)
+
+    db.commit()
+    db.refresh(venda)
+    return _serialize_venda_detail(venda)
+
+
+@app.post("/api/vendas/{venda_id}/confirmar", response_model=VendaDetailOut)
+def confirm_venda(
+    venda_id: str,
+    payload: VendaConfirmRequest,
+    db: Session = Depends(get_db),
+):
+    venda = _get_venda_or_404(db, venda_id)
+    if venda.status == "cancelada":
+        raise HTTPException(status_code=400, detail="Venda cancelada nao pode ser confirmada")
+    if venda.status == "paga":
+        return _serialize_venda_detail(venda)
+
+    if payload.payments:
+        _replace_venda_payments(db, venda, payload.payments)
+        db.flush()
+    if not venda.payments:
+        raise HTTPException(status_code=400, detail="Informe ao menos um pagamento")
+    if _paid_total(venda) + 1e-9 < _as_float(venda.total):
+        raise HTTPException(status_code=400, detail="Pagamento menor que o total da venda")
+
+    _apply_venda_stock_movements(db, venda)
+    _insert_historical_sales(db, venda)
+    venda.status = "paga"
+    venda.confirmed_at = _now_recife()
+    venda.updated_at = venda.confirmed_at
+    _prepare_fiscal_document(db, venda)
+
+    db.commit()
+    db.refresh(venda)
+    return _serialize_venda_detail(venda)
+
+
+@app.patch("/api/vendas/{venda_id}/cancelar", response_model=VendaDetailOut)
+def cancel_venda(venda_id: str, db: Session = Depends(get_db)):
+    venda = _get_venda_or_404(db, venda_id)
+    if venda.status == "cancelada":
+        return _serialize_venda_detail(venda)
+
+    now = _now_recife()
+    reserved_movement_ids: set[str] = set()
+    movements = (
+        db.query(EstoqueMovimento)
+        .filter(EstoqueMovimento.source_type == "venda")
+        .filter(EstoqueMovimento.source_id == venda.id)
+        .all()
+    )
+    if movements:
+        ingredient_ids = sorted({movement.ingredient_id for movement in movements})
+        stock_rows = (
+            db.query(EstoqueAtual)
+            .filter(EstoqueAtual.ingrediente.in_(ingredient_ids))
+            .with_for_update()
+            .all()
+        )
+        stock_by_ingredient = {row.ingrediente: row for row in stock_rows}
+        ingredient_units = {
+            ingredient.id: ingredient.unit
+            for ingredient in db.query(Ingrediente)
+            .filter(Ingrediente.id.in_(ingredient_ids))
+            .all()
+        }
+        delta_by_ingredient: dict[str, float] = {}
+        for movement in movements:
+            delta_by_ingredient[movement.ingredient_id] = (
+                delta_by_ingredient.get(movement.ingredient_id, 0.0)
+                + _as_float(movement.delta_qty)
+            )
+        for ingredient_id, original_delta in delta_by_ingredient.items():
+            revert_qty = round(-original_delta, 4)
+            stock = stock_by_ingredient.get(ingredient_id)
+            previous_qty = _as_float(stock.qtd) if stock else 0.0
+            new_qty = round(previous_qty + revert_qty, 4)
+            if stock is None:
+                stock = EstoqueAtual(
+                    id=f"CUR-{ingredient_id}",
+                    ingrediente=ingredient_id,
+                    qtd=new_qty,
+                    data=now.date(),
+                )
+                db.add(stock)
+            else:
+                stock.qtd = new_qty
+                stock.data = now.date()
+            db.add(
+                EstoqueMovimento(
+                    id=_next_estoque_movimento_id(db, reserved_movement_ids),
+                    ingredient_id=ingredient_id,
+                    source_type="cancelamento_venda",
+                    source_id=venda.id,
+                    delta_qty=revert_qty,
+                    previous_qty=previous_qty,
+                    new_qty=new_qty,
+                    unit=ingredient_units.get(ingredient_id, ""),
+                    reason="Estorno por cancelamento de venda",
+                )
+            )
+
+    for item in venda.items:
+        if item.venda_historica_id:
+            db.query(Venda).filter(Venda.id == item.venda_historica_id).delete()
+            item.venda_historica_id = None
+
+    for payment in venda.payments:
+        if payment.status == "pago":
+            payment.status = "estornado"
+
+    for document in venda.fiscal_documents:
+        document.status = "cancelado"
+        document.cancelled_at = now
+        document.updated_at = now
+    venda.status = "cancelada"
+    venda.fiscal_status = "cancelado"
+    venda.canceled_at = now
+    venda.updated_at = now
+
+    db.commit()
+    db.refresh(venda)
+    return _serialize_venda_detail(venda)
+
+
+@app.get("/api/vendas", response_model=VendaPaginado)
+def get_vendas(
+    status: Optional[str] = None,
+    q: Optional[str] = None,
+    date_from: Optional[date] = None,
+    date_to: Optional[date] = None,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=25, ge=1, le=100),
+    db: Session = Depends(get_db),
+):
+    if date_from and date_to and date_from > date_to:
+        raise HTTPException(status_code=400, detail="Data inicial maior que data final")
+    query = db.query(VendaTransacao).outerjoin(Cliente)
+    if status:
+        query = query.filter(VendaTransacao.status == status)
+    if q:
+        like = f"%{q}%"
+        query = query.filter(or_(VendaTransacao.id.ilike(like), Cliente.name.ilike(like)))
+    if date_from:
+        query = query.filter(func.date(VendaTransacao.date_time) >= date_from)
+    if date_to:
+        query = query.filter(func.date(VendaTransacao.date_time) <= date_to)
+
+    total = query.count()
+    total_pages = max(1, math.ceil(total / page_size))
+    vendas = (
+        query.order_by(VendaTransacao.date_time.desc(), VendaTransacao.id.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+        .all()
+    )
+    items = [
+        VendaListItem(
+            id=venda.id,
+            date_time=venda.date_time,
+            customer_name=venda.cliente.name if venda.cliente else None,
+            status=venda.status,
+            fiscal_status=venda.fiscal_status,
+            items_count=len(venda.items),
+            items_qty=sum(_as_float(item.quantity) for item in venda.items),
+            total=_as_float(venda.total),
+            paid_total=_paid_total(venda),
+        )
+        for venda in vendas
+    ]
+    return VendaPaginado(
+        items=items,
+        total=total,
+        page=page,
+        page_size=page_size,
+        total_pages=total_pages,
+    )
+
+
+@app.get("/api/vendas/{venda_id}/fiscal", response_model=VendaFiscalDocumentOut)
+def get_venda_fiscal_document(venda_id: str, db: Session = Depends(get_db)):
+    venda = _get_venda_or_404(db, venda_id)
+    document = _latest_fiscal_document(venda)
+    if document is None:
+        raise HTTPException(status_code=404, detail="Documento fiscal nao preparado")
+    return _serialize_fiscal_document(document)
+
+
+@app.get("/api/vendas/{venda_id}", response_model=VendaDetailOut)
+def get_venda_detail(venda_id: str, db: Session = Depends(get_db)):
+    return _serialize_venda_detail(_get_venda_or_404(db, venda_id))
 
 
 # ---------------------------------------------------------------------------

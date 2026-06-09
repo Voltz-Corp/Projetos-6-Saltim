@@ -6,6 +6,7 @@ import {
   Package,
   PackageCheck,
   Palette,
+  ReceiptText,
   ShoppingCart,
   Truck,
 } from 'lucide-react';
@@ -68,6 +69,7 @@ export function Sidebar() {
         <NavItem to="/estoque" icon={Package} label="Estoque" exact />
         <NavItem to="/fornecedores" icon={Truck} label="Fornecedores" />
         <NavItem to="/pedidos" icon={PackageCheck} label="Pedidos" />
+        <NavItem to="/vendas" icon={ReceiptText} label="Vendas" />
         <NavItem to="/compras/planejamento" icon={ShoppingCart} label="Compras" />
         <NavItem to="/estoque/contagem" icon={ClipboardList} label="Contagem" />
         <NavItem to="/ml/criticidade" icon={Activity} label="Criticidade" />

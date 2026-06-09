@@ -171,55 +171,103 @@ asyncio.exceptions.CancelledError
 INFO:     Started server process [2500]
 INFO:     Waiting for application startup.
 INFO:     Application startup complete.
-hon\core\kitty.py', '.venv\Lib\site-packages\IPython\core\display_trap.py', '.venv\Lib\site-packages\IPython\utils\sentinel.py', '.venv\Lib\site-packages\IPython\sphinxext\custom_doctests.py', '.venv\Lib\site-packages\IPython\utils\frame.py', '.venv\Lib\site-packages\IPython\testing\plugin\pytest_ipdoctest.py', '.venv\Lib\site-packages\IPython\core\error.py', '.venv\Lib\site-packages\IPython\testing\decorators.py', '.venv\Lib\site-packages\jsonschema_specifications\_core.py', '.venv\Lib\site-packages\IPython\core\crashhandler.py', '.venv\Lib\site-packages\IPython\terminal\pt_inputhooks\asyncio.py', '.venv\Lib\site-packages\jsonschema_specifications\tests\__init__.py', '.venv\Lib\site-packages\IPython\terminal\__init__.py', '.venv\Lib\site-packages\IPython\lib\demo.py', '.venv\Lib\site-packages\IPython\lib\pretty.py', '.venv\Lib\site-packages\IPython\utils\io.py', '.venv\Lib\site-packages\IPython\__init__.py', '.venv\Lib\site-packages\IPython\utils\coloransi.py', '.venv\Lib\site-packages\IPython\core\autocall.py', '.venv\Lib\site-packages\IPython\core\compilerop.py', '.venv\Lib\site-packages\IPython\terminal\shortcuts\__init__.py', '.venv\Lib\site-packages\IPython\core\formatters.py', '.venv\Lib\site-packages\IPython\terminal\pt_inputhooks\wx.py', '.venv\Lib\site-packages\IPython\core\profiledir.py', '.venv\Lib\site-packages\IPython\core\magics\display.py', '.venv\Lib\site-packages\IPython\testing\tools.py', '.venv\Lib\site-packages\IPython\core\payloadpage.py', '.venv\Lib\site-packages\IPython\core\magics\logging.py', '.venv\Lib\site-packages\IPython\core\profileapp.py', '.venv\Lib\site-packages\IPython\utils\contexts.py', '.venv\Lib\site-packages\IPython\core\magics\script.py', '.venv\Lib\site-packages\IPython\core\magic_arguments.py', '.venv\Lib\site-packages\IPython\utils\data.py', '.venv\Lib\site-packages\IPython\core\debugger_backport.py', '.venv\Lib\site-packages\IPython\core\magics\history.py', '.venv\Lib\site-packages\IPython\lib\editorhooks.py', '.venv\Lib\site-packages\IPython\core\magics\extension.py', '.venv\Lib\site-packages\IPython\core\tips.py', '.venv\Lib\site-packages\IPython\core\usage.py', '.venv\Lib\site-packages\IPython\terminal\shortcuts\auto_suggest.py', '.venv\Lib\site-packages\IPython\core\async_helpers.py', '.venv\Lib\site-packages\IPython\core\magics\code.py', '.venv\Lib\site-packages\IPython\core\displayhook.py', '.venv\Lib\site-packages\IPython\core\magics\osm.py', '.venv\Lib\site-packages\IPython\utils\timing.py', '.venv\Lib\site-packages\IPython\core\builtin_trap.py', '.venv\Lib\site-packages\IPython\utils\PyColorize.py', '.venv\Lib\site-packages\IPython\core\ultratb.py', '.venv\Lib\site-packages\IPython\terminal\pt_inputhooks\pyglet.py', '.venv\Lib\site-packages\IPython\external\qt_for_kernel.py', '.venv\Lib\site-packages\IPython\utils\importstring.py', '.venv\Lib\site-packages\IPython\core\interactiveshell.py', '.venv\Lib\site-packages\IPython\terminal\pt_inputhooks\osx.py', '.venv\Lib\site-packages\IPython\utils\tempdir.py', '.venv\Lib\site-packages\IPython\terminal\ipapp.py', '.venv\Lib\site-packages\IPython\external\qt_loaders.py', '.venv\Lib\site-packages\IPython\paths.py', '.venv\Lib\site-packages\IPython\utils\_process_emscripten.py', '.venv\Lib\site-packages\IPython\terminal\magics.py', '.venv\Lib\site-packages\IPython\lib\backgroundjobs.py', '.venv\Lib\site-packages\IPython\utils\process.py', '.venv\Lib\site-packages\IPython\core\completerlib.py', '.venv\Lib\site-packages\IPython\testing\ipunittest.py', '.venv\Lib\site-packages\IPython\lib\lexers.py', '.venv\Lib\site-packages\IPython\core\doctb.py', '.venv\Lib\site-packages\IPython\lib\__init__.py'. Reloading...
-INFO:     Started server process [24568]
+WARNING:  WatchFiles detected changes in 'app\models.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [2500]
+WARNING:  WatchFiles detected changes in 'app\main.py', 'app\schemas.py'. Reloading...
+Process SpawnProcess-16:
+Traceback (most recent call last):
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.12_3.12.2800.0_x64__qbz5n2kfra8p0\Lib\multiprocessing\process.py", line 314, in _bootstrap
+    self.run()
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.12_3.12.2800.0_x64__qbz5n2kfra8p0\Lib\multiprocessing\process.py", line 108, in run
+    self._target(*self._args, **self._kwargs)
+  File "D:\PENTES\PENTES\Projetos-6-Saltim\backend\.venv\Lib\site-packages\uvicorn\_subprocess.py", line 80, in subprocess_started
+    target(sockets=sockets)
+  File "D:\PENTES\PENTES\Projetos-6-Saltim\backend\.venv\Lib\site-packages\uvicorn\server.py", line 65, in run
+    return asyncio.run(self.serve(sockets=sockets))
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.12_3.12.2800.0_x64__qbz5n2kfra8p0\Lib\asyncio\runners.py", line 195, in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.12_3.12.2800.0_x64__qbz5n2kfra8p0\Lib\asyncio\runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.12_3.12.2800.0_x64__qbz5n2kfra8p0\Lib\asyncio\base_events.py", line 691, in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+  File "D:\PENTES\PENTES\Projetos-6-Saltim\backend\.venv\Lib\site-packages\uvicorn\server.py", line 69, in serve
+    await self._serve(sockets)
+  File "D:\PENTES\PENTES\Projetos-6-Saltim\backend\.venv\Lib\site-packages\uvicorn\server.py", line 76, in _serve
+    config.load()
+  File "D:\PENTES\PENTES\Projetos-6-Saltim\backend\.venv\Lib\site-packages\uvicorn\config.py", line 434, in load
+    self.loaded_app = import_from_string(self.app)
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\PENTES\PENTES\Projetos-6-Saltim\backend\.venv\Lib\site-packages\uvicorn\importer.py", line 19, in import_from_string
+    module = importlib.import_module(module_str)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.12_3.12.2800.0_x64__qbz5n2kfra8p0\Lib\importlib\__init__.py", line 90, in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<frozen importlib._bootstrap>", line 1387, in _gcd_import
+  File "<frozen importlib._bootstrap>", line 1360, in _find_and_load
+  File "<frozen importlib._bootstrap>", line 1331, in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 935, in _load_unlocked
+  File "<frozen importlib._bootstrap_external>", line 999, in exec_module
+  File "<frozen importlib._bootstrap>", line 488, in _call_with_frames_removed
+  File "D:\PENTES\PENTES\Projetos-6-Saltim\backend\app\main.py", line 4629, in <module>
+    payments: list[VendaPagamentoCreate],
+                   ^^^^^^^^^^^^^^^^^^^^
+NameError: name 'VendaPagamentoCreate' is not defined
+Process SpawnProcess-17:
+Traceback (most recent call last):
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.12_3.12.2800.0_x64__qbz5n2kfra8p0\Lib\multiprocessing\process.py", line 314, in _bootstrap
+    self.run()
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.12_3.12.2800.0_x64__qbz5n2kfra8p0\Lib\multiprocessing\process.py", line 108, in run
+    self._target(*self._args, **self._kwargs)
+  File "D:\PENTES\PENTES\Projetos-6-Saltim\backend\.venv\Lib\site-packages\uvicorn\_subprocess.py", line 80, in subprocess_started
+    target(sockets=sockets)
+  File "D:\PENTES\PENTES\Projetos-6-Saltim\backend\.venv\Lib\site-packages\uvicorn\server.py", line 65, in run
+    return asyncio.run(self.serve(sockets=sockets))
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.12_3.12.2800.0_x64__qbz5n2kfra8p0\Lib\asyncio\runners.py", line 195, in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.12_3.12.2800.0_x64__qbz5n2kfra8p0\Lib\asyncio\runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.12_3.12.2800.0_x64__qbz5n2kfra8p0\Lib\asyncio\base_events.py", line 691, in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+  File "D:\PENTES\PENTES\Projetos-6-Saltim\backend\.venv\Lib\site-packages\uvicorn\server.py", line 69, in serve
+    await self._serve(sockets)
+  File "D:\PENTES\PENTES\Projetos-6-Saltim\backend\.venv\Lib\site-packages\uvicorn\server.py", line 76, in _serve
+    config.load()
+  File "D:\PENTES\PENTES\Projetos-6-Saltim\backend\.venv\Lib\site-packages\uvicorn\config.py", line 434, in load
+    self.loaded_app = import_from_string(self.app)
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\PENTES\PENTES\Projetos-6-Saltim\backend\.venv\Lib\site-packages\uvicorn\importer.py", line 19, in import_from_string
+    module = importlib.import_module(module_str)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.12_3.12.2800.0_x64__qbz5n2kfra8p0\Lib\importlib\__init__.py", line 90, in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<frozen importlib._bootstrap>", line 1387, in _gcd_import
+  File "<frozen importlib._bootstrap>", line 1360, in _find_and_load
+  File "<frozen importlib._bootstrap>", line 1331, in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 935, in _load_unlocked
+  File "<frozen importlib._bootstrap_external>", line 999, in exec_module
+  File "<frozen importlib._bootstrap>", line 488, in _call_with_frames_removed
+  File "D:\PENTES\PENTES\Projetos-6-Saltim\backend\app\main.py", line 4629, in <module>
+    payments: list[VendaPagamentoCreate],
+                   ^^^^^^^^^^^^^^^^^^^^
+NameError: name 'VendaPagamentoCreate' is not defined
+WARNING:  WatchFiles detected changes in 'app\main.py'. Reloading...
+INFO:     Started server process [3336]
 INFO:     Waiting for application startup.
-ERROR:    Traceback (most recent call last):
-  File "D:\PENTES\PENTES\Projetos-6-Saltim\backend\.venv\Lib\site-packages\starlette\routing.py", line 693, in lifespan
-    async with self.lifespan_context(app) as maybe_state:
-               ^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.12_3.12.2800.0_x64__qbz5n2kfra8p0\Lib\contextlib.py", line 210, in __aenter__
-    return await anext(self.gen)
-           ^^^^^^^^^^^^^^^^^^^^^
-  File "D:\PENTES\PENTES\Projetos-6-Saltim\backend\app\main.py", line 206, in lifespan
-    run_sql_loaders()
-  File "D:\PENTES\PENTES\Projetos-6-Saltim\backend\app\database.py", line 51, in run_sql_loaders
-    raw_conn = engine.raw_connection()
-               ^^^^^^^^^^^^^^^^^^^^^^^
-  File "D:\PENTES\PENTES\Projetos-6-Saltim\backend\.venv\Lib\site-packages\sqlalchemy\engine\base.py", line 3302, in raw_connection
-    return self.pool.connect()
-           ^^^^^^^^^^^^^^^^^^^
-  File "D:\PENTES\PENTES\Projetos-6-Saltim\backend\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 449, in connect
-    return _ConnectionFairy._checkout(self)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "D:\PENTES\PENTES\Projetos-6-Saltim\backend\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 1263, in _checkout
-    fairy = _ConnectionRecord.checkout(pool)
-            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "D:\PENTES\PENTES\Projetos-6-Saltim\backend\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 712, in checkout
-    rec = pool._do_get()
-          ^^^^^^^^^^^^^^
-  File "D:\PENTES\PENTES\Projetos-6-Saltim\backend\.venv\Lib\site-packages\sqlalchemy\pool\impl.py", line 179, in _do_get
-    with util.safe_reraise():
-         ^^^^^^^^^^^^^^^^^^^
-  File "D:\PENTES\PENTES\Projetos-6-Saltim\backend\.venv\Lib\site-packages\sqlalchemy\util\langhelpers.py", line 146, in __exit__
-    raise exc_value.with_traceback(exc_tb)
-  File "D:\PENTES\PENTES\Projetos-6-Saltim\backend\.venv\Lib\site-packages\sqlalchemy\pool\impl.py", line 177, in _do_get
-    return self._create_connection()
-           ^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "D:\PENTES\PENTES\Projetos-6-Saltim\backend\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 390, in _create_connection
-    return _ConnectionRecord(self)
-           ^^^^^^^^^^^^^^^^^^^^^^^
-  File "D:\PENTES\PENTES\Projetos-6-Saltim\backend\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 674, in __init__
-    self.__connect()
-  File "D:\PENTES\PENTES\Projetos-6-Saltim\backend\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 900, in __connect
-    with util.safe_reraise():
-         ^^^^^^^^^^^^^^^^^^^
-  File "D:\PENTES\PENTES\Projetos-6-Saltim\backend\.venv\Lib\site-packages\sqlalchemy\util\langhelpers.py", line 146, in __exit__
-    raise exc_value.with_traceback(exc_tb)
-  File "D:\PENTES\PENTES\Projetos-6-Saltim\backend\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 896, in __connect
-    self.dbapi_connection = connection = pool._invoke_creator(self)
-                                         ^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "D:\PENTES\PENTES\Projetos-6-Saltim\backend\.venv\Lib\site-packages\sqlalchemy\engine\create.py", line 643, in connect
+INFO:     Application startup complete.
+ File "D:\PENTES\PENTES\Projetos-6-Saltim\backend\.venv\Lib\site-packages\sqlalchemy\engine\create.py", line 643, in connect
     return dialect.connect(*cargs, **cparams)
            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
   File "D:\PENTES\PENTES\Projetos-6-Saltim\backend\.venv\Lib\site-packages\sqlalchemy\engine\default.py", line 621, in connect
@@ -962,6 +1010,350 @@ ERROR:    Traceback (most recent call last):
     return await anext(self.gen)
            ^^^^^^^^^^^^^^^^^^^^^
   File "D:\PENTES\PENTES\Projetos-6-Saltim\backend\app\main.py", line 206, in lifespan
+    run_sql_loaders()
+  File "D:\PENTES\PENTES\Projetos-6-Saltim\backend\app\database.py", line 51, in run_sql_loaders
+    raw_conn = engine.raw_connection()
+               ^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\PENTES\PENTES\Projetos-6-Saltim\backend\.venv\Lib\site-packages\sqlalchemy\engine\base.py", line 3302, in raw_connection
+    return self.pool.connect()
+           ^^^^^^^^^^^^^^^^^^^
+  File "D:\PENTES\PENTES\Projetos-6-Saltim\backend\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 449, in connect
+    return _ConnectionFairy._checkout(self)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\PENTES\PENTES\Projetos-6-Saltim\backend\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 1263, in _checkout
+    fairy = _ConnectionRecord.checkout(pool)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\PENTES\PENTES\Projetos-6-Saltim\backend\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 712, in checkout
+    rec = pool._do_get()
+          ^^^^^^^^^^^^^^
+  File "D:\PENTES\PENTES\Projetos-6-Saltim\backend\.venv\Lib\site-packages\sqlalchemy\pool\impl.py", line 179, in _do_get
+    with util.safe_reraise():
+         ^^^^^^^^^^^^^^^^^^^
+  File "D:\PENTES\PENTES\Projetos-6-Saltim\backend\.venv\Lib\site-packages\sqlalchemy\util\langhelpers.py", line 146, in __exit__
+    raise exc_value.with_traceback(exc_tb)
+  File "D:\PENTES\PENTES\Projetos-6-Saltim\backend\.venv\Lib\site-packages\sqlalchemy\pool\impl.py", line 177, in _do_get
+    return self._create_connection()
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\PENTES\PENTES\Projetos-6-Saltim\backend\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 390, in _create_connection
+    return _ConnectionRecord(self)
+           ^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\PENTES\PENTES\Projetos-6-Saltim\backend\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 674, in __init__
+    self.__connect()
+  File "D:\PENTES\PENTES\Projetos-6-Saltim\backend\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 900, in __connect
+    with util.safe_reraise():
+         ^^^^^^^^^^^^^^^^^^^
+  File "D:\PENTES\PENTES\Projetos-6-Saltim\backend\.venv\Lib\site-packages\sqlalchemy\util\langhelpers.py", line 146, in __exit__
+    raise exc_value.with_traceback(exc_tb)
+  File "D:\PENTES\PENTES\Projetos-6-Saltim\backend\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 896, in __connect
+    self.dbapi_connection = connection = pool._invoke_creator(self)
+                                         ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\PENTES\PENTES\Projetos-6-Saltim\backend\.venv\Lib\site-packages\sqlalchemy\engine\create.py", line 643, in connect
+    return dialect.connect(*cargs, **cparams)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\PENTES\PENTES\Projetos-6-Saltim\backend\.venv\Lib\site-packages\sqlalchemy\engine\default.py", line 621, in connect
+    return self.loaded_dbapi.connect(*cargs, **cparams)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\PENTES\PENTES\Projetos-6-Saltim\backend\.venv\Lib\site-packages\psycopg2\__init__.py", line 122, in connect
+    conn = _connect(dsn, connection_factory=connection_factory, **kwasync)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeDecodeError: 'utf-8' codec can't decode byte 0xe7 in position 78: invalid continuation byte
+
+ERROR:    Application startup failed. Exiting.
+WARNING:  WatchFiles detected changes in 'app\models.py'. Reloading...
+INFO:     Started server process [27292]
+INFO:     Waiting for application startup.
+ERROR:    Traceback (most recent call last):
+  File "D:\PENTES\PENTES\Projetos-6-Saltim\backend\.venv\Lib\site-packages\starlette\routing.py", line 693, in lifespan
+    async with self.lifespan_context(app) as maybe_state:
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.12_3.12.2800.0_x64__qbz5n2kfra8p0\Lib\contextlib.py", line 210, in __aenter__
+    return await anext(self.gen)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "D:\PENTES\PENTES\Projetos-6-Saltim\backend\app\main.py", line 206, in lifespan
+    run_sql_loaders()
+  File "D:\PENTES\PENTES\Projetos-6-Saltim\backend\app\database.py", line 51, in run_sql_loaders
+    raw_conn = engine.raw_connection()
+               ^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\PENTES\PENTES\Projetos-6-Saltim\backend\.venv\Lib\site-packages\sqlalchemy\engine\base.py", line 3302, in raw_connection
+    return self.pool.connect()
+           ^^^^^^^^^^^^^^^^^^^
+  File "D:\PENTES\PENTES\Projetos-6-Saltim\backend\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 449, in connect
+    return _ConnectionFairy._checkout(self)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\PENTES\PENTES\Projetos-6-Saltim\backend\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 1263, in _checkout
+    fairy = _ConnectionRecord.checkout(pool)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\PENTES\PENTES\Projetos-6-Saltim\backend\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 712, in checkout
+    rec = pool._do_get()
+          ^^^^^^^^^^^^^^
+  File "D:\PENTES\PENTES\Projetos-6-Saltim\backend\.venv\Lib\site-packages\sqlalchemy\pool\impl.py", line 179, in _do_get
+    with util.safe_reraise():
+         ^^^^^^^^^^^^^^^^^^^
+  File "D:\PENTES\PENTES\Projetos-6-Saltim\backend\.venv\Lib\site-packages\sqlalchemy\util\langhelpers.py", line 146, in __exit__
+    raise exc_value.with_traceback(exc_tb)
+  File "D:\PENTES\PENTES\Projetos-6-Saltim\backend\.venv\Lib\site-packages\sqlalchemy\pool\impl.py", line 177, in _do_get
+    return self._create_connection()
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\PENTES\PENTES\Projetos-6-Saltim\backend\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 390, in _create_connection
+    return _ConnectionRecord(self)
+           ^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\PENTES\PENTES\Projetos-6-Saltim\backend\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 674, in __init__
+    self.__connect()
+  File "D:\PENTES\PENTES\Projetos-6-Saltim\backend\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 900, in __connect
+    with util.safe_reraise():
+         ^^^^^^^^^^^^^^^^^^^
+  File "D:\PENTES\PENTES\Projetos-6-Saltim\backend\.venv\Lib\site-packages\sqlalchemy\util\langhelpers.py", line 146, in __exit__
+    raise exc_value.with_traceback(exc_tb)
+  File "D:\PENTES\PENTES\Projetos-6-Saltim\backend\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 896, in __connect
+    self.dbapi_connection = connection = pool._invoke_creator(self)
+                                         ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\PENTES\PENTES\Projetos-6-Saltim\backend\.venv\Lib\site-packages\sqlalchemy\engine\create.py", line 643, in connect
+    return dialect.connect(*cargs, **cparams)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\PENTES\PENTES\Projetos-6-Saltim\backend\.venv\Lib\site-packages\sqlalchemy\engine\default.py", line 621, in connect
+    return self.loaded_dbapi.connect(*cargs, **cparams)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\PENTES\PENTES\Projetos-6-Saltim\backend\.venv\Lib\site-packages\psycopg2\__init__.py", line 122, in connect
+    conn = _connect(dsn, connection_factory=connection_factory, **kwasync)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeDecodeError: 'utf-8' codec can't decode byte 0xe7 in position 78: invalid continuation byte
+
+ERROR:    Application startup failed. Exiting.
+WARNING:  WatchFiles detected changes in 'app\schemas.py'. Reloading...
+INFO:     Started server process [19148]
+INFO:     Waiting for application startup.
+ERROR:    Traceback (most recent call last):
+  File "D:\PENTES\PENTES\Projetos-6-Saltim\backend\.venv\Lib\site-packages\starlette\routing.py", line 693, in lifespan
+    async with self.lifespan_context(app) as maybe_state:
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.12_3.12.2800.0_x64__qbz5n2kfra8p0\Lib\contextlib.py", line 210, in __aenter__
+    return await anext(self.gen)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "D:\PENTES\PENTES\Projetos-6-Saltim\backend\app\main.py", line 206, in lifespan
+    run_sql_loaders()
+  File "D:\PENTES\PENTES\Projetos-6-Saltim\backend\app\database.py", line 51, in run_sql_loaders
+    raw_conn = engine.raw_connection()
+               ^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\PENTES\PENTES\Projetos-6-Saltim\backend\.venv\Lib\site-packages\sqlalchemy\engine\base.py", line 3302, in raw_connection
+    return self.pool.connect()
+           ^^^^^^^^^^^^^^^^^^^
+  File "D:\PENTES\PENTES\Projetos-6-Saltim\backend\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 449, in connect
+    return _ConnectionFairy._checkout(self)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\PENTES\PENTES\Projetos-6-Saltim\backend\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 1263, in _checkout
+    fairy = _ConnectionRecord.checkout(pool)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\PENTES\PENTES\Projetos-6-Saltim\backend\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 712, in checkout
+    rec = pool._do_get()
+          ^^^^^^^^^^^^^^
+  File "D:\PENTES\PENTES\Projetos-6-Saltim\backend\.venv\Lib\site-packages\sqlalchemy\pool\impl.py", line 179, in _do_get
+    with util.safe_reraise():
+         ^^^^^^^^^^^^^^^^^^^
+  File "D:\PENTES\PENTES\Projetos-6-Saltim\backend\.venv\Lib\site-packages\sqlalchemy\util\langhelpers.py", line 146, in __exit__
+    raise exc_value.with_traceback(exc_tb)
+  File "D:\PENTES\PENTES\Projetos-6-Saltim\backend\.venv\Lib\site-packages\sqlalchemy\pool\impl.py", line 177, in _do_get
+    return self._create_connection()
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\PENTES\PENTES\Projetos-6-Saltim\backend\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 390, in _create_connection
+    return _ConnectionRecord(self)
+           ^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\PENTES\PENTES\Projetos-6-Saltim\backend\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 674, in __init__
+    self.__connect()
+  File "D:\PENTES\PENTES\Projetos-6-Saltim\backend\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 900, in __connect
+    with util.safe_reraise():
+         ^^^^^^^^^^^^^^^^^^^
+  File "D:\PENTES\PENTES\Projetos-6-Saltim\backend\.venv\Lib\site-packages\sqlalchemy\util\langhelpers.py", line 146, in __exit__
+    raise exc_value.with_traceback(exc_tb)
+  File "D:\PENTES\PENTES\Projetos-6-Saltim\backend\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 896, in __connect
+    self.dbapi_connection = connection = pool._invoke_creator(self)
+                                         ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\PENTES\PENTES\Projetos-6-Saltim\backend\.venv\Lib\site-packages\sqlalchemy\engine\create.py", line 643, in connect
+    return dialect.connect(*cargs, **cparams)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\PENTES\PENTES\Projetos-6-Saltim\backend\.venv\Lib\site-packages\sqlalchemy\engine\default.py", line 621, in connect
+    return self.loaded_dbapi.connect(*cargs, **cparams)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\PENTES\PENTES\Projetos-6-Saltim\backend\.venv\Lib\site-packages\psycopg2\__init__.py", line 122, in connect
+    conn = _connect(dsn, connection_factory=connection_factory, **kwasync)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeDecodeError: 'utf-8' codec can't decode byte 0xe7 in position 78: invalid continuation byte
+
+ERROR:    Application startup failed. Exiting.
+WARNING:  WatchFiles detected changes in 'app\main.py'. Reloading...
+INFO:     Started server process [17692]
+INFO:     Waiting for application startup.
+ERROR:    Traceback (most recent call last):
+  File "D:\PENTES\PENTES\Projetos-6-Saltim\backend\.venv\Lib\site-packages\starlette\routing.py", line 693, in lifespan
+    async with self.lifespan_context(app) as maybe_state:
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.12_3.12.2800.0_x64__qbz5n2kfra8p0\Lib\contextlib.py", line 210, in __aenter__
+    return await anext(self.gen)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "D:\PENTES\PENTES\Projetos-6-Saltim\backend\app\main.py", line 223, in lifespan
+    run_sql_loaders()
+  File "D:\PENTES\PENTES\Projetos-6-Saltim\backend\app\database.py", line 51, in run_sql_loaders
+    raw_conn = engine.raw_connection()
+               ^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\PENTES\PENTES\Projetos-6-Saltim\backend\.venv\Lib\site-packages\sqlalchemy\engine\base.py", line 3302, in raw_connection
+    return self.pool.connect()
+           ^^^^^^^^^^^^^^^^^^^
+  File "D:\PENTES\PENTES\Projetos-6-Saltim\backend\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 449, in connect
+    return _ConnectionFairy._checkout(self)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\PENTES\PENTES\Projetos-6-Saltim\backend\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 1263, in _checkout
+    fairy = _ConnectionRecord.checkout(pool)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\PENTES\PENTES\Projetos-6-Saltim\backend\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 712, in checkout
+    rec = pool._do_get()
+          ^^^^^^^^^^^^^^
+  File "D:\PENTES\PENTES\Projetos-6-Saltim\backend\.venv\Lib\site-packages\sqlalchemy\pool\impl.py", line 179, in _do_get
+    with util.safe_reraise():
+         ^^^^^^^^^^^^^^^^^^^
+  File "D:\PENTES\PENTES\Projetos-6-Saltim\backend\.venv\Lib\site-packages\sqlalchemy\util\langhelpers.py", line 146, in __exit__
+    raise exc_value.with_traceback(exc_tb)
+  File "D:\PENTES\PENTES\Projetos-6-Saltim\backend\.venv\Lib\site-packages\sqlalchemy\pool\impl.py", line 177, in _do_get
+    return self._create_connection()
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\PENTES\PENTES\Projetos-6-Saltim\backend\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 390, in _create_connection
+    return _ConnectionRecord(self)
+           ^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\PENTES\PENTES\Projetos-6-Saltim\backend\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 674, in __init__
+    self.__connect()
+  File "D:\PENTES\PENTES\Projetos-6-Saltim\backend\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 900, in __connect
+    with util.safe_reraise():
+         ^^^^^^^^^^^^^^^^^^^
+  File "D:\PENTES\PENTES\Projetos-6-Saltim\backend\.venv\Lib\site-packages\sqlalchemy\util\langhelpers.py", line 146, in __exit__
+    raise exc_value.with_traceback(exc_tb)
+  File "D:\PENTES\PENTES\Projetos-6-Saltim\backend\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 896, in __connect
+    self.dbapi_connection = connection = pool._invoke_creator(self)
+                                         ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\PENTES\PENTES\Projetos-6-Saltim\backend\.venv\Lib\site-packages\sqlalchemy\engine\create.py", line 643, in connect
+    return dialect.connect(*cargs, **cparams)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\PENTES\PENTES\Projetos-6-Saltim\backend\.venv\Lib\site-packages\sqlalchemy\engine\default.py", line 621, in connect
+    return self.loaded_dbapi.connect(*cargs, **cparams)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\PENTES\PENTES\Projetos-6-Saltim\backend\.venv\Lib\site-packages\psycopg2\__init__.py", line 122, in connect
+    conn = _connect(dsn, connection_factory=connection_factory, **kwasync)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeDecodeError: 'utf-8' codec can't decode byte 0xe7 in position 78: invalid continuation byte
+
+ERROR:    Application startup failed. Exiting.
+WARNING:  WatchFiles detected changes in 'app\main.py'. Reloading...
+INFO:     Started server process [30776]
+INFO:     Waiting for application startup.
+ERROR:    Traceback (most recent call last):
+  File "D:\PENTES\PENTES\Projetos-6-Saltim\backend\.venv\Lib\site-packages\starlette\routing.py", line 693, in lifespan
+    async with self.lifespan_context(app) as maybe_state:
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.12_3.12.2800.0_x64__qbz5n2kfra8p0\Lib\contextlib.py", line 210, in __aenter__
+    return await anext(self.gen)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "D:\PENTES\PENTES\Projetos-6-Saltim\backend\app\main.py", line 223, in lifespan
+    run_sql_loaders()
+  File "D:\PENTES\PENTES\Projetos-6-Saltim\backend\app\database.py", line 51, in run_sql_loaders
+    raw_conn = engine.raw_connection()
+               ^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\PENTES\PENTES\Projetos-6-Saltim\backend\.venv\Lib\site-packages\sqlalchemy\engine\base.py", line 3302, in raw_connection
+    return self.pool.connect()
+           ^^^^^^^^^^^^^^^^^^^
+  File "D:\PENTES\PENTES\Projetos-6-Saltim\backend\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 449, in connect
+    return _ConnectionFairy._checkout(self)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\PENTES\PENTES\Projetos-6-Saltim\backend\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 1263, in _checkout
+    fairy = _ConnectionRecord.checkout(pool)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\PENTES\PENTES\Projetos-6-Saltim\backend\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 712, in checkout
+    rec = pool._do_get()
+          ^^^^^^^^^^^^^^
+  File "D:\PENTES\PENTES\Projetos-6-Saltim\backend\.venv\Lib\site-packages\sqlalchemy\pool\impl.py", line 179, in _do_get
+    with util.safe_reraise():
+         ^^^^^^^^^^^^^^^^^^^
+  File "D:\PENTES\PENTES\Projetos-6-Saltim\backend\.venv\Lib\site-packages\sqlalchemy\util\langhelpers.py", line 146, in __exit__
+    raise exc_value.with_traceback(exc_tb)
+  File "D:\PENTES\PENTES\Projetos-6-Saltim\backend\.venv\Lib\site-packages\sqlalchemy\pool\impl.py", line 177, in _do_get
+    return self._create_connection()
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\PENTES\PENTES\Projetos-6-Saltim\backend\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 390, in _create_connection
+    return _ConnectionRecord(self)
+           ^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\PENTES\PENTES\Projetos-6-Saltim\backend\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 674, in __init__
+    self.__connect()
+  File "D:\PENTES\PENTES\Projetos-6-Saltim\backend\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 900, in __connect
+    with util.safe_reraise():
+         ^^^^^^^^^^^^^^^^^^^
+  File "D:\PENTES\PENTES\Projetos-6-Saltim\backend\.venv\Lib\site-packages\sqlalchemy\util\langhelpers.py", line 146, in __exit__
+    raise exc_value.with_traceback(exc_tb)
+  File "D:\PENTES\PENTES\Projetos-6-Saltim\backend\.venv\Lib\site-packages\sqlalchemy\pool\base.py", line 896, in __connect
+    self.dbapi_connection = connection = pool._invoke_creator(self)
+                                         ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\PENTES\PENTES\Projetos-6-Saltim\backend\.venv\Lib\site-packages\sqlalchemy\engine\create.py", line 643, in connect
+    return dialect.connect(*cargs, **cparams)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\PENTES\PENTES\Projetos-6-Saltim\backend\.venv\Lib\site-packages\sqlalchemy\engine\default.py", line 621, in connect
+    return self.loaded_dbapi.connect(*cargs, **cparams)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\PENTES\PENTES\Projetos-6-Saltim\backend\.venv\Lib\site-packages\psycopg2\__init__.py", line 122, in connect
+    conn = _connect(dsn, connection_factory=connection_factory, **kwasync)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeDecodeError: 'utf-8' codec can't decode byte 0xe7 in position 78: invalid continuation byte
+
+ERROR:    Application startup failed. Exiting.
+WARNING:  WatchFiles detected changes in 'app\main.py'. Reloading...
+Process SpawnProcess-58:
+Traceback (most recent call last):
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.12_3.12.2800.0_x64__qbz5n2kfra8p0\Lib\multiprocessing\process.py", line 314, in _bootstrap
+    self.run()
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.12_3.12.2800.0_x64__qbz5n2kfra8p0\Lib\multiprocessing\process.py", line 108, in run
+    self._target(*self._args, **self._kwargs)
+  File "D:\PENTES\PENTES\Projetos-6-Saltim\backend\.venv\Lib\site-packages\uvicorn\_subprocess.py", line 80, in subprocess_started
+    target(sockets=sockets)
+  File "D:\PENTES\PENTES\Projetos-6-Saltim\backend\.venv\Lib\site-packages\uvicorn\server.py", line 65, in run
+    return asyncio.run(self.serve(sockets=sockets))
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.12_3.12.2800.0_x64__qbz5n2kfra8p0\Lib\asyncio\runners.py", line 195, in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.12_3.12.2800.0_x64__qbz5n2kfra8p0\Lib\asyncio\runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.12_3.12.2800.0_x64__qbz5n2kfra8p0\Lib\asyncio\base_events.py", line 691, in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+  File "D:\PENTES\PENTES\Projetos-6-Saltim\backend\.venv\Lib\site-packages\uvicorn\server.py", line 69, in serve
+    await self._serve(sockets)
+  File "D:\PENTES\PENTES\Projetos-6-Saltim\backend\.venv\Lib\site-packages\uvicorn\server.py", line 76, in _serve
+    config.load()
+  File "D:\PENTES\PENTES\Projetos-6-Saltim\backend\.venv\Lib\site-packages\uvicorn\config.py", line 434, in load
+    self.loaded_app = import_from_string(self.app)
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\PENTES\PENTES\Projetos-6-Saltim\backend\.venv\Lib\site-packages\uvicorn\importer.py", line 19, in import_from_string
+    module = importlib.import_module(module_str)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.12_3.12.2800.0_x64__qbz5n2kfra8p0\Lib\importlib\__init__.py", line 90, in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<frozen importlib._bootstrap>", line 1387, in _gcd_import
+  File "<frozen importlib._bootstrap>", line 1360, in _find_and_load
+  File "<frozen importlib._bootstrap>", line 1331, in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 935, in _load_unlocked
+  File "<frozen importlib._bootstrap_external>", line 999, in exec_module
+  File "<frozen importlib._bootstrap>", line 488, in _call_with_frames_removed
+  File "D:\PENTES\PENTES\Projetos-6-Saltim\backend\app\main.py", line 4629, in <module>
+    payments: list[VendaPagamentoCreate],
+                   ^^^^^^^^^^^^^^^^^^^^
+NameError: name 'VendaPagamentoCreate' is not defined
+WARNING:  WatchFiles detected changes in 'app\main.py'. Reloading...
+INFO:     Started server process [32852]
+INFO:     Waiting for application startup.
+ERROR:    Traceback (most recent call last):
+  File "D:\PENTES\PENTES\Projetos-6-Saltim\backend\.venv\Lib\site-packages\starlette\routing.py", line 693, in lifespan
+    async with self.lifespan_context(app) as maybe_state:
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.12_3.12.2800.0_x64__qbz5n2kfra8p0\Lib\contextlib.py", line 210, in __aenter__
+    return await anext(self.gen)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "D:\PENTES\PENTES\Projetos-6-Saltim\backend\app\main.py", line 224, in lifespan
     run_sql_loaders()
   File "D:\PENTES\PENTES\Projetos-6-Saltim\backend\app\database.py", line 51, in run_sql_loaders
     raw_conn = engine.raw_connection()

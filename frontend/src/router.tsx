@@ -11,6 +11,7 @@ import { ingredienteEditRoute } from './routes/IngredienteEditPage'
 import { fornecedorNewRoute } from './routes/FornecedorNewPage'
 import { fornecedorProfileRoute, fornecedoresRoute } from './routes/FornecedoresPage'
 import { pedidoGroupDetailRoute, pedidoNewRoute, pedidosRoute } from './routes/PedidosPage'
+import { vendasRoute } from './routes/VendasPage'
 import { aparenciaAliasRoute, aparenciaRoute } from './routes/AparenciaPage'
 import { comprasPlanejamentoRoute } from './routes/ComprasPlanejamentoPage'
 
@@ -29,6 +30,7 @@ const routeTree = rootRoute.addChildren([
   pedidosRoute,
   pedidoNewRoute,
   pedidoGroupDetailRoute,
+  vendasRoute,
   comprasPlanejamentoRoute,
   aparenciaRoute,
   aparenciaAliasRoute,

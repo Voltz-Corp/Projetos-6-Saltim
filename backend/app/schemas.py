@@ -460,6 +460,194 @@ class PedidoCreateResponse(BaseModel):
     email_results: List[PedidoEmailResult] = Field(default_factory=list)
 
 
+class ClienteCreate(BaseModel):
+    name: str
+    document: Optional[str] = None
+    email: Optional[str] = None
+    phone: Optional[str] = None
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("Nome do cliente e obrigatorio")
+        return value
+
+    @field_validator("document", "email", "phone")
+    @classmethod
+    def normalize_optional_text(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        value = value.strip()
+        return value or None
+
+
+class ClienteOut(BaseModel):
+    id: str
+    name: str
+    document: Optional[str] = None
+    email: Optional[str] = None
+    phone: Optional[str] = None
+    created_at: Optional[datetime] = None
+
+    @field_serializer("created_at", when_used="json")
+    def serialize_created_at(self, value: Optional[datetime]) -> Optional[str]:
+        return _to_recife_datetime(value)
+
+
+class VendaProdutoOut(BaseModel):
+    id: str
+    name: str
+    recipe_type: str
+    sale_price: float
+    yield_qty: Optional[float] = None
+    yield_unit: Optional[str] = None
+    ingredients_count: int
+    available: bool
+    max_quantity: Optional[float] = None
+    stock_warnings: List[str] = Field(default_factory=list)
+
+
+class VendaItemCreate(BaseModel):
+    recipe_id: str
+    quantity: float = Field(gt=0)
+    unit_price: Optional[float] = Field(default=None, ge=0)
+    discount_value: float = Field(default=0, ge=0)
+
+
+class VendaPagamentoCreate(BaseModel):
+    method: str
+    amount: float = Field(gt=0)
+    status: str = "pago"
+    change_amount: float = Field(default=0, ge=0)
+    external_reference: Optional[str] = None
+
+    @field_validator("method")
+    @classmethod
+    def validate_method(cls, value: str) -> str:
+        value = value.strip().lower()
+        if not value:
+            raise ValueError("Forma de pagamento e obrigatoria")
+        return value
+
+
+class VendaCreateRequest(BaseModel):
+    customer_id: Optional[str] = None
+    customer: Optional[ClienteCreate] = None
+    items: List[VendaItemCreate] = Field(default_factory=list, min_length=1)
+    payments: List[VendaPagamentoCreate] = Field(default_factory=list)
+    discount_total: float = Field(default=0, ge=0)
+    source: str = "balcao"
+    notes: Optional[str] = None
+
+
+class VendaConfirmRequest(BaseModel):
+    payments: List[VendaPagamentoCreate] = Field(default_factory=list)
+
+
+class VendaPagamentoOut(BaseModel):
+    id: str
+    method: str
+    amount: float
+    status: str
+    paid_at: Optional[datetime] = None
+    change_amount: float
+    external_reference: Optional[str] = None
+
+    @field_serializer("paid_at", when_used="json")
+    def serialize_paid_at(self, value: Optional[datetime]) -> Optional[str]:
+        return _to_recife_datetime(value)
+
+
+class VendaItemOut(BaseModel):
+    id: str
+    recipe_id: str
+    recipe_name: str
+    quantity: float
+    unit_price: float
+    discount_value: float
+    total_value: float
+    venda_historica_id: Optional[str] = None
+
+
+class VendaFiscalDocumentOut(BaseModel):
+    id: str
+    venda_id: str
+    document_type: str
+    status: str
+    provider: Optional[str] = None
+    access_key: Optional[str] = None
+    protocol: Optional[str] = None
+    issued_at: Optional[datetime] = None
+    cancelled_at: Optional[datetime] = None
+    payload: Optional[dict[str, Any]] = None
+    error_message: Optional[str] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+    @field_serializer(
+        "issued_at",
+        "cancelled_at",
+        "created_at",
+        "updated_at",
+        when_used="json",
+    )
+    def serialize_datetime(self, value: Optional[datetime]) -> Optional[str]:
+        return _to_recife_datetime(value)
+
+
+class VendaListItem(BaseModel):
+    id: str
+    date_time: datetime
+    customer_name: Optional[str] = None
+    status: str
+    fiscal_status: str
+    items_count: int
+    items_qty: float
+    total: float
+    paid_total: float
+
+    @field_serializer("date_time", when_used="json")
+    def serialize_date_time(self, value: datetime) -> Optional[str]:
+        return _to_recife_datetime(value)
+
+
+class VendaPaginado(BaseModel):
+    items: List[VendaListItem]
+    total: int
+    page: int
+    page_size: int
+    total_pages: int
+
+
+class VendaDetailOut(BaseModel):
+    id: str
+    date_time: datetime
+    customer: Optional[ClienteOut] = None
+    status: str
+    fiscal_status: str
+    subtotal: float
+    discount_total: float
+    total: float
+    source: str
+    notes: Optional[str] = None
+    confirmed_at: Optional[datetime] = None
+    canceled_at: Optional[datetime] = None
+    items: List[VendaItemOut] = Field(default_factory=list)
+    payments: List[VendaPagamentoOut] = Field(default_factory=list)
+    fiscal_document: Optional[VendaFiscalDocumentOut] = None
+
+    @field_serializer(
+        "date_time",
+        "confirmed_at",
+        "canceled_at",
+        when_used="json",
+    )
+    def serialize_datetime(self, value: Optional[datetime]) -> Optional[str]:
+        return _to_recife_datetime(value)
+
+
 class PurchasePlanGenerateRequest(BaseModel):
     contagem_id: Optional[int] = None
     horizon_days: int = Field(default=7, ge=1, le=30)
