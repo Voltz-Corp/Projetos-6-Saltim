@@ -796,6 +796,240 @@ html[data-theme='ocean'] {
   --theme-success-text: #5eead4;
 }
 
+html[data-theme^='world-cup-'] {
+  --theme-surface: var(--cup-surface);
+  --theme-card: var(--cup-card);
+  --theme-sidebar: var(--cup-sidebar);
+  --theme-logo: var(--cup-logo);
+  --theme-brand-50: color-mix(in srgb, var(--cup-primary) 12%, var(--cup-card));
+  --theme-brand-100: color-mix(in srgb, var(--cup-primary) 18%, var(--cup-card));
+  --theme-brand-200: color-mix(in srgb, var(--cup-primary) 32%, var(--cup-card));
+  --theme-brand-300: color-mix(in srgb, var(--cup-primary) 56%, var(--cup-card));
+  --theme-brand-600: var(--cup-primary);
+  --theme-brand-700: var(--cup-secondary);
+  --theme-red: var(--cup-red);
+  --theme-green: var(--cup-green);
+  --theme-blue: var(--cup-blue);
+  --theme-cream: color-mix(in srgb, var(--cup-accent) 22%, var(--cup-card));
+  --theme-chart-1: var(--cup-primary);
+  --theme-chart-2: var(--cup-secondary);
+  --theme-chart-3: var(--cup-accent);
+  --theme-chart-4: var(--cup-blue);
+  --theme-chart-5: var(--cup-red);
+  --theme-chart-6: var(--cup-green);
+  --theme-chart-7: var(--theme-stone-500);
+  --theme-chart-8: color-mix(in srgb, var(--cup-primary) 70%, var(--cup-accent));
+  --theme-chart-grid: var(--theme-stone-200);
+  --theme-chart-axis: var(--theme-stone-500);
+  --theme-chart-cursor: var(--theme-brand-50);
+  --theme-alert-bg: color-mix(in srgb, var(--cup-accent) 18%, var(--cup-card));
+  --theme-alert-border: color-mix(in srgb, var(--cup-accent) 52%, var(--cup-card));
+  --theme-alert-soft: color-mix(in srgb, var(--cup-accent) 28%, var(--cup-card));
+  --theme-alert-text: color-mix(in srgb, var(--cup-secondary) 72%, var(--theme-stone-900));
+  --theme-alert-strong: var(--cup-secondary);
+  --theme-success-bg: color-mix(in srgb, var(--cup-green) 16%, var(--cup-card));
+  --theme-success-border: color-mix(in srgb, var(--cup-green) 44%, var(--cup-card));
+  --theme-success-text: var(--cup-green);
+}
+
+html[data-theme='world-cup-spain'],
+html[data-theme='world-cup-argentina'],
+html[data-theme='world-cup-england'],
+html[data-theme='world-cup-brazil'],
+html[data-theme='world-cup-germany'],
+html[data-theme='world-cup-netherlands'],
+html[data-theme='world-cup-uruguay'],
+html[data-theme='world-cup-colombia'],
+html[data-theme='world-cup-croatia'] {
+  --theme-on-primary: #ffffff;
+  --theme-stone-50: #fafafa;
+  --theme-stone-100: #f4f4f5;
+  --theme-stone-200: #e4e4e7;
+  --theme-stone-300: #d4d4d8;
+  --theme-stone-400: #a1a1aa;
+  --theme-stone-500: #71717a;
+  --theme-stone-600: #52525b;
+  --theme-stone-700: #3f3f46;
+  --theme-stone-800: #27272a;
+  --theme-stone-900: #18181b;
+  --theme-stone-950: #09090b;
+}
+
+html[data-theme='world-cup-france'],
+html[data-theme='world-cup-portugal'],
+html[data-theme='world-cup-belgium'] {
+  --theme-on-primary: #ffffff;
+  --theme-stone-50: color-mix(in srgb, var(--cup-card) 88%, white);
+  --theme-stone-100: color-mix(in srgb, var(--cup-card) 78%, white);
+  --theme-stone-200: color-mix(in srgb, var(--cup-card) 62%, white);
+  --theme-stone-300: color-mix(in srgb, var(--cup-card) 46%, white);
+  --theme-stone-400: color-mix(in srgb, var(--cup-card) 28%, white);
+  --theme-stone-500: color-mix(in srgb, var(--cup-card) 12%, white);
+  --theme-stone-600: #e4e4e7;
+  --theme-stone-700: #f4f4f5;
+  --theme-stone-800: #fafafa;
+  --theme-stone-900: #ffffff;
+  --theme-stone-950: #ffffff;
+}
+
+html[data-theme='world-cup-france'] {
+  --cup-surface: #0c1633;
+  --cup-card: #142350;
+  --cup-sidebar: #081022;
+  --cup-logo: #ef3340;
+  --cup-primary: #2f55a4;
+  --cup-secondary: #ef3340;
+  --cup-accent: #ffffff;
+  --cup-red: #ef3340;
+  --cup-green: #22c55e;
+  --cup-blue: #5b7bd5;
+}
+
+html[data-theme='world-cup-spain'] {
+  --cup-surface: #fff4d6;
+  --cup-card: #ffffff;
+  --cup-sidebar: #7a0613;
+  --cup-logo: #ffc400;
+  --cup-primary: #c60b1e;
+  --cup-secondary: #d99a00;
+  --cup-accent: #ffc400;
+  --cup-red: #c60b1e;
+  --cup-green: #16803a;
+  --cup-blue: #254d9a;
+}
+
+html[data-theme='world-cup-argentina'] {
+  --cup-surface: #e9f5ff;
+  --cup-card: #ffffff;
+  --cup-sidebar: #2d7eb8;
+  --cup-logo: #f6b40e;
+  --cup-primary: #4d9fd3;
+  --cup-secondary: #c89519;
+  --cup-accent: #ffffff;
+  --cup-red: #d33f49;
+  --cup-green: #1f8f72;
+  --cup-blue: #5ba7d9;
+}
+
+html[data-theme='world-cup-england'] {
+  --cup-surface: #f7f8fb;
+  --cup-card: #ffffff;
+  --cup-sidebar: #1d2a57;
+  --cup-logo: #cf142b;
+  --cup-primary: #cf142b;
+  --cup-secondary: #1d2a57;
+  --cup-accent: #ffffff;
+  --cup-red: #cf142b;
+  --cup-green: #1f8f72;
+  --cup-blue: #1d2a57;
+}
+
+html[data-theme='world-cup-brazil'] {
+  --theme-on-primary: #17320f;
+  --cup-surface: #fff8cc;
+  --cup-card: #ffffff;
+  --cup-sidebar: #073b1c;
+  --cup-logo: #ffdf00;
+  --cup-primary: #f7d117;
+  --cup-secondary: #009c3b;
+  --cup-accent: #002776;
+  --cup-red: #d62828;
+  --cup-green: #009c3b;
+  --cup-blue: #002776;
+}
+
+html[data-theme='world-cup-portugal'] {
+  --cup-surface: #21070d;
+  --cup-card: #371017;
+  --cup-sidebar: #140407;
+  --cup-logo: #d4af37;
+  --cup-primary: #a70f2b;
+  --cup-secondary: #10a374;
+  --cup-accent: #d4af37;
+  --cup-red: #d7263d;
+  --cup-green: #10a374;
+  --cup-blue: #4f8cc9;
+}
+
+html[data-theme='world-cup-germany'] {
+  --cup-surface: #f4f4f2;
+  --cup-card: #ffffff;
+  --cup-sidebar: #111111;
+  --cup-logo: #ffce00;
+  --cup-primary: #111111;
+  --cup-secondary: #b88b00;
+  --cup-accent: #dd0000;
+  --cup-red: #dd0000;
+  --cup-green: #16803a;
+  --cup-blue: #345995;
+}
+
+html[data-theme='world-cup-netherlands'] {
+  --cup-surface: #fff0e4;
+  --cup-card: #ffffff;
+  --cup-sidebar: #102b5c;
+  --cup-logo: #ff6f00;
+  --cup-primary: #f36c21;
+  --cup-secondary: #102b5c;
+  --cup-accent: #ffffff;
+  --cup-red: #c43226;
+  --cup-green: #1b8a5a;
+  --cup-blue: #102b5c;
+}
+
+html[data-theme='world-cup-belgium'] {
+  --cup-surface: #1c0708;
+  --cup-card: #2d0d10;
+  --cup-sidebar: #080404;
+  --cup-logo: #ffd90c;
+  --cup-primary: #e30613;
+  --cup-secondary: #ffd90c;
+  --cup-accent: #111111;
+  --cup-red: #e30613;
+  --cup-green: #1f9d65;
+  --cup-blue: #2f6fc4;
+}
+
+html[data-theme='world-cup-uruguay'] {
+  --cup-surface: #eaf8ff;
+  --cup-card: #ffffff;
+  --cup-sidebar: #1475a8;
+  --cup-logo: #d8a31a;
+  --cup-primary: #4bb6e8;
+  --cup-secondary: #c89418;
+  --cup-accent: #ffffff;
+  --cup-red: #d64045;
+  --cup-green: #138a63;
+  --cup-blue: #4bb6e8;
+}
+
+html[data-theme='world-cup-colombia'] {
+  --theme-on-primary: #201a06;
+  --cup-surface: #fff7c2;
+  --cup-card: #ffffff;
+  --cup-sidebar: #003893;
+  --cup-logo: #fcd116;
+  --cup-primary: #f7c600;
+  --cup-secondary: #003893;
+  --cup-accent: #ce1126;
+  --cup-red: #ce1126;
+  --cup-green: #16803a;
+  --cup-blue: #003893;
+}
+
+html[data-theme='world-cup-croatia'] {
+  --cup-surface: #fff1f1;
+  --cup-card: #ffffff;
+  --cup-sidebar: #171796;
+  --cup-logo: #d20a11;
+  --cup-primary: #d20a11;
+  --cup-secondary: #171796;
+  --cup-accent: #ffffff;
+  --cup-red: #d20a11;
+  --cup-green: #16803a;
+  --cup-blue: #171796;
+}
+
 @layer base {
   html { font-family: var(--font-sans); }
   body {
@@ -864,6 +1098,29 @@ a {
 
 svg {
   overflow: visible;
+}
+
+.world-cup-confetti-piece {
+  animation: world-cup-confetti-fall 820ms cubic-bezier(0.14, 0.86, 0.34, 1) forwards;
+  border-radius: 2px;
+  opacity: 0;
+  position: absolute;
+  top: -18px;
+  transform: translate3d(0, 0, 0) rotate(0deg);
+}
+
+@keyframes world-cup-confetti-fall {
+  0% {
+    opacity: 0;
+    transform: translate3d(0, -18px, 0) rotate(0deg);
+  }
+  12% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translate3d(var(--confetti-x), 72vh, 0) rotate(var(--confetti-rotate));
+  }
 }
 
 html[data-theme='cyberpunk'] .saltim-sidebar {
