@@ -132,7 +132,7 @@ function ContagemRow({ contagem }: { contagem: ContagemResumo }) {
           <span
             className={cn(
               'inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-bold',
-              finalizada ? 'bg-green-50 text-green-700' : 'bg-amber-50 text-amber-700',
+              finalizada ? 'saltim-success-soft' : 'saltim-alert-soft',
             )}
           >
             {finalizada ? <CheckCircle2 className="size-3" /> : <CalendarClock className="size-3" />}

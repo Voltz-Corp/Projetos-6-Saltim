@@ -84,7 +84,10 @@ export function ContagemAtualPage() {
         <div className="h-1.5 bg-white border border-stone-200 rounded-full overflow-hidden">
           <div
             className="h-full rounded-full transition-all duration-500"
-            style={{ width: `${pct}%`, backgroundColor: pct === 100 ? '#2D7A3A' : '#F07820' }}
+            style={{
+              width: `${pct}%`,
+              backgroundColor: pct === 100 ? 'var(--theme-green)' : 'var(--theme-brand-600)',
+            }}
           />
         </div>
       </div>

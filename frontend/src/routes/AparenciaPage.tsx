@@ -42,7 +42,7 @@ function AparenciaPage() {
               <div>
                 <h2 className="text-base font-black text-stone-900">Modo</h2>
                 <p className="mt-1 text-sm font-medium text-stone-500">
-                  Alterne rapidamente entre a base clara e escura do Saltim.
+                  Alterne rapidamente entre a base clara e escura principal.
                 </p>
               </div>
               <div className="grid w-full max-w-sm grid-cols-2 rounded-lg border border-stone-200 bg-stone-50 p-1">

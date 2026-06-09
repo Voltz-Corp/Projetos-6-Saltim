@@ -37,9 +37,154 @@
 }
 
 :root {
+  --theme-surface: #f6f5fb;
+  --theme-card: #ffffff;
+  --theme-sidebar: #17123f;
+  --theme-logo: #f15a24;
+  --theme-on-primary: #ffffff;
+  --theme-brand-50: #efedff;
+  --theme-brand-100: #ded9ff;
+  --theme-brand-200: #c4bbff;
+  --theme-brand-300: #9488f0;
+  --theme-brand-600: #1b1464;
+  --theme-brand-700: #f15a24;
+  --theme-stone-50: #fbfafc;
+  --theme-stone-100: #f1eff7;
+  --theme-stone-200: #e4e0ef;
+  --theme-stone-300: #cdc7dd;
+  --theme-stone-400: #9b93b2;
+  --theme-stone-500: #6f6787;
+  --theme-stone-600: #514a6a;
+  --theme-stone-700: #3d3655;
+  --theme-stone-800: #2d2842;
+  --theme-stone-900: #211f33;
+  --theme-stone-950: #171326;
+  --theme-red: #d93f2c;
+  --theme-green: #227c5a;
+  --theme-blue: #3667d8;
+  --theme-cream: #f4d6c9;
+  --theme-chart-1: #1b1464;
+  --theme-chart-2: #f15a24;
+  --theme-chart-3: #3667d8;
+  --theme-chart-4: #227c5a;
+  --theme-chart-5: #d93f2c;
+  --theme-chart-6: #9488f0;
+  --theme-chart-7: #6f6787;
+  --theme-chart-8: #ff9b67;
+  --theme-chart-grid: #e4e0ef;
+  --theme-chart-axis: #6f6787;
+  --theme-chart-cursor: #efedff;
+  --theme-alert-bg: #fff2ec;
+  --theme-alert-border: #ffbd9c;
+  --theme-alert-soft: #ffe2d4;
+  --theme-alert-text: #8d3214;
+  --theme-alert-strong: #f15a24;
+  --theme-success-bg: #edf9f4;
+  --theme-success-border: #b8ead7;
+  --theme-success-text: #227c5a;
+}
+
+html[data-theme='maestro-light'] {
+  --theme-surface: #f6f5fb;
+  --theme-card: #ffffff;
+  --theme-sidebar: #17123f;
+  --theme-logo: #f15a24;
+  --theme-on-primary: #ffffff;
+  --theme-brand-50: #efedff;
+  --theme-brand-100: #ded9ff;
+  --theme-brand-200: #c4bbff;
+  --theme-brand-300: #9488f0;
+  --theme-brand-600: #1b1464;
+  --theme-brand-700: #f15a24;
+  --theme-stone-50: #fbfafc;
+  --theme-stone-100: #f1eff7;
+  --theme-stone-200: #e4e0ef;
+  --theme-stone-300: #cdc7dd;
+  --theme-stone-400: #9b93b2;
+  --theme-stone-500: #6f6787;
+  --theme-stone-600: #514a6a;
+  --theme-stone-700: #3d3655;
+  --theme-stone-800: #2d2842;
+  --theme-stone-900: #211f33;
+  --theme-stone-950: #171326;
+  --theme-red: #d93f2c;
+  --theme-green: #227c5a;
+  --theme-blue: #3667d8;
+  --theme-cream: #f4d6c9;
+  --theme-chart-1: #1b1464;
+  --theme-chart-2: #f15a24;
+  --theme-chart-3: #3667d8;
+  --theme-chart-4: #227c5a;
+  --theme-chart-5: #d93f2c;
+  --theme-chart-6: #9488f0;
+  --theme-chart-7: #6f6787;
+  --theme-chart-8: #ff9b67;
+  --theme-chart-grid: #e4e0ef;
+  --theme-chart-axis: #6f6787;
+  --theme-chart-cursor: #efedff;
+  --theme-alert-bg: #fff2ec;
+  --theme-alert-border: #ffbd9c;
+  --theme-alert-soft: #ffe2d4;
+  --theme-alert-text: #8d3214;
+  --theme-alert-strong: #f15a24;
+  --theme-success-bg: #edf9f4;
+  --theme-success-border: #b8ead7;
+  --theme-success-text: #227c5a;
+}
+
+html[data-theme='maestro-dark'] {
+  --theme-surface: #141127;
+  --theme-card: #1e1a33;
+  --theme-sidebar: #100d24;
+  --theme-logo: #f15a24;
+  --theme-on-primary: #ffffff;
+  --theme-brand-50: #2a1931;
+  --theme-brand-100: #3b1f36;
+  --theme-brand-200: #5d2e42;
+  --theme-brand-300: #a23f42;
+  --theme-brand-600: #f15a24;
+  --theme-brand-700: #ff875b;
+  --theme-stone-50: #1e1a33;
+  --theme-stone-100: #29233f;
+  --theme-stone-200: #37304f;
+  --theme-stone-300: #51486a;
+  --theme-stone-400: #8f86aa;
+  --theme-stone-500: #c9c3dc;
+  --theme-stone-600: #ddd8ec;
+  --theme-stone-700: #ece8f6;
+  --theme-stone-800: #f5f3ff;
+  --theme-stone-900: #ffffff;
+  --theme-stone-950: #ffffff;
+  --theme-red: #ff765f;
+  --theme-green: #77d8ae;
+  --theme-blue: #8e7cff;
+  --theme-cream: #442718;
+  --theme-chart-1: #f15a24;
+  --theme-chart-2: #8e7cff;
+  --theme-chart-3: #ffb088;
+  --theme-chart-4: #77d8ae;
+  --theme-chart-5: #ff765f;
+  --theme-chart-6: #c9c3dc;
+  --theme-chart-7: #5d2e42;
+  --theme-chart-8: #1b1464;
+  --theme-chart-grid: #37304f;
+  --theme-chart-axis: #c9c3dc;
+  --theme-chart-cursor: #2a1931;
+  --theme-alert-bg: #3a2218;
+  --theme-alert-border: #9a3f22;
+  --theme-alert-soft: #442718;
+  --theme-alert-text: #ffbd9c;
+  --theme-alert-strong: #f15a24;
+  --theme-success-bg: #173427;
+  --theme-success-border: #2d7958;
+  --theme-success-text: #77d8ae;
+}
+
+html[data-theme='saltim-light'] {
   --theme-surface: #f5f4f1;
   --theme-card: #ffffff;
   --theme-sidebar: #1a1918;
+  --theme-logo: #f07820;
   --theme-on-primary: #ffffff;
   --theme-brand-50: #fef4e8;
   --theme-brand-100: #fdebd0;
@@ -62,12 +207,33 @@
   --theme-green: #2d7a3a;
   --theme-blue: #52b9eb;
   --theme-cream: #ede0b4;
+  --theme-chart-1: #f07820;
+  --theme-chart-2: #52b9eb;
+  --theme-chart-3: #2d7a3a;
+  --theme-chart-4: #e4332b;
+  --theme-chart-5: #ede0b4;
+  --theme-chart-6: #c5621a;
+  --theme-chart-7: #5f5e5a;
+  --theme-chart-8: #f5a565;
+  --theme-chart-grid: #e8e6e0;
+  --theme-chart-axis: #888780;
+  --theme-chart-cursor: #fef4e8;
+  --theme-alert-bg: #fffbeb;
+  --theme-alert-border: #f7d77b;
+  --theme-alert-soft: #fef3c7;
+  --theme-alert-text: #8a3f11;
+  --theme-alert-strong: #c5621a;
+  --theme-success-bg: #ecfdf3;
+  --theme-success-border: #bbf7d0;
+  --theme-success-text: #15803d;
 }
 
 html[data-theme='saltim-dark'] {
   --theme-surface: #11100f;
   --theme-card: #1c1917;
   --theme-sidebar: #0c0a09;
+  --theme-logo: #f59e42;
+  --theme-on-primary: #1c1917;
   --theme-brand-50: #431f0b;
   --theme-brand-100: #5f2d10;
   --theme-brand-200: #8a4618;
@@ -89,12 +255,128 @@ html[data-theme='saltim-dark'] {
   --theme-green: #86efac;
   --theme-blue: #7dd3fc;
   --theme-cream: #4a3d22;
+  --theme-chart-1: #f59e42;
+  --theme-chart-2: #7dd3fc;
+  --theme-chart-3: #86efac;
+  --theme-chart-4: #f87171;
+  --theme-chart-5: #d6d3d1;
+  --theme-chart-6: #ffb86c;
+  --theme-chart-7: #a8a29e;
+  --theme-chart-8: #c46522;
+  --theme-chart-grid: #3a342f;
+  --theme-chart-axis: #d6d3d1;
+  --theme-chart-cursor: #431f0b;
+  --theme-alert-bg: #332719;
+  --theme-alert-border: #8a4618;
+  --theme-alert-soft: #431f0b;
+  --theme-alert-text: #ffcf9a;
+  --theme-alert-strong: #f59e42;
+  --theme-success-bg: #17301f;
+  --theme-success-border: #2e6b3d;
+  --theme-success-text: #86efac;
+}
+
+html[data-theme='mossy-forest-light-green'] {
+  --theme-surface: #f1f5e0;
+  --theme-card: #f7faf0;
+  --theme-sidebar: #3d5436;
+  --theme-logo: #d7b05e;
+  --theme-on-primary: #f7faf0;
+  --theme-brand-50: #e8eed4;
+  --theme-brand-100: #dfe6ca;
+  --theme-brand-200: #cbd8ab;
+  --theme-brand-300: #91aa68;
+  --theme-brand-600: #3d5436;
+  --theme-brand-700: #a46122;
+  --theme-stone-50: #f7faf0;
+  --theme-stone-100: #f1f5e0;
+  --theme-stone-200: #e4ead0;
+  --theme-stone-300: #d2ddba;
+  --theme-stone-400: #9aaa7b;
+  --theme-stone-500: #6b7d52;
+  --theme-stone-600: #536343;
+  --theme-stone-700: #3d5436;
+  --theme-stone-800: #33452d;
+  --theme-stone-900: #2c3320;
+  --theme-stone-950: #1f2719;
+  --theme-red: #aa3731;
+  --theme-green: #448c27;
+  --theme-blue: #2f7c88;
+  --theme-cream: #eadbb6;
+  --theme-chart-1: #3d5436;
+  --theme-chart-2: #a46122;
+  --theme-chart-3: #2f7c88;
+  --theme-chart-4: #aa3731;
+  --theme-chart-5: #448c27;
+  --theme-chart-6: #7a3e9d;
+  --theme-chart-7: #6a7a56;
+  --theme-chart-8: #4b83cd;
+  --theme-chart-grid: #d2ddba;
+  --theme-chart-axis: #6b7d52;
+  --theme-chart-cursor: #e4ead0;
+  --theme-alert-bg: #f6efd8;
+  --theme-alert-border: #cfa86e;
+  --theme-alert-soft: #eadbb6;
+  --theme-alert-text: #6f431b;
+  --theme-alert-strong: #ab6526;
+  --theme-success-bg: #e6f3dd;
+  --theme-success-border: #b8d99f;
+  --theme-success-text: #448c27;
+}
+
+html[data-theme='anime-trinity-one-piece-dark'] {
+  --theme-surface: #0f172a;
+  --theme-card: #172036;
+  --theme-sidebar: #111827;
+  --theme-logo: #fbbf24;
+  --theme-on-primary: #ffffff;
+  --theme-brand-50: #3b1620;
+  --theme-brand-100: #551b24;
+  --theme-brand-200: #7f1d1d;
+  --theme-brand-300: #b91c1c;
+  --theme-brand-600: #ef4444;
+  --theme-brand-700: #fbbf24;
+  --theme-stone-50: #172036;
+  --theme-stone-100: #1e293b;
+  --theme-stone-200: #334155;
+  --theme-stone-300: #475569;
+  --theme-stone-400: #94a3b8;
+  --theme-stone-500: #cbd5e1;
+  --theme-stone-600: #dbe4ef;
+  --theme-stone-700: #e2e8f0;
+  --theme-stone-800: #f1f5f9;
+  --theme-stone-900: #ffffff;
+  --theme-stone-950: #ffffff;
+  --theme-red: #ef4444;
+  --theme-green: #22c55e;
+  --theme-blue: #38bdf8;
+  --theme-cream: #3f3217;
+  --theme-chart-1: #ef4444;
+  --theme-chart-2: #fbbf24;
+  --theme-chart-3: #38bdf8;
+  --theme-chart-4: #22c55e;
+  --theme-chart-5: #fb7185;
+  --theme-chart-6: #60a5fa;
+  --theme-chart-7: #cbd5e1;
+  --theme-chart-8: #f97316;
+  --theme-chart-grid: #334155;
+  --theme-chart-axis: #cbd5e1;
+  --theme-chart-cursor: #1e293b;
+  --theme-alert-bg: #312613;
+  --theme-alert-border: #a66f14;
+  --theme-alert-soft: #3f3217;
+  --theme-alert-text: #fde68a;
+  --theme-alert-strong: #fbbf24;
+  --theme-success-bg: #143322;
+  --theme-success-border: #247a43;
+  --theme-success-text: #22c55e;
 }
 
 html[data-theme='dracula'] {
   --theme-surface: #282a36;
   --theme-card: #343746;
   --theme-sidebar: #191a21;
+  --theme-logo: #bd93f9;
   --theme-brand-50: #3a2f4f;
   --theme-brand-100: #4d3b70;
   --theme-brand-200: #684f9b;
@@ -116,12 +398,32 @@ html[data-theme='dracula'] {
   --theme-green: #50fa7b;
   --theme-blue: #8be9fd;
   --theme-cream: #4a3d5d;
+  --theme-chart-1: #bd93f9;
+  --theme-chart-2: #8be9fd;
+  --theme-chart-3: #50fa7b;
+  --theme-chart-4: #ff5555;
+  --theme-chart-5: #ff79c6;
+  --theme-chart-6: #f1fa8c;
+  --theme-chart-7: #a7abbe;
+  --theme-chart-8: #6272a4;
+  --theme-chart-grid: #44475a;
+  --theme-chart-axis: #c4c8d4;
+  --theme-chart-cursor: #3a2f4f;
+  --theme-alert-bg: #3a2f4f;
+  --theme-alert-border: #684f9b;
+  --theme-alert-soft: #4d3b70;
+  --theme-alert-text: #f1fa8c;
+  --theme-alert-strong: #ff79c6;
+  --theme-success-bg: #1f3b2c;
+  --theme-success-border: #50fa7b;
+  --theme-success-text: #50fa7b;
 }
 
 html[data-theme='nord'] {
   --theme-surface: #2e3440;
   --theme-card: #3b4252;
   --theme-sidebar: #242933;
+  --theme-logo: #88c0d0;
   --theme-brand-50: #243944;
   --theme-brand-100: #2d4d5d;
   --theme-brand-200: #3d6678;
@@ -143,12 +445,32 @@ html[data-theme='nord'] {
   --theme-green: #a3be8c;
   --theme-blue: #88c0d0;
   --theme-cream: #4b5263;
+  --theme-chart-1: #88c0d0;
+  --theme-chart-2: #a3be8c;
+  --theme-chart-3: #b48ead;
+  --theme-chart-4: #bf616a;
+  --theme-chart-5: #ebcb8b;
+  --theme-chart-6: #81a1c1;
+  --theme-chart-7: #d8dee9;
+  --theme-chart-8: #5e81ac;
+  --theme-chart-grid: #434c5e;
+  --theme-chart-axis: #d8dee9;
+  --theme-chart-cursor: #243944;
+  --theme-alert-bg: #3a3324;
+  --theme-alert-border: #8a6d3b;
+  --theme-alert-soft: #4b5263;
+  --theme-alert-text: #ebcb8b;
+  --theme-alert-strong: #ebcb8b;
+  --theme-success-bg: #24382f;
+  --theme-success-border: #5d7a5d;
+  --theme-success-text: #a3be8c;
 }
 
 html[data-theme='solarized-dark'] {
   --theme-surface: #002b36;
   --theme-card: #073642;
   --theme-sidebar: #001f27;
+  --theme-logo: #b58900;
   --theme-brand-50: #073642;
   --theme-brand-100: #0d4653;
   --theme-brand-200: #155b6b;
@@ -170,12 +492,32 @@ html[data-theme='solarized-dark'] {
   --theme-green: #859900;
   --theme-blue: #268bd2;
   --theme-cream: #51431a;
+  --theme-chart-1: #268bd2;
+  --theme-chart-2: #2aa198;
+  --theme-chart-3: #859900;
+  --theme-chart-4: #dc322f;
+  --theme-chart-5: #b58900;
+  --theme-chart-6: #6c71c4;
+  --theme-chart-7: #93a1a1;
+  --theme-chart-8: #cb4b16;
+  --theme-chart-grid: #586e75;
+  --theme-chart-axis: #93a1a1;
+  --theme-chart-cursor: #073642;
+  --theme-alert-bg: #352b12;
+  --theme-alert-border: #7c6411;
+  --theme-alert-soft: #51431a;
+  --theme-alert-text: #d6b857;
+  --theme-alert-strong: #b58900;
+  --theme-success-bg: #243914;
+  --theme-success-border: #657514;
+  --theme-success-text: #a6b82e;
 }
 
 html[data-theme='solarized-light'] {
   --theme-surface: #fdf6e3;
   --theme-card: #fffbea;
   --theme-sidebar: #eee8d5;
+  --theme-logo: #268bd2;
   --theme-brand-50: #e2f1f4;
   --theme-brand-100: #c9e5ec;
   --theme-brand-200: #9bd0e0;
@@ -197,12 +539,32 @@ html[data-theme='solarized-light'] {
   --theme-green: #859900;
   --theme-blue: #268bd2;
   --theme-cream: #eee8d5;
+  --theme-chart-1: #268bd2;
+  --theme-chart-2: #2aa198;
+  --theme-chart-3: #859900;
+  --theme-chart-4: #dc322f;
+  --theme-chart-5: #b58900;
+  --theme-chart-6: #6c71c4;
+  --theme-chart-7: #657b83;
+  --theme-chart-8: #cb4b16;
+  --theme-chart-grid: #ddd6c1;
+  --theme-chart-axis: #657b83;
+  --theme-chart-cursor: #e2f1f4;
+  --theme-alert-bg: #fff4cf;
+  --theme-alert-border: #d8bd64;
+  --theme-alert-soft: #eee8d5;
+  --theme-alert-text: #7a5a00;
+  --theme-alert-strong: #b58900;
+  --theme-success-bg: #eef3d0;
+  --theme-success-border: #c9d58c;
+  --theme-success-text: #657500;
 }
 
 html[data-theme='monokai'] {
   --theme-surface: #272822;
   --theme-card: #34352d;
   --theme-sidebar: #1f201b;
+  --theme-logo: #a6e22e;
   --theme-brand-50: #29320e;
   --theme-brand-100: #354412;
   --theme-brand-200: #536914;
@@ -224,12 +586,32 @@ html[data-theme='monokai'] {
   --theme-green: #a6e22e;
   --theme-blue: #66d9ef;
   --theme-cream: #4b4529;
+  --theme-chart-1: #a6e22e;
+  --theme-chart-2: #66d9ef;
+  --theme-chart-3: #fd971f;
+  --theme-chart-4: #f92672;
+  --theme-chart-5: #e6db74;
+  --theme-chart-6: #ae81ff;
+  --theme-chart-7: #d6d0b8;
+  --theme-chart-8: #75715e;
+  --theme-chart-grid: #555449;
+  --theme-chart-axis: #d6d0b8;
+  --theme-chart-cursor: #29320e;
+  --theme-alert-bg: #342b19;
+  --theme-alert-border: #7b5d1f;
+  --theme-alert-soft: #4b4529;
+  --theme-alert-text: #e6db74;
+  --theme-alert-strong: #fd971f;
+  --theme-success-bg: #25320e;
+  --theme-success-border: #536914;
+  --theme-success-text: #a6e22e;
 }
 
 html[data-theme='github-dark'] {
   --theme-surface: #0d1117;
   --theme-card: #161b22;
   --theme-sidebar: #010409;
+  --theme-logo: #58a6ff;
   --theme-brand-50: #0d2744;
   --theme-brand-100: #12345c;
   --theme-brand-200: #174a7d;
@@ -251,12 +633,32 @@ html[data-theme='github-dark'] {
   --theme-green: #3fb950;
   --theme-blue: #58a6ff;
   --theme-cream: #332d1e;
+  --theme-chart-1: #58a6ff;
+  --theme-chart-2: #3fb950;
+  --theme-chart-3: #d2a8ff;
+  --theme-chart-4: #ff7b72;
+  --theme-chart-5: #f2cc60;
+  --theme-chart-6: #79c0ff;
+  --theme-chart-7: #c9d1d9;
+  --theme-chart-8: #db6d28;
+  --theme-chart-grid: #30363d;
+  --theme-chart-axis: #c9d1d9;
+  --theme-chart-cursor: #0d2744;
+  --theme-alert-bg: #332d1e;
+  --theme-alert-border: #8a6a22;
+  --theme-alert-soft: #45381c;
+  --theme-alert-text: #f2cc60;
+  --theme-alert-strong: #f2cc60;
+  --theme-success-bg: #16311d;
+  --theme-success-border: #2f6f3d;
+  --theme-success-text: #56d364;
 }
 
 html[data-theme='cyberpunk'] {
   --theme-surface: #09090f;
   --theme-card: #171421;
   --theme-sidebar: #050508;
+  --theme-logo: #ffd60a;
   --theme-on-primary: #0a0a0f;
   --theme-brand-50: #241c36;
   --theme-brand-100: #32224d;
@@ -279,12 +681,32 @@ html[data-theme='cyberpunk'] {
   --theme-green: #05ffa1;
   --theme-blue: #00d9ff;
   --theme-cream: #3b3700;
+  --theme-chart-1: #ffd60a;
+  --theme-chart-2: #00d9ff;
+  --theme-chart-3: #05ffa1;
+  --theme-chart-4: #ff2a6d;
+  --theme-chart-5: #a78bfa;
+  --theme-chart-6: #ff9f1c;
+  --theme-chart-7: #e9d5ff;
+  --theme-chart-8: #51306f;
+  --theme-chart-grid: #35294a;
+  --theme-chart-axis: #e9d5ff;
+  --theme-chart-cursor: #241c36;
+  --theme-alert-bg: #332b0a;
+  --theme-alert-border: #8f7808;
+  --theme-alert-soft: #3b3700;
+  --theme-alert-text: #fff49a;
+  --theme-alert-strong: #ffd60a;
+  --theme-success-bg: #083327;
+  --theme-success-border: #0a8f61;
+  --theme-success-text: #05ffa1;
 }
 
 html[data-theme='forest'] {
   --theme-surface: #0f1f17;
   --theme-card: #173526;
   --theme-sidebar: #09140e;
+  --theme-logo: #7dd87d;
   --theme-brand-50: #16351f;
   --theme-brand-100: #1f4a2b;
   --theme-brand-200: #2c6b3b;
@@ -306,12 +728,32 @@ html[data-theme='forest'] {
   --theme-green: #7dd87d;
   --theme-blue: #7dd3fc;
   --theme-cream: #4b3b1e;
+  --theme-chart-1: #7dd87d;
+  --theme-chart-2: #7dd3fc;
+  --theme-chart-3: #d6a85b;
+  --theme-chart-4: #f87171;
+  --theme-chart-5: #84a98c;
+  --theme-chart-6: #4ca85f;
+  --theme-chart-7: #c7dfc5;
+  --theme-chart-8: #2c6b3b;
+  --theme-chart-grid: #2b4d39;
+  --theme-chart-axis: #c7dfc5;
+  --theme-chart-cursor: #16351f;
+  --theme-alert-bg: #332811;
+  --theme-alert-border: #8a6c2d;
+  --theme-alert-soft: #4b3b1e;
+  --theme-alert-text: #f1c879;
+  --theme-alert-strong: #d6a85b;
+  --theme-success-bg: #16351f;
+  --theme-success-border: #2c6b3b;
+  --theme-success-text: #7dd87d;
 }
 
 html[data-theme='ocean'] {
   --theme-surface: #071a2c;
   --theme-card: #0b2540;
   --theme-sidebar: #04111f;
+  --theme-logo: #38bdf8;
   --theme-brand-50: #082f49;
   --theme-brand-100: #0c4a6e;
   --theme-brand-200: #075985;
@@ -333,6 +775,25 @@ html[data-theme='ocean'] {
   --theme-green: #2dd4bf;
   --theme-blue: #38bdf8;
   --theme-cream: #15364f;
+  --theme-chart-1: #38bdf8;
+  --theme-chart-2: #2dd4bf;
+  --theme-chart-3: #a7f3d0;
+  --theme-chart-4: #fb7185;
+  --theme-chart-5: #fbbf24;
+  --theme-chart-6: #818cf8;
+  --theme-chart-7: #bae6fd;
+  --theme-chart-8: #0284c7;
+  --theme-chart-grid: #1d4468;
+  --theme-chart-axis: #bae6fd;
+  --theme-chart-cursor: #082f49;
+  --theme-alert-bg: #15364f;
+  --theme-alert-border: #2c6a8d;
+  --theme-alert-soft: #0b2037;
+  --theme-alert-text: #bae6fd;
+  --theme-alert-strong: #38bdf8;
+  --theme-success-bg: #07342f;
+  --theme-success-border: #0e8278;
+  --theme-success-text: #5eead4;
 }
 
 @layer base {
@@ -356,6 +817,35 @@ html[data-theme='ocean'] {
   .hover\:bg-white:hover { background-color: var(--theme-card) !important; }
   .border-white { border-color: var(--theme-card) !important; }
   .ring-white { --tw-ring-color: var(--theme-card) !important; }
+  .saltim-alert {
+    background-color: var(--theme-alert-bg);
+    border-color: var(--theme-alert-border);
+    color: var(--theme-alert-text);
+  }
+  .saltim-alert-soft {
+    background-color: var(--theme-alert-soft);
+    border-color: var(--theme-alert-border);
+    color: var(--theme-alert-text);
+  }
+  .saltim-alert-icon {
+    background-color: var(--theme-alert-soft);
+    color: var(--theme-alert-strong);
+  }
+  .saltim-danger-soft {
+    background-color: color-mix(in srgb, var(--theme-red) 16%, var(--theme-card));
+    border-color: color-mix(in srgb, var(--theme-red) 45%, var(--theme-card));
+    color: var(--theme-red);
+  }
+  .saltim-info-soft {
+    background-color: color-mix(in srgb, var(--theme-chart-2) 16%, var(--theme-card));
+    border-color: color-mix(in srgb, var(--theme-chart-2) 45%, var(--theme-card));
+    color: var(--theme-blue);
+  }
+  .saltim-success-soft {
+    background-color: var(--theme-success-bg);
+    border-color: var(--theme-success-border);
+    color: var(--theme-success-text);
+  }
 }
 
 button {
@@ -377,36 +867,36 @@ svg {
 }
 
 html[data-theme='cyberpunk'] .saltim-sidebar {
-  background-color: #050508 !important;
-  border-color: #35294a !important;
+  background-color: var(--theme-sidebar) !important;
+  border-color: var(--theme-stone-200) !important;
 }
 
 html[data-theme='cyberpunk'] .saltim-sidebar a {
-  color: #ffd60a !important;
+  color: var(--theme-brand-600) !important;
 }
 
 html[data-theme='cyberpunk'] .saltim-sidebar .saltim-sidebar-item:hover {
-  background-color: #241c36 !important;
-  color: #ffd60a !important;
-  outline: 1px solid #ffd60a;
+  background-color: var(--theme-brand-50) !important;
+  color: var(--theme-brand-600) !important;
+  outline: 1px solid var(--theme-brand-600);
 }
 
 html[data-theme='cyberpunk'] .saltim-sidebar .saltim-sidebar-item[data-status='active'] {
-  background-color: #32224d !important;
-  color: #ffd60a !important;
-  outline: 1px solid #ffd60a;
+  background-color: var(--theme-brand-100) !important;
+  color: var(--theme-brand-600) !important;
+  outline: 1px solid var(--theme-brand-600);
 }
 
 html[data-theme='cyberpunk'] .saltim-sidebar .saltim-sidebar-tooltip {
-  background-color: #09090f !important;
-  border: 1px solid #ffd60a;
-  color: #ffd60a !important;
+  background-color: var(--theme-brand-50) !important;
+  border: 1px solid var(--theme-stone-200);
+  color: var(--theme-brand-700) !important;
 }
 
 html[data-theme='cyberpunk'] .saltim-sidebar .saltim-sidebar-tooltip:hover,
 html[data-theme='cyberpunk'] .saltim-sidebar .saltim-sidebar-item:hover .saltim-sidebar-tooltip,
 html[data-theme='cyberpunk'] .saltim-sidebar .saltim-sidebar-item[data-status='active'] .saltim-sidebar-tooltip {
-  color: #ffd60a !important;
+  color: var(--theme-brand-700) !important;
 }
 
 .saltim-day-picker {

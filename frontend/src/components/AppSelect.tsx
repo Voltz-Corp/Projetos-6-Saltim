@@ -17,15 +17,21 @@ const styles: StylesConfig<SelectOption, boolean> = {
     ...base,
     minHeight: 36,
     borderRadius: 8,
-    borderColor: state.isFocused ? '#F07820' : '#DCDAD4',
-    boxShadow: state.isFocused ? '0 0 0 3px rgba(240, 120, 32, 0.14)' : 'none',
-    backgroundColor: '#F7F7F7',
-    color: '#1A1918',
+    borderColor: state.isFocused
+      ? 'var(--theme-brand-600)'
+      : 'var(--theme-stone-200)',
+    boxShadow: state.isFocused
+      ? '0 0 0 3px color-mix(in srgb, var(--theme-brand-600) 16%, transparent)'
+      : 'none',
+    backgroundColor: 'var(--theme-stone-50)',
+    color: 'var(--theme-stone-900)',
     fontSize: 13,
     cursor: 'pointer',
     transition: 'border-color 120ms ease, box-shadow 120ms ease',
     ':hover': {
-      borderColor: state.isFocused ? '#F07820' : '#CFCBC2',
+      borderColor: state.isFocused
+        ? 'var(--theme-brand-600)'
+        : 'var(--theme-stone-300)',
     },
   }),
   valueContainer: base => ({
@@ -34,62 +40,65 @@ const styles: StylesConfig<SelectOption, boolean> = {
   }),
   input: base => ({
     ...base,
-    color: '#1A1918',
+    color: 'var(--theme-stone-900)',
     margin: 0,
     padding: 0,
   }),
   singleValue: base => ({
     ...base,
-    color: '#1A1918',
+    color: 'var(--theme-stone-900)',
     fontWeight: 500,
   }),
   multiValue: base => ({
     ...base,
     borderRadius: 999,
-    backgroundColor: '#FEF4E8',
+    backgroundColor: 'var(--theme-brand-50)',
   }),
   multiValueLabel: base => ({
     ...base,
-    color: '#C5621A',
+    color: 'var(--theme-brand-700)',
     fontWeight: 700,
     fontSize: 12,
     paddingLeft: 8,
   }),
   multiValueRemove: base => ({
     ...base,
-    color: '#C5621A',
+    color: 'var(--theme-brand-700)',
     borderRadius: 999,
     cursor: 'pointer',
     ':hover': {
-      backgroundColor: '#FDEBD0',
-      color: '#1A1918',
+      backgroundColor: 'var(--theme-brand-100)',
+      color: 'var(--theme-stone-900)',
     },
   }),
   placeholder: base => ({
     ...base,
-    color: '#888780',
+    color: 'var(--theme-stone-400)',
   }),
   indicatorSeparator: () => ({
     display: 'none',
   }),
   dropdownIndicator: (base, state) => ({
     ...base,
-    color: state.isFocused ? '#F07820' : '#5F5E5A',
+    color: state.isFocused
+      ? 'var(--theme-brand-600)'
+      : 'var(--theme-stone-500)',
     padding: '0 8px',
     cursor: 'pointer',
-    ':hover': { color: '#F07820' },
+    ':hover': { color: 'var(--theme-brand-600)' },
   }),
   clearIndicator: base => ({
     ...base,
-    color: '#888780',
+    color: 'var(--theme-stone-400)',
     padding: '0 6px',
-    ':hover': { color: '#1A1918' },
+    ':hover': { color: 'var(--theme-stone-900)' },
   }),
   menu: base => ({
     ...base,
     borderRadius: 8,
-    border: '1px solid #E8E6E0',
-    boxShadow: '0 12px 28px rgba(26, 25, 24, 0.10)',
+    border: '1px solid var(--theme-stone-200)',
+    boxShadow: '0 12px 28px color-mix(in srgb, var(--theme-stone-950) 16%, transparent)',
+    backgroundColor: 'var(--theme-card)',
     overflow: 'hidden',
     zIndex: 80,
   }),
@@ -104,17 +113,19 @@ const styles: StylesConfig<SelectOption, boolean> = {
   option: (base, state) => ({
     ...base,
     borderRadius: 6,
-    color: '#1A1918',
+    color: state.isSelected
+      ? 'var(--theme-brand-700)'
+      : 'var(--theme-stone-900)',
     backgroundColor: state.isSelected
-      ? '#FEF4E8'
+      ? 'var(--theme-brand-50)'
       : state.isFocused
-        ? '#F5F4F1'
-        : '#F7F7F7',
+        ? 'var(--theme-stone-100)'
+        : 'var(--theme-card)',
     fontSize: 13,
     fontWeight: state.isSelected ? 700 : 500,
     cursor: 'pointer',
     ':active': {
-      backgroundColor: '#FEF4E8',
+      backgroundColor: 'var(--theme-brand-50)',
     },
   }),
 }

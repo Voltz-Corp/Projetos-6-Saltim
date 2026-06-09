@@ -27,7 +27,6 @@ from reportlab.lib.pagesizes import A4, landscape
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import mm
 from reportlab.platypus import (
-    Image,
     PageBreak,
     Paragraph,
     SimpleDocTemplate,
@@ -36,6 +35,10 @@ from reportlab.platypus import (
     TableStyle,
 )
 from reportlab.graphics.shapes import Drawing, Line as DrawingLine, Rect, String
+try:
+    from svglib.svglib import svg2rlg
+except ImportError:  # pragma: no cover - optional PDF logo renderer
+    svg2rlg = None
 from sqlalchemy import asc, case, desc, func, or_, text
 from sqlalchemy.orm import Session
 
@@ -948,7 +951,7 @@ SALTIM_DARK = "#232323"
 SALTIM_CREAM = "#FEF4E8"
 SALTIM_STONE = "#5F5E5A"
 SALTIM_LOGO_PATH = (
-    Path(__file__).resolve().parents[2] / "frontend" / "public" / "images" / "saltim_logo.jpg"
+    Path(__file__).resolve().parents[2] / "frontend" / "public" / "images" / "maestro-logo.svg"
 )
 
 EXPORT_COLUMN_LABELS = {
@@ -1164,10 +1167,15 @@ def _pdf_header_block(
         Paragraph(_xml_escape(title), title_style),
         Paragraph(f"Gerado em {generated_at}", meta_style),
     ]
-    if SALTIM_LOGO_PATH.exists():
-        logo = Image(str(SALTIM_LOGO_PATH), width=18 * mm, height=18 * mm)
-    else:
-        logo = Paragraph("Saltim", title_style)
+    logo = Paragraph("Saltim", title_style)
+    if SALTIM_LOGO_PATH.exists() and svg2rlg is not None:
+        drawing = svg2rlg(str(SALTIM_LOGO_PATH))
+        if drawing is not None:
+            scale = min((18 * mm) / drawing.width, (18 * mm) / drawing.height)
+            drawing.width *= scale
+            drawing.height *= scale
+            drawing.scale(scale, scale)
+            logo = drawing
 
     table = Table(
         [[logo, title_cell]],
@@ -3919,6 +3927,24 @@ def _add_pedidos_to_estoque_atual(
         )
 
 
+def _pedidos_without_stock_application(pedidos: list[Pedido]) -> list[Pedido]:
+    return [pedido for pedido in pedidos if pedido.estoque_aplicado_em is None]
+
+
+def _mark_pedidos_delivered_and_apply_stock(
+    db: Session,
+    pedidos: list[Pedido],
+) -> None:
+    delivery_time = _now_recife()
+    pedidos_to_apply = _pedidos_without_stock_application(pedidos)
+    _add_pedidos_to_estoque_atual(db, pedidos_to_apply, delivery_time.date())
+
+    for pedido in pedidos:
+        if pedido.estoque_aplicado_em is None:
+            pedido.estoque_aplicado_em = delivery_time
+        pedido.status = "entregue"
+
+
 def _pedido_base_query(db: Session):
     return (
         db.query(
@@ -4560,6 +4586,7 @@ def get_pedido_group_detail(
             Pedido.data_pedido,
             Pedido.data_prevista,
             Pedido.status,
+            Pedido.estoque_aplicado_em,
             Pedido.ingredient_id,
             Ingrediente.name.label("ingredient_name"),
             Categoria.name.label("category"),
@@ -4597,6 +4624,11 @@ def get_pedido_group_detail(
     ]
     first = rows[0]
     expected_date = max(row.data_prevista for row in rows)
+    stock_applied_at = (
+        max(row.estoque_aplicado_em for row in rows)
+        if all(row.estoque_aplicado_em is not None for row in rows)
+        else None
+    )
     status = (
         "em_transito"
         if any(row.status == "em_transito" for row in rows)
@@ -4612,6 +4644,7 @@ def get_pedido_group_detail(
         order_date=first.data_pedido,
         expected_date=expected_date,
         status=status,
+        stock_applied_at=stock_applied_at,
         items_qty=sum(item.qty for item in items),
         total_value=sum(item.total_value for item in items),
         items=items,
@@ -4638,17 +4671,31 @@ def mark_pedido_group_delivered(
     if not pedidos:
         raise HTTPException(status_code=404, detail="Pedido não encontrado")
 
-    delivery_time = _now_recife()
-    pending_pedidos = [pedido for pedido in pedidos if pedido.status == "em_transito"]
-    _add_pedidos_to_estoque_atual(db, pending_pedidos, delivery_time.date())
-
-    for pedido in pedidos:
-        if pedido.status == "em_transito":
-            pedido.estoque_aplicado_em = delivery_time
-        pedido.status = "entregue"
+    _mark_pedidos_delivered_and_apply_stock(db, pedidos)
 
     db.commit()
     return get_pedido_group_detail(supplier_id, order_date, db)
+
+
+@app.patch("/api/pedidos/{pedido_id}/entregar", response_model=PedidoDetailResponse)
+def mark_pedido_delivered(
+    pedido_id: str,
+    db: Session = Depends(get_db),
+):
+    pedidos = (
+        db.query(Pedido)
+        .join(Ingrediente, Ingrediente.id == Pedido.ingredient_id)
+        .filter(Pedido.id == pedido_id)
+        .filter(Ingrediente.category_id != PRODUCTION_CATEGORY_ID)
+        .all()
+    )
+    if not pedidos:
+        raise HTTPException(status_code=404, detail="Pedido não encontrado")
+
+    _mark_pedidos_delivered_and_apply_stock(db, pedidos)
+
+    db.commit()
+    return get_pedido_detail(pedido_id, db)
 
 
 @app.get("/api/pedidos/{pedido_id}", response_model=PedidoDetailResponse)
@@ -4661,6 +4708,7 @@ def get_pedido_detail(pedido_id: str, db: Session = Depends(get_db)):
             Pedido.data_pedido,
             Pedido.data_prevista,
             Pedido.status,
+            Pedido.estoque_aplicado_em,
             Pedido.ingredient_id,
             Ingrediente.name.label("ingredient_name"),
             Categoria.name.label("category"),
@@ -4705,6 +4753,7 @@ def get_pedido_detail(pedido_id: str, db: Session = Depends(get_db)):
         order_date=first.data_pedido,
         expected_date=first.data_prevista,
         status=first.status,
+        stock_applied_at=first.estoque_aplicado_em,
         items_qty=sum(item.qty for item in items),
         total_value=sum(item.total_value for item in items),
         items=items,

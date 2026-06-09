@@ -78,14 +78,28 @@ type RankingKind =
 
 const UNIT_OPTIONS: DashboardUnit[] = ['KG', 'UND', 'L'];
 const DONUT_COLORS = [
-  '#F07820',
-  '#52B9EB',
-  '#2D7A3A',
-  '#E4332B',
-  '#EDE0B4',
-  '#C5621A',
-  '#5F5E5A',
-  '#F5A565',
+  'var(--theme-chart-1)',
+  'var(--theme-chart-2)',
+  'var(--theme-chart-3)',
+  'var(--theme-chart-4)',
+  'var(--theme-chart-5)',
+  'var(--theme-chart-6)',
+  'var(--theme-chart-7)',
+  'var(--theme-chart-8)',
+];
+const chartAxisTick = { fill: 'var(--theme-chart-axis)', fontSize: 11 };
+const chartTooltipStyle = {
+  backgroundColor: 'var(--theme-card)',
+  borderColor: 'var(--theme-stone-200)',
+  color: 'var(--theme-stone-900)',
+};
+const chartTooltipLabelStyle = { color: 'var(--theme-stone-900)' };
+const DASHBOARD_EXPORT_OPTIONS: Array<{
+  value: DashboardExportFormat;
+  label: string;
+}> = [
+  { value: 'pdf', label: 'PDF' },
+  { value: 'excel', label: 'Excel' },
 ];
 
 interface DashboardGlobalFilterState {
@@ -907,24 +921,26 @@ function RevenueBarChart({ data }: { data: DashboardNamedMetric[] }) {
           data={data}
           margin={{ top: 8, right: 12, bottom: 0, left: 0 }}
         >
-          <CartesianGrid stroke="#E8E6E0" vertical={false} />
+          <CartesianGrid stroke="var(--theme-chart-grid)" vertical={false} />
           <XAxis
             dataKey="label"
-            tick={{ fill: '#888780', fontSize: 11 }}
+            tick={chartAxisTick}
             axisLine={false}
             tickLine={false}
           />
           <YAxis
             tickFormatter={fmt.compact}
-            tick={{ fill: '#888780', fontSize: 11 }}
+            tick={chartAxisTick}
             axisLine={false}
             tickLine={false}
           />
           <Tooltip
             formatter={(value) => [fmt.currency(Number(value)), 'Faturamento']}
-            cursor={{ fill: '#FEF4E8' }}
+            cursor={{ fill: 'var(--theme-chart-cursor)' }}
+            contentStyle={chartTooltipStyle}
+            labelStyle={chartTooltipLabelStyle}
           />
-          <Bar dataKey="value" fill="#F07820" radius={[6, 6, 0, 0]} />
+          <Bar dataKey="value" fill="var(--theme-chart-1)" radius={[6, 6, 0, 0]} />
         </BarChart>
       </ResponsiveContainer>
     </div>
@@ -941,24 +957,26 @@ function WeekdayOrdersBarChart({ data }: { data: DashboardNamedMetric[] }) {
           data={data}
           margin={{ top: 8, right: 12, bottom: 0, left: 0 }}
         >
-          <CartesianGrid stroke="#E8E6E0" vertical={false} />
+          <CartesianGrid stroke="var(--theme-chart-grid)" vertical={false} />
           <XAxis
             dataKey="label"
-            tick={{ fill: '#888780', fontSize: 11 }}
+            tick={chartAxisTick}
             axisLine={false}
             tickLine={false}
           />
           <YAxis
             tickFormatter={fmt.compact}
-            tick={{ fill: '#888780', fontSize: 11 }}
+            tick={chartAxisTick}
             axisLine={false}
             tickLine={false}
           />
           <Tooltip
             formatter={(value) => [fmt.number(Number(value), 2), 'Pedidos']}
-            cursor={{ fill: '#FEF4E8' }}
+            cursor={{ fill: 'var(--theme-chart-cursor)' }}
+            contentStyle={chartTooltipStyle}
+            labelStyle={chartTooltipLabelStyle}
           />
-          <Bar dataKey="value" fill="#52B9EB" radius={[6, 6, 0, 0]} />
+          <Bar dataKey="value" fill="var(--theme-chart-2)" radius={[6, 6, 0, 0]} />
         </BarChart>
       </ResponsiveContainer>
     </div>
@@ -981,6 +999,8 @@ function CategoryUsageDonutChart({
       <ResponsiveContainer width="100%" height="100%">
         <PieChart>
           <Tooltip
+            contentStyle={chartTooltipStyle}
+            labelStyle={chartTooltipLabelStyle}
             formatter={(value, _name, props) => {
               const percent = (Number(value) / total) * 100;
               return [
@@ -1056,11 +1076,11 @@ function CombinedHistoryChart({
           data={data}
           margin={{ top: 10, right: 24, bottom: 0, left: 0 }}
         >
-          <CartesianGrid stroke="#E8E6E0" vertical={false} />
+          <CartesianGrid stroke="var(--theme-chart-grid)" vertical={false} />
           <XAxis
             dataKey="date"
             tickFormatter={fmt.date}
-            tick={{ fill: '#888780', fontSize: 11 }}
+            tick={chartAxisTick}
             axisLine={false}
             tickLine={false}
             interval="preserveStartEnd"
@@ -1070,7 +1090,7 @@ function CombinedHistoryChart({
             <YAxis
               yAxisId="stock"
               tickFormatter={fmt.compact}
-              tick={{ fill: '#52B9EB', fontSize: 11 }}
+              tick={{ fill: 'var(--theme-chart-2)', fontSize: 11 }}
               axisLine={false}
               tickLine={false}
             />
@@ -1080,12 +1100,14 @@ function CombinedHistoryChart({
               yAxisId="sales"
               orientation={showStock ? 'right' : 'left'}
               tickFormatter={fmt.compact}
-              tick={{ fill: '#F07820', fontSize: 11 }}
+              tick={{ fill: 'var(--theme-chart-1)', fontSize: 11 }}
               axisLine={false}
               tickLine={false}
             />
           )}
           <Tooltip
+            contentStyle={chartTooltipStyle}
+            labelStyle={chartTooltipLabelStyle}
             formatter={(value, name) => [
               fmt.number(Number(value), 2),
               name === 'stock' || name === 'Estoque' ? 'Estoque' : 'Vendas',
@@ -1106,7 +1128,7 @@ function CombinedHistoryChart({
               yAxisId="stock"
               type="monotone"
               dataKey="stock"
-              stroke="#52B9EB"
+              stroke="var(--theme-chart-2)"
               strokeWidth={2.5}
               dot={false}
               activeDot={{ r: 4 }}
@@ -1119,7 +1141,7 @@ function CombinedHistoryChart({
               yAxisId="sales"
               type="monotone"
               dataKey="sales"
-              stroke="#F07820"
+              stroke="var(--theme-chart-1)"
               strokeWidth={2.5}
               dot={false}
               activeDot={{ r: 4 }}
@@ -1133,10 +1155,10 @@ function CombinedHistoryChart({
 }
 
 function severityClass(severity: DashboardAlert['severity']) {
-  if (severity === 'Crítico') return 'bg-red-50 text-saltim-red border-red-100';
+  if (severity === 'Crítico') return 'saltim-danger-soft';
   if (severity === 'Atenção')
-    return 'bg-orange-50 text-saltim-orange border-orange-100';
-  return 'bg-blue-50 text-saltim-blue border-blue-100';
+    return 'saltim-alert-soft';
+  return 'saltim-info-soft';
 }
 
 export function DashboardPage() {
@@ -1163,6 +1185,8 @@ export function DashboardPage() {
     useState<DashboardUnit>('KG');
   const [categoryUsageFiltersOpen, setCategoryUsageFiltersOpen] =
     useState(false);
+  const [dashboardExportFormat, setDashboardExportFormat] =
+    useState<DashboardExportFormat>('pdf');
   const [exportingFormat, setExportingFormat] =
     useState<DashboardExportFormat | null>(null);
   const [exportError, setExportError] = useState('');
@@ -1355,23 +1379,22 @@ export function DashboardPage() {
         </div>
         <div className="flex flex-col items-end gap-1">
           <div className="flex items-center gap-2">
+            <AppSelect
+              value={dashboardExportFormat}
+              onChange={(value) =>
+                setDashboardExportFormat((value || 'pdf') as DashboardExportFormat)
+              }
+              options={DASHBOARD_EXPORT_OPTIONS}
+              className="w-28"
+            />
             <button
               type="button"
-              onClick={() => handleDashboardExport('pdf')}
+              onClick={() => handleDashboardExport(dashboardExportFormat)}
               disabled={!data || Boolean(exportingFormat)}
-              className="inline-flex items-center gap-2 rounded-lg border border-stone-200 bg-white px-3 py-2 text-xs font-bold text-stone-700 shadow-sm transition hover:border-brand-200 hover:bg-brand-50 hover:text-brand-700 disabled:cursor-not-allowed disabled:opacity-50"
+              className="inline-flex items-center gap-2 rounded-lg bg-brand-600 px-3 py-2 text-xs font-bold text-white transition hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-50"
             >
               <Download className="size-4" strokeWidth={1.9} />
-              {exportingFormat === 'pdf' ? 'PDF...' : 'PDF'}
-            </button>
-            <button
-              type="button"
-              onClick={() => handleDashboardExport('excel')}
-              disabled={!data || Boolean(exportingFormat)}
-              className="inline-flex items-center gap-2 rounded-lg bg-brand-600 px-3 py-2 text-xs font-bold text-white shadow-sm transition hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              <Download className="size-4" strokeWidth={1.9} />
-              {exportingFormat === 'excel' ? 'Excel...' : 'Excel'}
+              {exportingFormat ? 'Exportando...' : 'Exportar'}
             </button>
           </div>
           {exportError && (

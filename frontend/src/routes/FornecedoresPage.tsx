@@ -711,8 +711,8 @@ function StatusPill({ status }: { status: string }) {
       className={[
         'inline-flex rounded-full border px-2.5 py-1 text-xs font-bold',
         delivered
-          ? 'border-emerald-100 bg-emerald-50 text-emerald-700'
-          : 'border-amber-100 bg-amber-50 text-amber-700',
+          ? 'saltim-success-soft'
+          : 'saltim-alert-soft',
       ].join(' ')}
     >
       {formatStatus(status)}

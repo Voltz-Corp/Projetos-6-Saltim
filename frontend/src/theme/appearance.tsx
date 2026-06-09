@@ -25,8 +25,34 @@ export interface ThemeOption {
 
 export const THEME_OPTIONS: ThemeOption[] = [
   {
+    id: 'maestro-light',
+    name: 'Maestro Light',
+    mode: 'light',
+    description: 'Identidade Maestro clara',
+    colors: {
+      surface: '#F6F5FB',
+      card: '#FFFFFF',
+      primary: '#1B1464',
+      secondary: '#F15A24',
+      text: '#211F33',
+    },
+  },
+  {
+    id: 'maestro-dark',
+    name: 'Maestro Dark',
+    mode: 'dark',
+    description: 'Identidade Maestro escura',
+    colors: {
+      surface: '#141127',
+      card: '#1E1A33',
+      primary: '#F15A24',
+      secondary: '#8E7CFF',
+      text: '#F5F3FF',
+    },
+  },
+  {
     id: 'saltim-light',
-    name: 'Light',
+    name: 'Saltim Light',
     mode: 'light',
     description: 'Padrao Saltim claro',
     colors: {
@@ -39,7 +65,7 @@ export const THEME_OPTIONS: ThemeOption[] = [
   },
   {
     id: 'saltim-dark',
-    name: 'Dark',
+    name: 'Saltim Dark',
     mode: 'dark',
     description: 'Saltim em modo escuro',
     colors: {
@@ -48,6 +74,32 @@ export const THEME_OPTIONS: ThemeOption[] = [
       primary: '#F59E42',
       secondary: '#52B9EB',
       text: '#F5F5F4',
+    },
+  },
+  {
+    id: 'mossy-forest-light-green',
+    name: 'Mossy Forest Light Green',
+    mode: 'light',
+    description: 'Verde claro natural e suave',
+    colors: {
+      surface: '#F1F5E0',
+      card: '#F7FAF0',
+      primary: '#3D5436',
+      secondary: '#A46122',
+      text: '#2C3320',
+    },
+  },
+  {
+    id: 'anime-trinity-one-piece-dark',
+    name: 'Anime Trinity One Piece',
+    mode: 'dark',
+    description: 'Marinho escuro com vermelho, azul e dourado',
+    colors: {
+      surface: '#0F172A',
+      card: '#172036',
+      primary: '#EF4444',
+      secondary: '#FBBF24',
+      text: '#E2E8F0',
     },
   },
   {
@@ -170,7 +222,7 @@ export const THEME_OPTIONS: ThemeOption[] = [
 ]
 
 const STORAGE_KEY = 'saltim-appearance-theme'
-const DEFAULT_THEME = 'saltim-light'
+const DEFAULT_THEME = 'maestro-light'
 
 interface AppearanceContextValue {
   themeId: string
@@ -209,7 +261,7 @@ export function AppearanceProvider({ children }: { children: ReactNode }) {
       mode: theme.mode,
       setThemeId: (nextThemeId) => setThemeIdState(resolveTheme(nextThemeId).id),
       setMode: (mode) =>
-        setThemeIdState(mode === 'light' ? 'saltim-light' : 'saltim-dark'),
+        setThemeIdState(mode === 'light' ? 'maestro-light' : 'maestro-dark'),
     }),
     [theme],
   )

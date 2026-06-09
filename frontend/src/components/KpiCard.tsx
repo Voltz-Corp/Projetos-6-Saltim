@@ -18,15 +18,15 @@ export interface KpiCardProps {
 
 const toneClasses: Record<KpiTone, string> = {
   orange: 'bg-brand-50 text-brand-600',
-  blue: 'bg-sky-50 text-saltim-blue',
-  green: 'bg-emerald-50 text-saltim-green',
-  red: 'bg-red-50 text-saltim-red',
+  blue: 'saltim-info-soft',
+  green: 'saltim-success-soft',
+  red: 'saltim-danger-soft',
   cream: 'bg-saltim-cream text-stone-900',
 }
 
 const badgeClasses = {
-  up: 'border-emerald-200 bg-emerald-50 text-emerald-700',
-  down: 'border-red-200 bg-red-50 text-red-700',
+  up: 'saltim-success-soft',
+  down: 'saltim-danger-soft',
   neutral: 'border-stone-200 bg-stone-50 text-stone-500',
 }
 
@@ -44,9 +44,9 @@ export function KpiCard({
   badgeTone = 'green',
 }: KpiCardProps) {
   const valueBadgeClasses = {
-    green: 'border-emerald-100 bg-emerald-50 text-emerald-700',
-    amber: 'border-amber-100 bg-amber-50 text-amber-700',
-    red: 'border-red-100 bg-red-50 text-red-700',
+    green: 'saltim-success-soft',
+    amber: 'saltim-alert-soft',
+    red: 'saltim-danger-soft',
   }
 
   return (

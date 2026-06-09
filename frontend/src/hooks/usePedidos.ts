@@ -49,6 +49,7 @@ export interface PedidoDetail {
   order_date: string
   expected_date: string
   status: string
+  stock_applied_at?: string | null
   items_qty: number
   total_value: number
   items: PedidoDetailItem[]

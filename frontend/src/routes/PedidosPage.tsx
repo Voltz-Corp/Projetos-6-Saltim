@@ -141,6 +141,7 @@ function PedidosPage() {
   const { data, isFetching, isError } = usePedidos(filters)
   const { data: inTransit = [], isFetching: isFetchingTransit } =
     usePedidosEmTransito(transitFilters)
+  const markDelivered = useMarkPedidoGroupDelivered()
 
   const supplierOptions = [
     { value: '', label: 'Todos os fornecedores' },
@@ -266,24 +267,24 @@ function PedidosPage() {
         />
 
         {view === 'transit' && dueTransit.length > 0 && (
-          <section className="flex flex-col gap-4 rounded-lg border border-amber-200 bg-amber-50 px-5 py-4 text-amber-950 sm:flex-row sm:items-center sm:justify-between">
+          <section className="saltim-alert flex flex-col gap-4 rounded-lg border px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex min-w-0 items-start gap-3">
-              <span className="flex size-10 flex-shrink-0 items-center justify-center rounded-lg bg-amber-100 text-amber-700">
+              <span className="saltim-alert-icon flex size-10 flex-shrink-0 items-center justify-center rounded-lg">
                 <AlertTriangle className="size-5" strokeWidth={2} />
               </span>
               <div className="min-w-0">
                 <p className="text-sm font-black">Entregas aguardando recebimento</p>
-                <p className="mt-1 text-xs font-semibold leading-5 text-amber-800">
+                <p className="mt-1 text-xs font-semibold leading-5">
                   {dueTransit.length} pedido{dueTransit.length === 1 ? '' : 's'} com previsao vencida ou para hoje. Ao marcar como entregue, os ingredientes entram no estoque atual.
                 </p>
               </div>
             </div>
             <div className="grid grid-cols-2 gap-2 text-center sm:w-56">
-              <span className="rounded-lg bg-white px-3 py-2 shadow-sm">
+              <span className="rounded-lg bg-white px-3 py-2">
                 <span className="block text-lg font-black">{dueTransit.length}</span>
                 <span className="text-[11px] font-bold uppercase text-stone-400">pedidos</span>
               </span>
-              <span className="rounded-lg bg-white px-3 py-2 shadow-sm">
+              <span className="rounded-lg bg-white px-3 py-2">
                 <span className="block text-lg font-black">{fmt.number(dueTransitQty, 2)}</span>
                 <span className="text-[11px] font-bold uppercase text-stone-400">itens</span>
               </span>
@@ -324,6 +325,17 @@ function PedidosPage() {
               isLoading={isFetchingTransit}
               emptyMessage="Nenhum pedido em trânsito."
               showExpectedDate
+              deliveringGroupKey={
+                markDelivered.isPending
+                  ? `${markDelivered.variables?.supplierId}-${markDelivered.variables?.orderDate}`
+                  : undefined
+              }
+              onMarkDelivered={(pedido) =>
+                markDelivered.mutate({
+                  supplierId: pedido.supplier_id,
+                  orderDate: pedido.order_date,
+                })
+              }
             />
           )}
         </DataPanel>
@@ -499,13 +511,13 @@ function PedidoNewPage() {
           <StepBar step={step} />
 
           {error && (
-            <section className="rounded-xl border border-red-100 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">
+            <section className="saltim-danger-soft rounded-xl border px-4 py-3 text-sm font-semibold">
               {error}
             </section>
           )}
 
           {emailNotice && (
-            <section className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-800">
+            <section className="saltim-alert rounded-xl border px-4 py-3 text-sm font-semibold">
               {emailNotice}
             </section>
           )}
@@ -620,7 +632,7 @@ function PedidoNewPage() {
                         <button
                           type="button"
                           onClick={() => removeIngredient(ingredient.id)}
-                          className="flex size-8 items-center justify-center rounded-lg text-stone-400 transition hover:bg-red-50 hover:text-red-600"
+                          className="flex size-8 items-center justify-center rounded-lg text-stone-400 transition hover:bg-stone-100 hover:text-saltim-red"
                           aria-label="Remover ingrediente"
                         >
                           <Trash2 className="size-4" strokeWidth={2} />
@@ -766,7 +778,7 @@ function PedidoGroupDetailPage() {
             {data ? `${data.supplier_name} · ${fmt.date(data.order_date)}` : 'Pedido'}
           </h1>
         </div>
-        {data?.status === 'em_transito' && (
+        {data && (data.status === 'em_transito' || !data.stock_applied_at) && (
           <button
             type="button"
             onClick={handleMarkDelivered}
@@ -774,7 +786,11 @@ function PedidoGroupDetailPage() {
             className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-bold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
           >
             <PackageCheck className="size-4" strokeWidth={2} />
-            {markDelivered.isPending ? 'Atualizando...' : 'Marcar como entregue'}
+            {markDelivered.isPending
+              ? 'Atualizando...'
+              : data.status === 'em_transito'
+                ? 'Marcar como entregue'
+                : 'Aplicar no estoque'}
           </button>
         )}
       </header>
@@ -940,12 +956,12 @@ function ReviewItem({
               )}
             </div>
           ) : (
-            <p className="mt-3 text-xs font-semibold text-red-600">
+            <p className="mt-3 text-xs font-semibold text-saltim-red">
               Nenhum fornecedor disponível para este ingrediente.
             </p>
           )}
           {selectedOption && !selectedOption.recommended && (
-            <p className="mt-3 text-xs font-semibold text-amber-700">
+            <p className="mt-3 text-xs font-semibold text-[var(--theme-alert-strong)]">
               {selectedOption.detractors.length > 0
                 ? `Detrator: ${selectedOption.detractors.join(', ')}.`
                 : 'Fornecedor alternativo sem detrator relevante.'}
@@ -1213,6 +1229,8 @@ function PedidosTable({
   emptyMessage = 'Nenhum pedido encontrado.',
   showExpectedDate = true,
   pagination,
+  onMarkDelivered,
+  deliveringGroupKey,
 }: {
   pedidos: PedidoGroup[]
   isLoading?: boolean
@@ -1220,6 +1238,8 @@ function PedidosTable({
   emptyMessage?: string
   showExpectedDate?: boolean
   pagination?: React.ComponentProps<typeof DataTable>['pagination']
+  onMarkDelivered?: (pedido: PedidoGroup) => void
+  deliveringGroupKey?: string
 }) {
   const headers = showExpectedDate ? pedidoHeaders : pedidoHeadersWithoutExpected
   const rowOffset = pagination ? (pagination.page - 1) * pagination.pageSize : 0
@@ -1239,12 +1259,14 @@ function PedidosTable({
       {pedidos.map((pedido, index) => {
         const displayId = `PED-${String(rowOffset + index + 1).padStart(4, '0')}`
         const deliveryDue = showExpectedDate && isDeliveryDue(pedido.expected_date)
+        const groupKey = `${pedido.supplier_id}-${pedido.order_date}`
+        const isDelivering = deliveringGroupKey === groupKey
         return (
         <tr
           key={pedido.group_key}
           className={[
             'border-b border-stone-100 transition-colors last:border-0 hover:bg-stone-50',
-            deliveryDue ? 'bg-amber-50/70' : '',
+            deliveryDue ? 'saltim-alert' : '',
           ].join(' ')}
         >
           <BodyCell strong>
@@ -1271,11 +1293,25 @@ function PedidosTable({
                   <CalendarDays className="size-4 text-brand-600" strokeWidth={1.9} />
                   {fmt.date(pedido.expected_date)}
                 </span>
-                {deliveryDue && (
-                  <span className="inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-100 px-2 py-0.5 text-[11px] font-black text-amber-800">
-                    <AlertTriangle className="size-3" strokeWidth={2} />
-                    Marcar entrega
-                  </span>
+                {onMarkDelivered && (
+                  <button
+                    type="button"
+                    onClick={() => onMarkDelivered(pedido)}
+                    disabled={isDelivering}
+                    className={[
+                      'inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-black transition disabled:cursor-not-allowed disabled:opacity-60',
+                      deliveryDue
+                        ? 'saltim-alert-soft hover:border-brand-300 hover:bg-brand-50'
+                        : 'border-stone-200 bg-white text-brand-700 hover:bg-brand-50',
+                    ].join(' ')}
+                  >
+                    {deliveryDue ? (
+                      <AlertTriangle className="size-3" strokeWidth={2} />
+                    ) : (
+                      <Check className="size-3" strokeWidth={2} />
+                    )}
+                    {isDelivering ? 'Atualizando...' : 'Marcar entrega'}
+                  </button>
                 )}
               </div>
             </BodyCell>
@@ -1316,8 +1352,8 @@ function StatusPill({ status }: { status: string }) {
       className={[
         'inline-flex rounded-full border px-2.5 py-1 text-xs font-bold capitalize',
         delivered
-          ? 'border-emerald-100 bg-emerald-50 text-emerald-700'
-          : 'border-amber-100 bg-amber-50 text-amber-700',
+          ? 'saltim-success-soft'
+          : 'saltim-alert-soft',
       ].join(' ')}
     >
       {formatStatus(status)}

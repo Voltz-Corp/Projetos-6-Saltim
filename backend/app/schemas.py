@@ -368,6 +368,7 @@ class PedidoDetailResponse(BaseModel):
     order_date: date
     expected_date: date
     status: str
+    stock_applied_at: Optional[datetime] = None
     items_qty: float
     total_value: float
     items: List[PedidoDetailItem]

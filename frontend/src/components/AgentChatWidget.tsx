@@ -146,7 +146,7 @@ export function AgentChatWidget() {
               type="button"
               onClick={() => submitMessage(suggestion)}
               disabled={chat.isPending}
-              className="flex min-h-9 w-full items-center gap-2 rounded-lg bg-blue-100 px-3 text-left text-sm font-medium text-stone-800 transition hover:bg-blue-200 disabled:cursor-not-allowed disabled:opacity-60"
+              className="flex min-h-9 w-full items-center gap-2 rounded-lg border border-stone-200 bg-brand-50 px-3 text-left text-sm font-medium text-stone-800 transition hover:bg-brand-100 disabled:cursor-not-allowed disabled:opacity-60"
             >
               <span className="flex size-5 flex-shrink-0 items-center justify-center rounded-full border border-stone-700 text-xs font-black">
                 ?
@@ -251,7 +251,7 @@ export function AgentChatWidget() {
           ref={panelRef}
           style={panelPosition ? { left: panelPosition.left, top: panelPosition.top } : undefined}
           className={cn(
-            'fixed z-[70] flex h-[min(650px,calc(100vh-110px))] w-[420px] max-w-[calc(100vw-24px)] flex-col overflow-hidden rounded-2xl border border-stone-200 bg-[#f8f8f8]',
+          'fixed z-[70] flex h-[min(650px,calc(100vh-110px))] w-[420px] max-w-[calc(100vw-24px)] flex-col overflow-hidden rounded-2xl border border-stone-200 bg-stone-50',
             panelPosition ? '' : 'bottom-24 right-5 max-sm:right-3',
             isDragging ? 'select-none' : '',
           )}
@@ -299,7 +299,7 @@ export function AgentChatWidget() {
               </div>
             )}
 
-            <form onSubmit={handleSubmit} className="border-t border-stone-200 bg-[#f8f8f8] p-4">
+            <form onSubmit={handleSubmit} className="border-t border-stone-200 bg-stone-50 p-4">
               <div className="grid grid-cols-[minmax(0,1fr)_36px_36px] items-center gap-1 rounded-xl border border-stone-300 bg-white px-2 py-1.5">
                 <input
                   value={input}

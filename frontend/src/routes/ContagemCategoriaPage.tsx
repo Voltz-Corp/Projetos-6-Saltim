@@ -107,7 +107,7 @@ function GlobalProgressBar({
           className="h-full rounded-full transition-all duration-300"
           style={{
             width: `${pct}%`,
-            backgroundColor: done ? '#2D7A3A' : '#F07820',
+            backgroundColor: done ? 'var(--theme-green)' : 'var(--theme-brand-600)',
           }}
         />
       </div>
@@ -344,7 +344,7 @@ export function ContagemCategoriaPage() {
           <button
             onClick={marcarTodos}
             className="flex-shrink-0 px-3 py-2 text-xs font-semibold rounded-lg transition-colors whitespace-nowrap cursor-pointer text-white"
-            style={{ backgroundColor: '#52B9EB' }}
+            style={{ backgroundColor: 'var(--theme-blue)' }}
           >
             Marcar todos
           </button>
@@ -496,7 +496,7 @@ function ItemCard({
           </span>
         </div>
         {deficit > 0 && (
-          <div className="text-amber-600 font-semibold pt-0.5">
+          <div className="font-semibold pt-0.5 text-[var(--theme-alert-strong)]">
             +{fmtQty(deficit, item.unit)} para o mínimo
           </div>
         )}

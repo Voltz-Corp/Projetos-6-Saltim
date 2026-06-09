@@ -31,11 +31,11 @@ export const criticidadeRoute = createRoute({
 })
 
 const COLORS = {
-  ok: '#2D7A3A',
-  alert: '#E4332B',
-  blue: '#52B9EB',
-  orange: '#F07820',
-  stone: '#78716c',
+  ok: 'var(--theme-green)',
+  alert: 'var(--theme-red)',
+  blue: 'var(--theme-chart-2)',
+  orange: 'var(--theme-brand-600)',
+  stone: 'var(--theme-stone-500)',
 }
 
 const fmt = {
@@ -227,10 +227,10 @@ export function CriticidadePage() {
           <div
             className={cn(
               'inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-bold',
-              status?.tone === 'green' && 'bg-green-50 text-green-700',
-              status?.tone === 'orange' && 'bg-orange-50 text-orange-700',
-              status?.tone === 'red' && 'bg-red-50 text-red-700',
-              status?.tone === 'blue' && 'bg-blue-50 text-blue-700',
+              status?.tone === 'green' && 'saltim-success-soft',
+              status?.tone === 'orange' && 'saltim-alert-soft',
+              status?.tone === 'red' && 'saltim-danger-soft',
+              status?.tone === 'blue' && 'saltim-info-soft',
             )}
           >
             <StatusIcon className="size-4" strokeWidth={2} />
@@ -245,14 +245,14 @@ export function CriticidadePage() {
         ) : (
           <div className="space-y-5">
             {run && !isSuccess && (
-              <div className="rounded-xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm font-medium text-amber-800">
+              <div className="saltim-alert rounded-xl border px-5 py-4 text-sm font-medium">
                 {jobStatus?.error_message ||
                   run.error_message ||
                   'O relatório ainda não está disponível para a contagem de hoje.'}
               </div>
             )}
             {runModel.isError && (
-              <div className="rounded-xl border border-red-200 bg-red-50 px-5 py-4 text-sm font-medium text-red-800">
+              <div className="saltim-danger-soft rounded-xl border px-5 py-4 text-sm font-medium">
                 Não foi possível disparar o modelo agora.
               </div>
             )}
@@ -329,13 +329,13 @@ export function CriticidadePage() {
                   <div className="h-72">
                     <ResponsiveContainer width="100%" height="100%">
                       <BarChart data={categoryData} layout="vertical" margin={{ left: 12, right: 18 }}>
-                        <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#e7e5e4" />
-                        <XAxis type="number" tick={{ fontSize: 11, fill: '#78716c' }} />
+                        <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="var(--theme-chart-grid)" />
+                        <XAxis type="number" tick={{ fontSize: 11, fill: 'var(--theme-chart-axis)' }} />
                         <YAxis
                           dataKey="category"
                           type="category"
                           width={132}
-                          tick={{ fontSize: 11, fill: '#78716c' }}
+                          tick={{ fontSize: 11, fill: 'var(--theme-chart-axis)' }}
                         />
                         <Tooltip formatter={tooltipNumber} />
                         <Bar dataKey="alertas" stackId="a" fill={COLORS.alert} radius={[0, 4, 4, 0]} />
