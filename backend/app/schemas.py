@@ -542,6 +542,58 @@ class VendaCreateRequest(BaseModel):
     notes: Optional[str] = None
 
 
+class MesaPedidoCreate(BaseModel):
+    comanda_id: Optional[str] = None
+
+
+class MesaVendaOut(BaseModel):
+    numero: int
+    status: str
+    comanda_id: Optional[str] = None
+    items_count: int = 0
+    items_qty: float = 0
+    total: float = 0
+    opened_at: Optional[datetime] = None
+
+    @field_serializer("opened_at", when_used="json")
+    def serialize_opened_at(self, value: Optional[datetime]) -> Optional[str]:
+        return _to_recife_datetime(value)
+
+
+class MesasResponse(BaseModel):
+    total_mesas: int
+    mesas: List[MesaVendaOut]
+
+
+class MesaPedidoOut(BaseModel):
+    mesa_numero: int
+    comanda_id: str
+
+
+class VendaItensUpdateRequest(BaseModel):
+    items: List[VendaItemCreate] = Field(default_factory=list, min_length=1)
+    mesa_numero: Optional[int] = None
+    customer_name: Optional[str] = None
+    cpf_cliente: Optional[str] = None
+    notes: Optional[str] = None
+
+
+class VendaFecharRequest(BaseModel):
+    payment_method: str
+    paid_amount: float = Field(gt=0)
+    cpf_cliente: Optional[str] = None
+    customer_name: Optional[str] = None
+    notes: Optional[str] = None
+
+    @field_validator("payment_method")
+    @classmethod
+    def validate_payment_method(cls, value: str) -> str:
+        value = value.strip().lower()
+        if not value:
+            raise ValueError("Forma de pagamento e obrigatoria")
+        return value
+
+
 class VendaConfirmRequest(BaseModel):
     payments: List[VendaPagamentoCreate] = Field(default_factory=list)
 
@@ -599,8 +651,11 @@ class VendaFiscalDocumentOut(BaseModel):
 
 class VendaListItem(BaseModel):
     id: str
+    comanda_id: Optional[str] = None
     date_time: datetime
     customer_name: Optional[str] = None
+    cpf_cliente: Optional[str] = None
+    mesa_numero: Optional[int] = None
     status: str
     fiscal_status: str
     items_count: int
@@ -623,8 +678,12 @@ class VendaPaginado(BaseModel):
 
 class VendaDetailOut(BaseModel):
     id: str
+    comanda_id: Optional[str] = None
     date_time: datetime
     customer: Optional[ClienteOut] = None
+    customer_name: Optional[str] = None
+    cpf_cliente: Optional[str] = None
+    mesa_numero: Optional[int] = None
     status: str
     fiscal_status: str
     subtotal: float

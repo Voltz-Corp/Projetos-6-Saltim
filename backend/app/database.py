@@ -4,7 +4,7 @@ from pathlib import Path
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, DeclarativeBase
 
-DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://saltim:saltim123@localhost:5433/saltim_db")
+DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://saltim:saltim123@localhost:5432/saltim_db")
 DATA_LOADER_FILE = "load_data_csvs.sql"
 ML_LOADER_FILE = "load_ml_dataset.sql"
 

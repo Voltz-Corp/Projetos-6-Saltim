@@ -268,7 +268,7 @@ Pré-condições:
 
 Variáveis do job:
 
-* `DATABASE_URL` (default: `postgresql://saltim:saltim123@localhost:5433/saltim_db`)
+* `DATABASE_URL` (default: `postgresql://saltim:saltim123@localhost:5432/saltim_db`)
 * `MLFLOW_TRACKING_URI` (default: `http://localhost:5000`)
 * `CRITICIDADE_MODEL_URI` (default: um `runs:/.../model`)
 * `CRITICIDADE_DAILY_MLFLOW_EXPERIMENT` (default: `jobs/criticidade/relatorio_diario`)

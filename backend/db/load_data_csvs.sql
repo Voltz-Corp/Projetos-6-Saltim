@@ -154,7 +154,24 @@ CREATE TABLE vendas (
     date_time TIMESTAMP NOT NULL,
     recipe_id TEXT NOT NULL REFERENCES receitas (id),
     quantity NUMERIC(14, 4) NOT NULL,
-    unit_price NUMERIC(14, 4) NOT NULL
+    unit_price NUMERIC(14, 4) NOT NULL,
+    comanda_id TEXT,
+    mesa_numero INTEGER,
+    status TEXT NOT NULL DEFAULT 'paga',
+    cpf_cliente TEXT,
+    customer_name TEXT,
+    payment_method TEXT,
+    paid_amount NUMERIC(14, 4) NOT NULL DEFAULT 0,
+    change_amount NUMERIC(14, 4) NOT NULL DEFAULT 0,
+    discount_total NUMERIC(14, 4) NOT NULL DEFAULT 0,
+    total NUMERIC(14, 4) NOT NULL DEFAULT 0,
+    source TEXT NOT NULL DEFAULT 'historico',
+    fiscal_status TEXT NOT NULL DEFAULT 'pendente_preparacao',
+    notes TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    confirmed_at TIMESTAMPTZ,
+    canceled_at TIMESTAMPTZ
 );
 
 CREATE TABLE clientes (
@@ -362,6 +379,13 @@ COPY vendas (id, date_time, recipe_id, quantity, unit_price)
 FROM '/data/vendas.csv'
 WITH (FORMAT csv, HEADER true, NULL '', ENCODING 'UTF8');
 
+UPDATE vendas
+SET
+    comanda_id = id,
+    total = quantity * unit_price,
+    paid_amount = quantity * unit_price,
+    confirmed_at = date_time;
+
 COPY pedidos (
     id,
     supplier_id,
@@ -467,6 +491,12 @@ CREATE INDEX idx_receitas_ingredientes_ingredient
 
 CREATE INDEX idx_vendas_recipe_date
     ON vendas (recipe_id, date_time);
+
+CREATE INDEX idx_vendas_comanda
+    ON vendas (comanda_id);
+
+CREATE INDEX idx_vendas_mesa_status
+    ON vendas (mesa_numero, status);
 
 CREATE INDEX idx_clientes_name
     ON clientes (name);

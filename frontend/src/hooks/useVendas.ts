@@ -54,6 +54,42 @@ export interface VendaCreateRequest {
   notes?: string
 }
 
+export interface MesaVenda {
+  numero: number
+  status: 'livre' | 'ocupada'
+  comanda_id?: string | null
+  items_count: number
+  items_qty: number
+  total: number
+  opened_at?: string | null
+}
+
+export interface MesasResponse {
+  total_mesas: number
+  mesas: MesaVenda[]
+}
+
+export interface MesaPedido {
+  mesa_numero: number
+  comanda_id: string
+}
+
+export interface VendaItensUpdateRequest {
+  items: VendaItemCreate[]
+  mesa_numero?: number
+  customer_name?: string
+  cpf_cliente?: string
+  notes?: string
+}
+
+export interface VendaFecharRequest {
+  payment_method: string
+  paid_amount: number
+  cpf_cliente?: string
+  customer_name?: string
+  notes?: string
+}
+
 export interface VendaItem {
   id: string
   recipe_id: string
@@ -93,8 +129,12 @@ export interface VendaFiscalDocument {
 
 export interface VendaDetail {
   id: string
+  comanda_id?: string | null
   date_time: string
   customer?: ClienteVenda | null
+  customer_name?: string | null
+  cpf_cliente?: string | null
+  mesa_numero?: number | null
   status: string
   fiscal_status: string
   subtotal: number
@@ -111,8 +151,11 @@ export interface VendaDetail {
 
 export interface VendaListItem {
   id: string
+  comanda_id?: string | null
   date_time: string
   customer_name?: string | null
+  cpf_cliente?: string | null
+  mesa_numero?: number | null
   status: string
   fiscal_status: string
   items_count: number
@@ -190,6 +233,18 @@ export function useVendas(filters: VendaFilters) {
   })
 }
 
+export function useVendaMesas() {
+  return useQuery({
+    queryKey: ['vendas-mesas'],
+    queryFn: async (): Promise<MesasResponse> => {
+      const response = await fetch(`${API_URL}/api/vendas/mesas`)
+      if (!response.ok) throw new Error(await parseError(response, 'Falha ao carregar mesas'))
+      return response.json()
+    },
+    staleTime: 10_000,
+  })
+}
+
 export function useVendaDetail(id?: string) {
   return useQuery({
     queryKey: ['venda', id],
@@ -200,6 +255,71 @@ export function useVendaDetail(id?: string) {
     },
     enabled: Boolean(id),
     staleTime: 30_000,
+  })
+}
+
+export function useCreateMesaPedido() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async (mesaNumero: number): Promise<MesaPedido> => {
+      const response = await fetch(`${API_URL}/api/vendas/mesas/${mesaNumero}/pedido`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      })
+      if (!response.ok) throw new Error(await parseError(response, 'Falha ao abrir mesa'))
+      return response.json()
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['vendas-mesas'] })
+    },
+  })
+}
+
+export function useUpdateVendaItens() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async ({ id, payload }: { id: string; payload: VendaItensUpdateRequest }): Promise<VendaDetail> => {
+      const response = await fetch(`${API_URL}/api/vendas/${id}/itens`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+      if (!response.ok) throw new Error(await parseError(response, 'Falha ao salvar itens'))
+      return response.json()
+    },
+    onSuccess: data => {
+      queryClient.invalidateQueries({ queryKey: ['vendas'] })
+      queryClient.invalidateQueries({ queryKey: ['vendas-mesas'] })
+      queryClient.invalidateQueries({ queryKey: ['venda', data.id] })
+    },
+  })
+}
+
+export function useFecharVenda() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async ({ id, payload }: { id: string; payload: VendaFecharRequest }): Promise<VendaDetail> => {
+      const response = await fetch(`${API_URL}/api/vendas/${id}/fechar`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+      if (!response.ok) throw new Error(await parseError(response, 'Falha ao fechar mesa'))
+      return response.json()
+    },
+    onSuccess: data => {
+      queryClient.invalidateQueries({ queryKey: ['vendas'] })
+      queryClient.invalidateQueries({ queryKey: ['vendas-mesas'] })
+      queryClient.invalidateQueries({ queryKey: ['venda', data.id] })
+      queryClient.invalidateQueries({ queryKey: ['vendas-produtos'] })
+      queryClient.invalidateQueries({ queryKey: ['estoque'] })
+      queryClient.invalidateQueries({ queryKey: ['estoque-paginado'] })
+      queryClient.invalidateQueries({ queryKey: ['dashboard'] })
+    },
   })
 }
 

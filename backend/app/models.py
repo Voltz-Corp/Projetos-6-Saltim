@@ -196,13 +196,34 @@ class ReceitaIngrediente(Base):
 
 class Venda(Base):
     __tablename__ = "vendas"
-    __table_args__ = (Index("idx_vendas_recipe_date", "recipe_id", "date_time"),)
+    __table_args__ = (
+        Index("idx_vendas_recipe_date", "recipe_id", "date_time"),
+        Index("idx_vendas_comanda", "comanda_id"),
+        Index("idx_vendas_mesa_status", "mesa_numero", "status"),
+    )
 
     id = Column(String, primary_key=True)
     date_time = Column(DateTime, nullable=False)
     recipe_id = Column(String, ForeignKey("receitas.id"), nullable=False)
     quantity = Column(Numeric(14, 4), nullable=False)
     unit_price = Column(Numeric(14, 4), nullable=False)
+    comanda_id = Column(String)
+    mesa_numero = Column(Integer)
+    status = Column(String, nullable=False, default="paga")
+    cpf_cliente = Column(String)
+    customer_name = Column(String)
+    payment_method = Column(String)
+    paid_amount = Column(Numeric(14, 4), nullable=False, default=0)
+    change_amount = Column(Numeric(14, 4), nullable=False, default=0)
+    discount_total = Column(Numeric(14, 4), nullable=False, default=0)
+    total = Column(Numeric(14, 4), nullable=False, default=0)
+    source = Column(String, nullable=False, default="historico")
+    fiscal_status = Column(String, nullable=False, default="pendente_preparacao")
+    notes = Column(String)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    confirmed_at = Column(DateTime(timezone=True))
+    canceled_at = Column(DateTime(timezone=True))
 
     receita = relationship("Receita", back_populates="vendas")
 
