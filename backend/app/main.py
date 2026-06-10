@@ -84,10 +84,6 @@ from .models import (
     ResumoDiarioVenda,
     SupplierQuote,
     Venda,
-    VendaDocumentoFiscal,
-    VendaItem,
-    VendaPagamento,
-    VendaTransacao,
 )
 from .schemas import (
     AgentChatRequest,
@@ -132,16 +128,13 @@ from .schemas import (
     PedidoRecommendationItem,
     PedidoRecommendationRequest,
     PedidoRecommendationResponse,
-    VendaConfirmRequest,
     VendaCreateRequest,
     VendaDetailOut,
+    VendaFechamentoDiaOut,
     VendaFecharRequest,
-    VendaFiscalDocumentOut,
     VendaItemOut,
     VendaItensUpdateRequest,
     VendaListItem,
-    VendaPagamentoCreate,
-    VendaPagamentoOut,
     VendaPaginado,
     VendaProdutoOut,
     PurchasePlanGenerateRequest,
@@ -484,6 +477,7 @@ def ensure_purchase_plan_schema() -> None:
 
 def ensure_sales_schema() -> None:
     statements = (
+        "DROP TABLE IF EXISTS venda_documentos_fiscais, venda_pagamentos, venda_itens, venda_transacoes CASCADE",
         "ALTER TABLE vendas ADD COLUMN IF NOT EXISTS comanda_id VARCHAR",
         "ALTER TABLE vendas ADD COLUMN IF NOT EXISTS mesa_numero INTEGER",
         "ALTER TABLE vendas ADD COLUMN IF NOT EXISTS status VARCHAR NOT NULL DEFAULT 'paga'",
@@ -495,7 +489,7 @@ def ensure_sales_schema() -> None:
         "ALTER TABLE vendas ADD COLUMN IF NOT EXISTS discount_total NUMERIC(14,4) NOT NULL DEFAULT 0",
         "ALTER TABLE vendas ADD COLUMN IF NOT EXISTS total NUMERIC(14,4) NOT NULL DEFAULT 0",
         "ALTER TABLE vendas ADD COLUMN IF NOT EXISTS source VARCHAR NOT NULL DEFAULT 'historico'",
-        "ALTER TABLE vendas ADD COLUMN IF NOT EXISTS fiscal_status VARCHAR NOT NULL DEFAULT 'pendente_preparacao'",
+        "ALTER TABLE vendas DROP COLUMN IF EXISTS fiscal_status",
         "ALTER TABLE vendas ADD COLUMN IF NOT EXISTS notes VARCHAR",
         "ALTER TABLE vendas ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT now()",
         "ALTER TABLE vendas ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT now()",
@@ -519,49 +513,6 @@ def ensure_sales_schema() -> None:
         )
         """,
         """
-        CREATE TABLE IF NOT EXISTS venda_transacoes (
-            id VARCHAR PRIMARY KEY,
-            date_time TIMESTAMPTZ NOT NULL,
-            cliente_id VARCHAR REFERENCES clientes(id),
-            status VARCHAR NOT NULL DEFAULT 'aberta',
-            subtotal NUMERIC(14,4) NOT NULL DEFAULT 0,
-            discount_total NUMERIC(14,4) NOT NULL DEFAULT 0,
-            total NUMERIC(14,4) NOT NULL DEFAULT 0,
-            source VARCHAR NOT NULL DEFAULT 'balcao',
-            fiscal_status VARCHAR NOT NULL DEFAULT 'pendente_preparacao',
-            notes VARCHAR,
-            created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-            updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-            confirmed_at TIMESTAMPTZ,
-            canceled_at TIMESTAMPTZ
-        )
-        """,
-        """
-        CREATE TABLE IF NOT EXISTS venda_itens (
-            id VARCHAR PRIMARY KEY,
-            venda_id VARCHAR NOT NULL REFERENCES venda_transacoes(id) ON DELETE CASCADE,
-            recipe_id VARCHAR NOT NULL REFERENCES receitas(id),
-            recipe_name VARCHAR NOT NULL,
-            quantity NUMERIC(14,4) NOT NULL,
-            unit_price NUMERIC(14,4) NOT NULL,
-            discount_value NUMERIC(14,4) NOT NULL DEFAULT 0,
-            total_value NUMERIC(14,4) NOT NULL,
-            venda_historica_id VARCHAR REFERENCES vendas(id)
-        )
-        """,
-        """
-        CREATE TABLE IF NOT EXISTS venda_pagamentos (
-            id VARCHAR PRIMARY KEY,
-            venda_id VARCHAR NOT NULL REFERENCES venda_transacoes(id) ON DELETE CASCADE,
-            method VARCHAR NOT NULL,
-            amount NUMERIC(14,4) NOT NULL,
-            status VARCHAR NOT NULL DEFAULT 'pago',
-            paid_at TIMESTAMPTZ,
-            change_amount NUMERIC(14,4) NOT NULL DEFAULT 0,
-            external_reference VARCHAR
-        )
-        """,
-        """
         CREATE TABLE IF NOT EXISTS estoque_movimentos (
             id VARCHAR PRIMARY KEY,
             ingredient_id VARCHAR NOT NULL REFERENCES ingredientes(id),
@@ -575,38 +526,10 @@ def ensure_sales_schema() -> None:
             created_at TIMESTAMPTZ NOT NULL DEFAULT now()
         )
         """,
-        """
-        CREATE TABLE IF NOT EXISTS venda_documentos_fiscais (
-            id VARCHAR PRIMARY KEY,
-            venda_id VARCHAR NOT NULL REFERENCES venda_transacoes(id) ON DELETE CASCADE,
-            document_type VARCHAR NOT NULL DEFAULT 'NFC-e',
-            status VARCHAR NOT NULL DEFAULT 'pendente_preparacao',
-            provider VARCHAR,
-            access_key VARCHAR,
-            protocol VARCHAR,
-            issued_at TIMESTAMPTZ,
-            cancelled_at TIMESTAMPTZ,
-            payload JSON,
-            error_message VARCHAR,
-            created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-            updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
-        )
-        """,
         "CREATE INDEX IF NOT EXISTS idx_clientes_name ON clientes(name)",
         "CREATE INDEX IF NOT EXISTS idx_clientes_document ON clientes(document)",
-        "CREATE INDEX IF NOT EXISTS idx_venda_transacoes_date ON venda_transacoes(date_time)",
-        "CREATE INDEX IF NOT EXISTS idx_venda_transacoes_status ON venda_transacoes(status)",
-        "CREATE INDEX IF NOT EXISTS idx_venda_transacoes_cliente ON venda_transacoes(cliente_id)",
-        "CREATE INDEX IF NOT EXISTS idx_venda_transacoes_fiscal_status ON venda_transacoes(fiscal_status)",
-        "CREATE INDEX IF NOT EXISTS idx_venda_itens_venda ON venda_itens(venda_id)",
-        "CREATE INDEX IF NOT EXISTS idx_venda_itens_recipe ON venda_itens(recipe_id)",
-        "CREATE INDEX IF NOT EXISTS idx_venda_itens_historical ON venda_itens(venda_historica_id)",
-        "CREATE INDEX IF NOT EXISTS idx_venda_pagamentos_venda ON venda_pagamentos(venda_id)",
-        "CREATE INDEX IF NOT EXISTS idx_venda_pagamentos_status ON venda_pagamentos(status)",
         "CREATE INDEX IF NOT EXISTS idx_estoque_movimentos_ingredient_date ON estoque_movimentos(ingredient_id, created_at)",
         "CREATE INDEX IF NOT EXISTS idx_estoque_movimentos_source ON estoque_movimentos(source_type, source_id)",
-        "CREATE INDEX IF NOT EXISTS idx_venda_documentos_fiscais_venda ON venda_documentos_fiscais(venda_id)",
-        "CREATE INDEX IF NOT EXISTS idx_venda_documentos_fiscais_status ON venda_documentos_fiscais(status)",
     )
     raw_conn = engine.raw_connection()
     try:
@@ -1221,9 +1144,13 @@ def run_criticidade_report(response: Response, db: Session = Depends(get_db)):
         next((path for path in python_candidates if path.exists()), sys.executable)
     )
     env = os.environ.copy()
-    env.setdefault(
-        "DATABASE_URL", "postgresql+psycopg://saltim:saltim123@localhost:5432/saltim_db"
+    database_url = env.get(
+        "DATABASE_URL",
+        "postgresql://saltim:saltim123@localhost:5432/saltim_db",
     )
+    if database_url.startswith("postgresql+psycopg://"):
+        database_url = database_url.replace("postgresql+psycopg://", "postgresql://", 1)
+    env["DATABASE_URL"] = database_url
     env.setdefault("MLFLOW_TRACKING_URI", "http://localhost:5000")
 
     result = subprocess.run(
@@ -5149,6 +5076,7 @@ def _next_prefixed_id(
     column,
     prefix: str,
     reserved_ids: Optional[set[str]] = None,
+    width: int = 12,
 ) -> str:
     reserved_ids = reserved_ids if reserved_ids is not None else set()
     last_id = (
@@ -5164,13 +5092,13 @@ def _next_prefixed_id(
         except ValueError:
             next_number = (db.query(func.count(column)).scalar() or 0) + 1
 
-    candidate = f"{prefix}{next_number:012d}"
+    candidate = f"{prefix}{next_number:0{width}d}"
     while (
         candidate in reserved_ids
         or db.query(column).filter(column == candidate).first()
     ):
         next_number += 1
-        candidate = f"{prefix}{next_number:012d}"
+        candidate = f"{prefix}{next_number:0{width}d}"
     reserved_ids.add(candidate)
     return candidate
 
@@ -5179,38 +5107,16 @@ def _next_cliente_id(db: Session, reserved_ids: Optional[set[str]] = None) -> st
     return _next_prefixed_id(db, Cliente.id, "CLI", reserved_ids)
 
 
-def _next_venda_transacao_id(
-    db: Session, reserved_ids: Optional[set[str]] = None
-) -> str:
-    return _next_prefixed_id(db, VendaTransacao.id, "VTR", reserved_ids)
-
-
-def _next_venda_item_id(db: Session, reserved_ids: Optional[set[str]] = None) -> str:
-    return _next_prefixed_id(db, VendaItem.id, "VTI", reserved_ids)
-
-
-def _next_venda_pagamento_id(
-    db: Session, reserved_ids: Optional[set[str]] = None
-) -> str:
-    return _next_prefixed_id(db, VendaPagamento.id, "VPG", reserved_ids)
-
-
 def _next_estoque_movimento_id(
     db: Session, reserved_ids: Optional[set[str]] = None
 ) -> str:
     return _next_prefixed_id(db, EstoqueMovimento.id, "MOV", reserved_ids)
 
 
-def _next_venda_documento_fiscal_id(
-    db: Session, reserved_ids: Optional[set[str]] = None
-) -> str:
-    return _next_prefixed_id(db, VendaDocumentoFiscal.id, "VDF", reserved_ids)
-
-
 def _next_historical_venda_id(
     db: Session, reserved_ids: Optional[set[str]] = None
 ) -> str:
-    return _next_prefixed_id(db, Venda.id, "VEN", reserved_ids)
+    return _next_prefixed_id(db, Venda.id, "VEN", reserved_ids, width=9)
 
 
 def _next_comanda_id(db: Session, reserved_ids: Optional[set[str]] = None) -> str:
@@ -5236,16 +5142,6 @@ def _money(value: float) -> float:
     return round(max(float(value or 0), 0), 2)
 
 
-def _paid_total(venda: VendaTransacao) -> float:
-    return _money(
-        sum(
-            _as_float(payment.amount)
-            for payment in venda.payments
-            if payment.status == "pago"
-        )
-    )
-
-
 def _serialize_cliente(cliente: Optional[Cliente]) -> Optional[ClienteOut]:
     if cliente is None:
         return None
@@ -5256,83 +5152,6 @@ def _serialize_cliente(cliente: Optional[Cliente]) -> Optional[ClienteOut]:
         email=cliente.email,
         phone=cliente.phone,
         created_at=cliente.created_at,
-    )
-
-
-def _serialize_fiscal_document(
-    document: Optional[VendaDocumentoFiscal],
-) -> Optional[VendaFiscalDocumentOut]:
-    if document is None:
-        return None
-    return VendaFiscalDocumentOut(
-        id=document.id,
-        venda_id=document.venda_id,
-        document_type=document.document_type,
-        status=document.status,
-        provider=document.provider,
-        access_key=document.access_key,
-        protocol=document.protocol,
-        issued_at=document.issued_at,
-        cancelled_at=document.cancelled_at,
-        payload=document.payload,
-        error_message=document.error_message,
-        created_at=document.created_at,
-        updated_at=document.updated_at,
-    )
-
-
-def _latest_fiscal_document(venda: VendaTransacao) -> Optional[VendaDocumentoFiscal]:
-    if not venda.fiscal_documents:
-        return None
-    return sorted(
-        venda.fiscal_documents,
-        key=lambda item: (
-            item.created_at or datetime.min.replace(tzinfo=RECIFE_TZ),
-            item.id,
-        ),
-    )[-1]
-
-
-def _serialize_venda_detail(venda: VendaTransacao) -> VendaDetailOut:
-    return VendaDetailOut(
-        id=venda.id,
-        date_time=venda.date_time,
-        customer=_serialize_cliente(venda.cliente),
-        status=venda.status,
-        fiscal_status=venda.fiscal_status,
-        subtotal=_as_float(venda.subtotal),
-        discount_total=_as_float(venda.discount_total),
-        total=_as_float(venda.total),
-        source=venda.source,
-        notes=venda.notes,
-        confirmed_at=venda.confirmed_at,
-        canceled_at=venda.canceled_at,
-        items=[
-            VendaItemOut(
-                id=item.id,
-                recipe_id=item.recipe_id,
-                recipe_name=item.recipe_name,
-                quantity=_as_float(item.quantity),
-                unit_price=_as_float(item.unit_price),
-                discount_value=_as_float(item.discount_value),
-                total_value=_as_float(item.total_value),
-                venda_historica_id=item.venda_historica_id,
-            )
-            for item in sorted(venda.items, key=lambda item: item.id)
-        ],
-        payments=[
-            VendaPagamentoOut(
-                id=payment.id,
-                method=payment.method,
-                amount=_as_float(payment.amount),
-                status=payment.status,
-                paid_at=payment.paid_at,
-                change_amount=_as_float(payment.change_amount),
-                external_reference=payment.external_reference,
-            )
-            for payment in sorted(venda.payments, key=lambda payment: payment.id)
-        ],
-        fiscal_document=_serialize_fiscal_document(_latest_fiscal_document(venda)),
     )
 
 
@@ -5353,7 +5172,6 @@ def _serialize_venda_group(rows: list[Venda]) -> VendaDetailOut:
         if first.total is not None and _as_float(first.total) > 0
         else _money(subtotal - discount_total)
     )
-    paid_amount = _as_float(first.paid_amount)
     customer = None
     if first.customer_name or first.cpf_cliente:
         customer = ClienteOut(
@@ -5373,7 +5191,7 @@ def _serialize_venda_group(rows: list[Venda]) -> VendaDetailOut:
         cpf_cliente=first.cpf_cliente,
         mesa_numero=first.mesa_numero,
         status=first.status,
-        fiscal_status=first.fiscal_status,
+        payment_method=first.payment_method,
         subtotal=subtotal,
         discount_total=discount_total,
         total=total,
@@ -5396,26 +5214,6 @@ def _serialize_venda_group(rows: list[Venda]) -> VendaDetailOut:
             )
             for item in ordered_rows
         ],
-        payments=(
-            [
-                VendaPagamentoOut(
-                    id=f"PAY-{first.comanda_id or first.id}",
-                    method=first.payment_method or "nao_informado",
-                    amount=paid_amount,
-                    status=(
-                        "pago"
-                        if paid_amount > 0 and first.status == "paga"
-                        else first.status
-                    ),
-                    paid_at=first.confirmed_at,
-                    change_amount=_as_float(first.change_amount),
-                    external_reference=None,
-                )
-            ]
-            if paid_amount > 0 or first.payment_method
-            else []
-        ),
-        fiscal_document=None,
     )
 
 
@@ -5440,44 +5238,15 @@ def _get_venda_rows_or_404(db: Session, venda_id: str) -> list[Venda]:
 def _recipe_stock_profile(
     db: Session, recipe_id: str
 ) -> tuple[int, bool, Optional[float], list[str]]:
-    rows = (
-        db.query(
-            ReceitaIngrediente.ingredient_id,
-            ReceitaIngrediente.qty,
-            Ingrediente.name,
-            Ingrediente.unit,
-            EstoqueAtual.qtd,
-        )
+    ingredients_count = (
+        db.query(func.count(ReceitaIngrediente.ingredient_id))
         .join(Ingrediente, Ingrediente.id == ReceitaIngrediente.ingredient_id)
-        .outerjoin(
-            EstoqueAtual, EstoqueAtual.ingrediente == ReceitaIngrediente.ingredient_id
-        )
         .filter(ReceitaIngrediente.recipe_id == recipe_id)
         .filter(Ingrediente.category_id != PRODUCTION_CATEGORY_ID)
-        .all()
+        .scalar()
+        or 0
     )
-    warnings: list[str] = []
-    max_quantity: Optional[float] = None
-    for row in rows:
-        required = _as_float(row.qty)
-        current_qty = _as_float(row.qtd)
-        if required <= 0:
-            warnings.append(f"{row.name}: ficha tecnica sem consumo valido")
-            continue
-        possible = current_qty / required
-        max_quantity = possible if max_quantity is None else min(max_quantity, possible)
-        if current_qty <= 0:
-            warnings.append(f"{row.name}: sem estoque")
-
-    if not rows:
-        warnings.append("Produto sem ficha tecnica de ingredientes")
-    available = bool(rows) and max_quantity is not None and max_quantity >= 1
-    return (
-        len(rows),
-        available,
-        round(max_quantity, 2) if max_quantity is not None else None,
-        warnings,
-    )
+    return int(ingredients_count), True, None, []
 
 
 def _serialize_venda_produto(db: Session, receita: Receita) -> VendaProdutoOut:
@@ -5590,334 +5359,6 @@ def _build_venda_items(
         )
     total = _money(total_before_sale_discount - discount_total)
     return rows, subtotal, total
-
-
-def _replace_venda_payments(
-    db: Session,
-    venda: VendaTransacao,
-    payments: list[VendaPagamentoCreate],
-) -> None:
-    venda.payments.clear()
-    db.flush()
-    reserved_ids: set[str] = set()
-    paid_at = _now_recife()
-    for payment in payments:
-        venda.payments.append(
-            VendaPagamento(
-                id=_next_venda_pagamento_id(db, reserved_ids),
-                method=payment.method,
-                amount=payment.amount,
-                status=payment.status,
-                paid_at=paid_at if payment.status == "pago" else None,
-                change_amount=payment.change_amount,
-                external_reference=payment.external_reference,
-            )
-        )
-
-
-def _required_ingredients_for_venda(db: Session, venda_id: str):
-    return (
-        db.query(
-            ReceitaIngrediente.ingredient_id,
-            Ingrediente.name.label("ingredient_name"),
-            Ingrediente.unit,
-            func.sum(VendaItem.quantity * ReceitaIngrediente.qty).label("required_qty"),
-        )
-        .join(Ingrediente, Ingrediente.id == ReceitaIngrediente.ingredient_id)
-        .join(VendaItem, VendaItem.recipe_id == ReceitaIngrediente.recipe_id)
-        .filter(VendaItem.venda_id == venda_id)
-        .filter(Ingrediente.category_id != PRODUCTION_CATEGORY_ID)
-        .group_by(ReceitaIngrediente.ingredient_id, Ingrediente.name, Ingrediente.unit)
-        .all()
-    )
-
-
-def _apply_venda_stock_movements(db: Session, venda: VendaTransacao) -> None:
-    requirements = _required_ingredients_for_venda(db, venda.id)
-    if not requirements:
-        raise HTTPException(
-            status_code=400,
-            detail="Venda sem ficha tecnica para baixa de estoque",
-        )
-
-    ingredient_ids = [row.ingredient_id for row in requirements]
-    stock_rows = (
-        db.query(EstoqueAtual)
-        .filter(EstoqueAtual.ingrediente.in_(ingredient_ids))
-        .with_for_update()
-        .all()
-    )
-    stock_by_ingredient = {row.ingrediente: row for row in stock_rows}
-
-    insufficient: list[dict] = []
-    for row in requirements:
-        required_qty = _as_float(row.required_qty)
-        stock = stock_by_ingredient.get(row.ingredient_id)
-        current_qty = _as_float(stock.qtd) if stock else 0.0
-        if required_qty <= 0:
-            insufficient.append(
-                {
-                    "ingredient_id": row.ingredient_id,
-                    "ingredient_name": row.ingredient_name,
-                    "required_qty": required_qty,
-                    "current_qty": current_qty,
-                    "unit": row.unit,
-                    "reason": "consumo invalido",
-                }
-            )
-        elif current_qty + 1e-9 < required_qty:
-            insufficient.append(
-                {
-                    "ingredient_id": row.ingredient_id,
-                    "ingredient_name": row.ingredient_name,
-                    "required_qty": required_qty,
-                    "current_qty": current_qty,
-                    "unit": row.unit,
-                    "reason": "estoque insuficiente",
-                }
-            )
-
-    if insufficient:
-        raise HTTPException(
-            status_code=400,
-            detail={
-                "message": "Estoque insuficiente para confirmar a venda",
-                "items": insufficient,
-            },
-        )
-
-    reserved_movement_ids: set[str] = set()
-    movement_date = _now_recife().date()
-    for row in requirements:
-        stock = stock_by_ingredient[row.ingredient_id]
-        required_qty = _as_float(row.required_qty)
-        previous_qty = _as_float(stock.qtd)
-        new_qty = round(previous_qty - required_qty, 4)
-        stock.qtd = new_qty
-        stock.data = movement_date
-        db.add(
-            EstoqueMovimento(
-                id=_next_estoque_movimento_id(db, reserved_movement_ids),
-                ingredient_id=row.ingredient_id,
-                source_type="venda",
-                source_id=venda.id,
-                delta_qty=-required_qty,
-                previous_qty=previous_qty,
-                new_qty=new_qty,
-                unit=row.unit,
-                reason="Baixa por venda de balcao",
-            )
-        )
-
-
-def _required_ingredients_for_venda_rows(db: Session, rows: list[Venda]):
-    recipe_quantities: dict[str, float] = {}
-    for row in rows:
-        recipe_quantities[row.recipe_id] = recipe_quantities.get(
-            row.recipe_id, 0.0
-        ) + _as_float(row.quantity)
-    requirements: dict[str, dict] = {}
-    if not recipe_quantities:
-        return []
-    recipe_ingredients = (
-        db.query(
-            ReceitaIngrediente.recipe_id,
-            ReceitaIngrediente.ingredient_id,
-            Ingrediente.name.label("ingredient_name"),
-            Ingrediente.unit,
-            ReceitaIngrediente.qty,
-        )
-        .join(Ingrediente, Ingrediente.id == ReceitaIngrediente.ingredient_id)
-        .filter(ReceitaIngrediente.recipe_id.in_(recipe_quantities.keys()))
-        .filter(Ingrediente.category_id != PRODUCTION_CATEGORY_ID)
-        .all()
-    )
-    for item in recipe_ingredients:
-        required_qty = _as_float(item.qty) * recipe_quantities[item.recipe_id]
-        current = requirements.setdefault(
-            item.ingredient_id,
-            {
-                "ingredient_id": item.ingredient_id,
-                "ingredient_name": item.ingredient_name,
-                "unit": item.unit,
-                "required_qty": 0.0,
-            },
-        )
-        current["required_qty"] += required_qty
-    return list(requirements.values())
-
-
-def _apply_venda_rows_stock_movements(db: Session, rows: list[Venda]) -> None:
-    requirements = _required_ingredients_for_venda_rows(db, rows)
-    if not requirements:
-        raise HTTPException(
-            status_code=400,
-            detail="Venda sem ficha tecnica para baixa de estoque",
-        )
-
-    ingredient_ids = [row["ingredient_id"] for row in requirements]
-    stock_rows = (
-        db.query(EstoqueAtual)
-        .filter(EstoqueAtual.ingrediente.in_(ingredient_ids))
-        .with_for_update()
-        .all()
-    )
-    stock_by_ingredient = {row.ingrediente: row for row in stock_rows}
-
-    insufficient: list[dict] = []
-    for row in requirements:
-        required_qty = _as_float(row["required_qty"])
-        stock = stock_by_ingredient.get(row["ingredient_id"])
-        current_qty = _as_float(stock.qtd) if stock else 0.0
-        if required_qty <= 0:
-            reason = "consumo invalido"
-        elif current_qty + 1e-9 < required_qty:
-            reason = "estoque insuficiente"
-        else:
-            reason = ""
-        if reason:
-            insufficient.append(
-                {
-                    "ingredient_id": row["ingredient_id"],
-                    "ingredient_name": row["ingredient_name"],
-                    "required_qty": required_qty,
-                    "current_qty": current_qty,
-                    "unit": row["unit"],
-                    "reason": reason,
-                }
-            )
-
-    if insufficient:
-        raise HTTPException(
-            status_code=400,
-            detail={
-                "message": "Estoque insuficiente para fechar a mesa",
-                "items": insufficient,
-            },
-        )
-
-    reserved_movement_ids: set[str] = set()
-    movement_date = _now_recife().date()
-    source_id = rows[0].comanda_id or rows[0].id
-    for row in requirements:
-        stock = stock_by_ingredient[row["ingredient_id"]]
-        required_qty = _as_float(row["required_qty"])
-        previous_qty = _as_float(stock.qtd)
-        new_qty = round(previous_qty - required_qty, 4)
-        stock.qtd = new_qty
-        stock.data = movement_date
-        db.add(
-            EstoqueMovimento(
-                id=_next_estoque_movimento_id(db, reserved_movement_ids),
-                ingredient_id=row["ingredient_id"],
-                source_type="venda",
-                source_id=source_id,
-                delta_qty=-required_qty,
-                previous_qty=previous_qty,
-                new_qty=new_qty,
-                unit=row["unit"],
-                reason="Baixa por fechamento de mesa",
-            )
-        )
-
-
-def _insert_historical_sales(db: Session, venda: VendaTransacao) -> None:
-    reserved_historical_ids: set[str] = set()
-    sale_time = venda.date_time
-    if sale_time.tzinfo is not None:
-        sale_time = sale_time.astimezone(RECIFE_TZ).replace(tzinfo=None)
-    for item in venda.items:
-        if item.venda_historica_id:
-            continue
-        historical_id = _next_historical_venda_id(db, reserved_historical_ids)
-        db.add(
-            Venda(
-                id=historical_id,
-                date_time=sale_time,
-                recipe_id=item.recipe_id,
-                quantity=item.quantity,
-                unit_price=item.unit_price,
-            )
-        )
-        item.venda_historica_id = historical_id
-
-
-def _fiscal_payload(venda: VendaTransacao) -> dict:
-    return {
-        "document_type": "NFC-e",
-        "integration_status": "prepared_only",
-        "sale": {
-            "id": venda.id,
-            "date_time": _to_recife_export_datetime(venda.date_time),
-            "subtotal": _as_float(venda.subtotal),
-            "discount_total": _as_float(venda.discount_total),
-            "total": _as_float(venda.total),
-            "source": venda.source,
-        },
-        "customer": (
-            {
-                "id": venda.cliente.id,
-                "name": venda.cliente.name,
-                "document": venda.cliente.document,
-                "email": venda.cliente.email,
-                "phone": venda.cliente.phone,
-            }
-            if venda.cliente
-            else None
-        ),
-        "items": [
-            {
-                "recipe_id": item.recipe_id,
-                "name": item.recipe_name,
-                "quantity": _as_float(item.quantity),
-                "unit_price": _as_float(item.unit_price),
-                "discount_value": _as_float(item.discount_value),
-                "total_value": _as_float(item.total_value),
-            }
-            for item in venda.items
-        ],
-        "payments": [
-            {
-                "method": payment.method,
-                "amount": _as_float(payment.amount),
-                "status": payment.status,
-                "change_amount": _as_float(payment.change_amount),
-            }
-            for payment in venda.payments
-        ],
-    }
-
-
-def _prepare_fiscal_document(db: Session, venda: VendaTransacao) -> None:
-    document = _latest_fiscal_document(venda)
-    now = _now_recife()
-    if document is None:
-        document = VendaDocumentoFiscal(
-            id=_next_venda_documento_fiscal_id(db),
-            venda_id=venda.id,
-            document_type="NFC-e",
-        )
-        venda.fiscal_documents.append(document)
-    document.status = "pronto_para_integracao"
-    document.updated_at = now
-    document.payload = _fiscal_payload(venda)
-    document.error_message = None
-    venda.fiscal_status = document.status
-
-
-def _to_recife_export_datetime(value: Optional[datetime]) -> Optional[str]:
-    if value is None:
-        return None
-    if value.tzinfo is None:
-        value = value.replace(tzinfo=RECIFE_TZ)
-    return value.astimezone(RECIFE_TZ).isoformat()
-
-
-def _get_venda_or_404(db: Session, venda_id: str) -> VendaTransacao:
-    venda = db.query(VendaTransacao).filter(VendaTransacao.id == venda_id).first()
-    if venda is None:
-        raise HTTPException(status_code=404, detail="Venda nao encontrada")
-    return venda
 
 
 @app.get("/api/vendas/produtos", response_model=list[VendaProdutoOut])
@@ -6099,7 +5540,6 @@ def update_venda_itens(
             discount_total=0,
             total=total,
             source="mesa" if mesa_numero else "balcao",
-            fiscal_status="pendente_preparacao",
             notes=payload.notes,
             created_at=now,
             updated_at=now,
@@ -6108,28 +5548,6 @@ def update_venda_itens(
         created.append(venda)
     db.commit()
     return _serialize_venda_group(created)
-
-
-@app.post("/api/vendas/{venda_id}/confirmar", response_model=VendaDetailOut)
-def confirm_venda(
-    venda_id: str,
-    payload: VendaConfirmRequest,
-    db: Session = Depends(get_db),
-):
-    payment = payload.payments[0] if payload.payments else None
-    if payment is None:
-        raise HTTPException(status_code=400, detail="Informe ao menos um pagamento")
-    return fechar_venda(
-        venda_id,
-        VendaFecharRequest(
-            payment_method=payment.method,
-            paid_amount=payment.amount,
-            cpf_cliente=None,
-            customer_name=None,
-            notes=None,
-        ),
-        db,
-    )
 
 
 @app.post("/api/vendas/{venda_id}/fechar", response_model=VendaDetailOut)
@@ -6151,15 +5569,11 @@ def fechar_venda(
     subtotal = _money(
         sum(_as_float(row.quantity) * _as_float(row.unit_price) for row in rows)
     )
-    if payload.paid_amount + 1e-9 < subtotal:
-        raise HTTPException(
-            status_code=400, detail="Pagamento menor que o total da venda"
-        )
 
-    _apply_venda_rows_stock_movements(db, rows)
     now = _now_recife()
     cpf_cliente = _digits_only(payload.cpf_cliente)
-    change_amount = _money(payload.paid_amount - subtotal)
+    paid_amount = payload.paid_amount if payload.paid_amount is not None else subtotal
+    change_amount = _money(paid_amount - subtotal)
     for row in rows:
         row.status = "paga"
         row.cpf_cliente = cpf_cliente
@@ -6169,11 +5583,10 @@ def fechar_venda(
             else row.customer_name
         )
         row.payment_method = payload.payment_method
-        row.paid_amount = payload.paid_amount
+        row.paid_amount = paid_amount
         row.change_amount = change_amount
         row.discount_total = 0
         row.total = subtotal
-        row.fiscal_status = "pronto_para_integracao"
         row.notes = payload.notes if payload.notes is not None else row.notes
         row.confirmed_at = now
         row.updated_at = now
@@ -6188,67 +5601,8 @@ def cancel_venda(venda_id: str, db: Session = Depends(get_db)):
         return _serialize_venda_group(rows)
 
     now = _now_recife()
-    source_id = rows[0].comanda_id or rows[0].id
-    reserved_movement_ids: set[str] = set()
-    movements = (
-        db.query(EstoqueMovimento)
-        .filter(EstoqueMovimento.source_type == "venda")
-        .filter(EstoqueMovimento.source_id == source_id)
-        .all()
-    )
-    if movements:
-        ingredient_ids = sorted({movement.ingredient_id for movement in movements})
-        stock_rows = (
-            db.query(EstoqueAtual)
-            .filter(EstoqueAtual.ingrediente.in_(ingredient_ids))
-            .with_for_update()
-            .all()
-        )
-        stock_by_ingredient = {row.ingrediente: row for row in stock_rows}
-        ingredient_units = {
-            ingredient.id: ingredient.unit
-            for ingredient in db.query(Ingrediente)
-            .filter(Ingrediente.id.in_(ingredient_ids))
-            .all()
-        }
-        delta_by_ingredient: dict[str, float] = {}
-        for movement in movements:
-            delta_by_ingredient[movement.ingredient_id] = delta_by_ingredient.get(
-                movement.ingredient_id, 0.0
-            ) + _as_float(movement.delta_qty)
-        for ingredient_id, original_delta in delta_by_ingredient.items():
-            revert_qty = round(-original_delta, 4)
-            stock = stock_by_ingredient.get(ingredient_id)
-            previous_qty = _as_float(stock.qtd) if stock else 0.0
-            new_qty = round(previous_qty + revert_qty, 4)
-            if stock is None:
-                stock = EstoqueAtual(
-                    id=f"CUR-{ingredient_id}",
-                    ingrediente=ingredient_id,
-                    qtd=new_qty,
-                    data=now.date(),
-                )
-                db.add(stock)
-            else:
-                stock.qtd = new_qty
-                stock.data = now.date()
-            db.add(
-                EstoqueMovimento(
-                    id=_next_estoque_movimento_id(db, reserved_movement_ids),
-                    ingredient_id=ingredient_id,
-                    source_type="cancelamento_venda",
-                    source_id=source_id,
-                    delta_qty=revert_qty,
-                    previous_qty=previous_qty,
-                    new_qty=new_qty,
-                    unit=ingredient_units.get(ingredient_id, ""),
-                    reason="Estorno por cancelamento de venda",
-                )
-            )
-
     for row in rows:
         row.status = "cancelada"
-        row.fiscal_status = "cancelado"
         row.canceled_at = now
         row.updated_at = now
     db.commit()
@@ -6274,7 +5628,7 @@ def get_vendas(
         func.max(Venda.cpf_cliente).label("cpf_cliente"),
         func.max(Venda.mesa_numero).label("mesa_numero"),
         func.max(Venda.status).label("status"),
-        func.max(Venda.fiscal_status).label("fiscal_status"),
+        func.max(Venda.payment_method).label("payment_method"),
         func.count(Venda.id).label("items_count"),
         func.coalesce(func.sum(Venda.quantity), 0).label("items_qty"),
         func.coalesce(
@@ -6302,6 +5656,12 @@ def get_vendas(
     query = query.group_by(func.coalesce(Venda.comanda_id, Venda.id))
 
     total = query.count()
+    revenue_rows = query.subquery()
+    paid_revenue_total = _as_float(
+        db.query(func.coalesce(func.sum(revenue_rows.c.total), 0))
+        .filter(revenue_rows.c.status == "paga")
+        .scalar()
+    )
     total_pages = max(1, math.ceil(total / page_size))
     vendas = (
         query.order_by(desc("date_time"), desc("group_id"))
@@ -6318,7 +5678,7 @@ def get_vendas(
             cpf_cliente=venda.cpf_cliente,
             mesa_numero=venda.mesa_numero,
             status=venda.status,
-            fiscal_status=venda.fiscal_status,
+            payment_method=venda.payment_method,
             items_count=int(venda.items_count or 0),
             items_qty=_as_float(venda.items_qty),
             total=_as_float(venda.total),
@@ -6332,16 +5692,74 @@ def get_vendas(
         page=page,
         page_size=page_size,
         total_pages=total_pages,
+        paid_revenue_total=paid_revenue_total,
     )
 
 
-@app.get("/api/vendas/{venda_id}/fiscal", response_model=VendaFiscalDocumentOut)
-def get_venda_fiscal_document(venda_id: str, db: Session = Depends(get_db)):
-    venda = _get_venda_or_404(db, venda_id)
-    document = _latest_fiscal_document(venda)
-    if document is None:
-        raise HTTPException(status_code=404, detail="Documento fiscal nao preparado")
-    return _serialize_fiscal_document(document)
+def _default_daily_sales_flags(db: Session, target_date: date) -> dict[str, int]:
+    holiday = (
+        db.query(FeriadoRecife)
+        .filter(FeriadoRecife.data == target_date)
+        .first()
+    )
+    return {
+        "is_holiday": 1 if holiday else 0,
+        "is_carnaval_window": 0,
+        "is_sao_joao": 1 if target_date.month == 6 else 0,
+        "is_summer": 1 if target_date.month in {12, 1, 2} else 0,
+        "is_promo_day": 0,
+        "is_rain_event": 0,
+        "is_closure": 0,
+    }
+
+
+def _serialize_resumo_diario_venda(row: ResumoDiarioVenda) -> VendaFechamentoDiaOut:
+    return VendaFechamentoDiaOut(
+        date=row.date,
+        vendas_dia=row.vendas_dia,
+        is_holiday=row.is_holiday,
+        is_carnaval_window=row.is_carnaval_window,
+        is_sao_joao=row.is_sao_joao,
+        is_summer=row.is_summer,
+        is_promo_day=row.is_promo_day,
+        is_rain_event=row.is_rain_event,
+        is_closure=row.is_closure,
+    )
+
+
+@app.post("/api/vendas/fechamento-dia", response_model=VendaFechamentoDiaOut)
+def fechar_dia_vendas(
+    target_date: Optional[date] = Query(default=None, alias="date"),
+    db: Session = Depends(get_db),
+):
+    if not isinstance(target_date, date):
+        target_date = None
+    target_date = target_date or _now_recife().date()
+    vendas_dia = (
+        db.query(func.count(Venda.id))
+        .filter(Venda.status == "paga")
+        .filter(func.date(Venda.date_time) == target_date)
+        .scalar()
+        or 0
+    )
+    row = (
+        db.query(ResumoDiarioVenda)
+        .filter(ResumoDiarioVenda.date == target_date)
+        .first()
+    )
+    if row is None:
+        flags = _default_daily_sales_flags(db, target_date)
+        row = ResumoDiarioVenda(
+            date=target_date,
+            vendas_dia=int(vendas_dia),
+            **flags,
+        )
+        db.add(row)
+    else:
+        row.vendas_dia = int(vendas_dia)
+    db.commit()
+    db.refresh(row)
+    return _serialize_resumo_diario_venda(row)
 
 
 @app.get("/api/vendas/{venda_id}", response_model=VendaDetailOut)

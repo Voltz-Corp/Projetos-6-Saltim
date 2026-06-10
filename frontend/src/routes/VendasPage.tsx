@@ -1,12 +1,12 @@
-import { useEffect, useState, type ReactNode } from 'react'
-import { createRoute } from '@tanstack/react-router'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { createRoute, useNavigate } from '@tanstack/react-router'
 import {
+  ArrowLeft,
   Banknote,
-  Check,
+  CalendarCheck,
   CircleDollarSign,
   CreditCard,
   Eye,
-  FileText,
   Package,
   Plus,
   ReceiptText,
@@ -14,6 +14,7 @@ import {
   Table2,
   Trash2,
   User,
+  Utensils,
   XCircle,
   type LucideIcon,
 } from 'lucide-react'
@@ -24,6 +25,7 @@ import { KpiCard } from '../components/KpiCard'
 import {
   useCancelVenda,
   useCreateMesaPedido,
+  useFecharDiaVendas,
   useFecharVenda,
   useUpdateVendaItens,
   useVendaDetail,
@@ -40,6 +42,12 @@ export const vendasRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/vendas',
   component: VendasPage,
+})
+
+export const vendaMesaRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/vendas/mesas/$mesaNumero',
+  component: VendaMesaPage,
 })
 
 type VendasView = 'mesas' | 'history'
@@ -63,6 +71,7 @@ const PAYMENT_OPTIONS = [
   { value: 'cartao_credito', label: 'Cartao credito' },
   { value: 'cartao_debito', label: 'Cartao debito' },
   { value: 'dinheiro', label: 'Dinheiro' },
+  { value: 'voucher', label: 'Voucher' },
 ]
 
 const fmt = {
@@ -74,14 +83,22 @@ const fmt = {
   currency: (value: number) =>
     value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }),
   dateTime: (value: string) => new Date(value).toLocaleString('pt-BR'),
+  date: (value: string) => new Date(`${value}T00:00:00`).toLocaleDateString('pt-BR'),
+}
+
+function todayInputValue() {
+  return new Date().toLocaleDateString('sv-SE')
 }
 
 function VendasPage() {
+  const navigate = useNavigate()
   const [view, setView] = useState<VendasView>('mesas')
   const [status, setStatus] = useState('')
   const [q, setQ] = useState('')
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
+  const [closeDate, setCloseDate] = useState(todayInputValue())
+  const [closeMessage, setCloseMessage] = useState('')
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(25)
   const [selectedSaleId, setSelectedSaleId] = useState<string>()
@@ -94,18 +111,27 @@ function VendasPage() {
     page,
     pageSize,
   })
-  const { data: mesasData } = useVendaMesas()
+  const { data: mesasData, isFetching: mesasFetching, isError: mesasError } = useVendaMesas()
+  const fecharDia = useFecharDiaVendas()
 
   const items = vendas?.items ?? []
-  const totalRevenue = items
-    .filter(item => item.status === 'paga')
-    .reduce((total, item) => total + item.total, 0)
-  const occupiedTables = mesasData?.mesas.filter(mesa => mesa.status === 'ocupada').length ?? 0
+  const mesas = mesasData?.mesas ?? []
+  const occupiedTables = mesas.filter(mesa => mesa.status === 'ocupada').length
+
+  async function closeSalesDay() {
+    setCloseMessage('')
+    try {
+      const result = await fecharDia.mutateAsync(closeDate || undefined)
+      setCloseMessage(`Dia ${fmt.date(result.date)} fechado com ${result.vendas_dia} vendas pagas.`)
+    } catch (error) {
+      setCloseMessage(error instanceof Error ? error.message : 'Não foi possível fechar o dia.')
+    }
+  }
 
   return (
-    <div className="flex h-screen flex-col bg-surface">
-      <header className="flex h-[73px] flex-shrink-0 items-center justify-between border-b border-stone-200 bg-white px-8">
-        <div>
+    <div className="flex min-h-screen flex-col bg-surface">
+      <header className="flex min-h-[73px] flex-shrink-0 items-center justify-between gap-4 border-b border-stone-200 bg-white px-6 py-4">
+        <div className="min-w-0">
           <h1 className="text-xl font-semibold text-stone-900">Vendas</h1>
           <p className="mt-1 text-xs tabular-nums text-stone-400">
             {view === 'mesas'
@@ -120,13 +146,13 @@ function VendasPage() {
             Mesas
           </SwitchButton>
           <SwitchButton active={view === 'history'} onClick={() => setView('history')}>
-            Historico
+            Histórico
           </SwitchButton>
         </div>
       </header>
 
-      <main className="min-h-0 flex-1 overflow-auto p-6">
-        <div className="grid gap-4 md:grid-cols-3">
+      <main className="flex-1 overflow-auto p-6">
+        <div className="grid gap-4 lg:grid-cols-4">
           <KpiCard
             icon={Table2}
             label="Mesas ocupadas"
@@ -138,20 +164,63 @@ function VendasPage() {
             icon={ReceiptText}
             label="Vendas listadas"
             value={fmt.number(vendas?.total ?? 0, 0)}
-            detail="Periodo filtrado"
+            detail="Período filtrado"
             tone="blue"
           />
           <KpiCard
             icon={CircleDollarSign}
             label="Receita paga"
-            value={fmt.currency(totalRevenue)}
-            detail="Somente pagina atual"
+            value={fmt.currency(vendas?.paid_revenue_total ?? 0)}
+            detail="Total do filtro"
             tone="green"
           />
+          <section className="rounded-xl border border-stone-200 bg-white p-4">
+            <div className="flex items-start gap-3">
+              <div className="flex size-9 flex-shrink-0 items-center justify-center rounded-xl saltim-info-soft">
+                <CalendarCheck className="size-5" strokeWidth={1.9} />
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="text-[11px] font-bold uppercase tracking-wide text-stone-500">
+                  Fechamento
+                </div>
+                <div className="mt-2 flex gap-2">
+                  <input
+                    value={closeDate}
+                    onChange={event => setCloseDate(event.target.value)}
+                    type="date"
+                    className="h-9 min-w-0 flex-1 rounded-lg border border-stone-200 bg-stone-50 px-3 text-sm font-medium text-stone-900 outline-none transition focus:border-brand-600 focus:ring-4 focus:ring-brand-100"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => void closeSalesDay()}
+                    disabled={fecharDia.isPending}
+                    className="inline-flex h-9 items-center justify-center rounded-lg bg-stone-900 px-3 text-xs font-black text-white transition hover:bg-stone-700 disabled:opacity-50"
+                  >
+                    Fechar
+                  </button>
+                </div>
+                {closeMessage && (
+                  <p className="mt-2 truncate text-xs font-bold text-stone-500" title={closeMessage}>
+                    {closeMessage}
+                  </p>
+                )}
+              </div>
+            </div>
+          </section>
         </div>
 
         {view === 'mesas' ? (
-          <MesasPanel />
+          <MesasGrid
+            mesas={mesas}
+            isFetching={mesasFetching}
+            isError={mesasError}
+            onSelectMesa={mesa =>
+              navigate({
+                to: '/vendas/mesas/$mesaNumero',
+                params: { mesaNumero: String(mesa.numero) },
+              })
+            }
+          />
         ) : (
           <HistoryPanel
             status={status}
@@ -192,90 +261,136 @@ function VendasPage() {
   )
 }
 
-function MesasPanel() {
-  const { data: mesasData, isFetching, isError } = useVendaMesas()
-  const createMesaPedido = useCreateMesaPedido()
-  const [selectedMesa, setSelectedMesa] = useState<MesaVenda>()
-  const [draftComandaId, setDraftComandaId] = useState<string>()
-
-  const mesas = mesasData?.mesas ?? []
-  const comandaId = selectedMesa?.comanda_id ?? draftComandaId
-  const { data: selectedSale } = useVendaDetail(selectedMesa?.comanda_id ?? undefined)
-
-  async function selectMesa(mesa: MesaVenda) {
-    setSelectedMesa(mesa)
-    if (mesa.comanda_id) {
-      setDraftComandaId(mesa.comanda_id)
-      return
-    }
-    const pedido = await createMesaPedido.mutateAsync(mesa.numero)
-    setDraftComandaId(pedido.comanda_id)
-  }
-
+function MesasGrid({
+  mesas,
+  isFetching,
+  isError,
+  onSelectMesa,
+}: {
+  mesas: MesaVenda[]
+  isFetching: boolean
+  isError: boolean
+  onSelectMesa: (mesa: MesaVenda) => void
+}) {
   return (
-    <section className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1fr)_420px]">
-      <div className="min-w-0 rounded-lg border border-stone-200 bg-white p-4">
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <h2 className="text-sm font-black text-stone-900">Mesas</h2>
-            <p className="mt-1 text-xs text-stone-400">
-              {isFetching ? 'Carregando mesas...' : `${mesas.length} mesas no salao`}
-            </p>
-          </div>
-          {isError && <StatusPill status="erro" />}
+    <section className="mt-4 rounded-xl border border-stone-200 bg-white p-4">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <h2 className="text-sm font-black text-stone-900">Mesas</h2>
+          <p className="mt-1 text-xs text-stone-400">
+            {isFetching ? 'Carregando mesas...' : `${mesas.length} mesas no salão`}
+          </p>
         </div>
+        {isError && <StatusPill status="erro" />}
+      </div>
 
-        <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 2xl:grid-cols-5">
-          {mesas.map(mesa => (
+      <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6">
+        {mesas.map(mesa => {
+          const occupied = mesa.status === 'ocupada'
+          return (
             <button
               key={mesa.numero}
               type="button"
-              onClick={() => void selectMesa(mesa)}
+              onClick={() => onSelectMesa(mesa)}
               className={[
-                'min-h-[112px] rounded-lg border p-4 text-left transition',
-                mesa.status === 'ocupada'
-                  ? 'border-brand-200 bg-brand-50 text-brand-900 hover:border-brand-400'
-                  : 'border-stone-200 bg-stone-50 text-stone-700 hover:border-stone-300 hover:bg-white',
-                selectedMesa?.numero === mesa.numero ? 'ring-4 ring-brand-100' : '',
+                'min-h-[132px] rounded-lg border p-4 text-left transition focus:outline-none focus:ring-4',
+                occupied
+                  ? 'border-red-200 bg-red-50 text-red-950 hover:border-red-300 focus:ring-red-100'
+                  : 'border-green-200 bg-green-50 text-green-950 hover:border-green-300 focus:ring-green-100',
               ].join(' ')}
             >
               <div className="flex items-center justify-between gap-2">
-                <span className="text-xs font-black uppercase text-stone-400">Mesa</span>
-                <StatusPill status={mesa.status === 'ocupada' ? 'aberta' : 'livre'} />
+                <span
+                  className={[
+                    'inline-flex size-9 items-center justify-center rounded-lg border',
+                    occupied
+                      ? 'border-red-200 bg-white text-red-600'
+                      : 'border-green-200 bg-white text-green-700',
+                  ].join(' ')}
+                >
+                  <Utensils className="size-5" strokeWidth={2} />
+                </span>
+                <StatusPill status={occupied ? 'ocupada' : 'livre'} />
               </div>
-              <p className="mt-2 text-2xl font-black tabular-nums">{mesa.numero}</p>
-              <p className="mt-2 text-xs font-bold text-stone-500">
-                {mesa.status === 'ocupada'
+              <p className="mt-3 text-2xl font-black tabular-nums">Mesa {mesa.numero}</p>
+              <p className="mt-2 text-xs font-bold">
+                {occupied
                   ? `${fmt.number(mesa.items_qty, 0)} itens | ${fmt.currency(mesa.total)}`
                   : 'Livre'}
               </p>
             </button>
-          ))}
-        </div>
+          )
+        })}
       </div>
-
-      <MesaDetailPanel
-        mesa={selectedMesa}
-        comandaId={comandaId}
-        sale={selectedSale}
-        onSaleSaved={sale => {
-          setDraftComandaId(sale.comanda_id ?? sale.id)
-        }}
-      />
     </section>
   )
 }
 
-function MesaDetailPanel({
+function VendaMesaPage() {
+  const navigate = useNavigate()
+  const params = vendaMesaRoute.useParams()
+  const mesaNumero = Number(params.mesaNumero)
+  const { data: mesasData } = useVendaMesas()
+  const mesa = mesasData?.mesas.find(item => item.numero === mesaNumero)
+  const [activeComandaId, setActiveComandaId] = useState<string>()
+
+  useEffect(() => {
+    setActiveComandaId(mesa?.comanda_id ?? undefined)
+  }, [mesa?.comanda_id, mesaNumero])
+
+  const comandaId = mesa?.comanda_id ?? activeComandaId
+  const { data: sale } = useVendaDetail(comandaId)
+
+  return (
+    <div className="flex min-h-screen flex-col bg-surface">
+      <header className="flex min-h-[73px] flex-shrink-0 items-center justify-between gap-4 border-b border-stone-200 bg-white px-6 py-4">
+        <div className="flex min-w-0 items-center gap-3">
+          <button
+            type="button"
+            onClick={() => navigate({ to: '/vendas' })}
+            className="inline-flex size-10 items-center justify-center rounded-lg border border-stone-200 bg-white text-stone-600 transition hover:bg-stone-50 hover:text-stone-900"
+            title="Voltar"
+          >
+            <ArrowLeft className="size-5" strokeWidth={2} />
+          </button>
+          <div className="min-w-0">
+            <h1 className="text-xl font-semibold text-stone-900">Mesa {mesaNumero}</h1>
+            <p className="mt-1 text-xs tabular-nums text-stone-400">
+              {comandaId ? `Comanda ${comandaId}` : 'Mesa livre'}
+            </p>
+          </div>
+        </div>
+        <StatusPill status={mesa?.status ?? 'livre'} />
+      </header>
+
+      <main className="flex-1 overflow-auto p-6">
+        <MesaAccount
+          mesaNumero={mesaNumero}
+          mesa={mesa}
+          comandaId={comandaId}
+          sale={sale}
+          onComandaChange={setActiveComandaId}
+          onDone={() => navigate({ to: '/vendas' })}
+        />
+      </main>
+    </div>
+  )
+}
+
+function MesaAccount({
+  mesaNumero,
   mesa,
   comandaId,
   sale,
-  onSaleSaved,
+  onComandaChange,
+  onDone,
 }: {
+  mesaNumero: number
   mesa?: MesaVenda
   comandaId?: string
   sale?: VendaDetail
-  onSaleSaved: (sale: VendaDetail) => void
+  onComandaChange: (id?: string) => void
+  onDone: () => void
 }) {
   const [productId, setProductId] = useState('')
   const [qty, setQty] = useState('1')
@@ -283,19 +398,23 @@ function MesaDetailPanel({
   const [customerName, setCustomerName] = useState('')
   const [cpfCliente, setCpfCliente] = useState('')
   const [paymentMethod, setPaymentMethod] = useState('pix')
-  const [paidAmount, setPaidAmount] = useState('')
+  const [notes, setNotes] = useState('')
+  const [isClosing, setIsClosing] = useState(false)
   const [message, setMessage] = useState('')
 
   const { data: products = [], isFetching } = useVendaProdutos()
+  const createMesaPedido = useCreateMesaPedido()
   const updateItens = useUpdateVendaItens()
   const fecharVenda = useFecharVenda()
+  const cancelVenda = useCancelVenda()
 
   useEffect(() => {
     if (!sale) {
       setCart([])
       setCustomerName('')
       setCpfCliente('')
-      setPaidAmount('')
+      setNotes('')
+      setIsClosing(false)
       setMessage('')
       return
     }
@@ -309,239 +428,285 @@ function MesaDetailPanel({
     setCart(nextCart)
     setCustomerName(sale.customer_name ?? sale.customer?.name ?? '')
     setCpfCliente(maskCpf(sale.cpf_cliente ?? sale.customer?.document ?? ''))
-    setPaidAmount(sale.status === 'paga' ? String(sale.total) : '')
+    setPaymentMethod(sale.payment_method ?? 'pix')
+    setNotes(sale.notes ?? '')
     setMessage('')
   }, [products, sale])
 
-  const productOptions = products.map(product => ({
-    value: product.id,
-    label: `${product.name} - ${fmt.currency(product.sale_price)}`,
-  }))
+  const productOptions = useMemo(
+    () =>
+      products.map(product => ({
+        value: product.id,
+        label: `${product.name} - ${fmt.currency(product.sale_price)}`,
+      })),
+    [products],
+  )
   const selectedProduct = products.find(product => product.id === productId)
   const subtotal = cart.reduce((total, item) => total + item.qty * item.product.sale_price, 0)
-  const effectivePaid = Number(paidAmount || subtotal)
-  const changeAmount = Math.max(effectivePaid - subtotal, 0)
-  const canSave = Boolean(mesa && comandaId && cart.length > 0 && subtotal > 0 && sale?.status !== 'paga')
-  const canClose = canSave && effectivePaid >= subtotal
+  const canEdit = sale?.status !== 'paga' && sale?.status !== 'cancelada'
+  const hasItems = cart.length > 0 && subtotal > 0
 
-  function addItem() {
+  async function addItem() {
     setMessage('')
     if (!selectedProduct) {
-      setMessage('Selecione um produto.')
+      setMessage('Selecione uma receita.')
       return
     }
     const parsedQty = Number(qty)
     if (!Number.isFinite(parsedQty) || parsedQty <= 0) {
-      setMessage('Informe uma quantidade valida.')
+      setMessage('Informe uma quantidade válida.')
       return
     }
-    setCart(previous => {
-      const existing = previous.find(item => item.product.id === selectedProduct.id)
-      if (existing) {
-        return previous.map(item =>
-          item.product.id === selectedProduct.id
-            ? { ...item, qty: item.qty + parsedQty }
-            : item,
+
+    const existing = cart.find(item => item.product.id === selectedProduct.id)
+    const nextCart = existing
+      ? cart.map(item =>
+          item.product.id === selectedProduct.id ? { ...item, qty: item.qty + parsedQty } : item,
         )
-      }
-      return [...previous, { product: selectedProduct, qty: parsedQty }]
-    })
-    setProductId('')
-    setQty('1')
+      : [...cart, { product: selectedProduct, qty: parsedQty }]
+
+    try {
+      await saveItems(nextCart, 'Receita adicionada.')
+      setCart(nextCart)
+      setProductId('')
+      setQty('1')
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'Não foi possível adicionar a receita.')
+    }
   }
 
-  function removeItem(productIdToRemove: string) {
-    setCart(previous => previous.filter(item => item.product.id !== productIdToRemove))
-  }
-
-  async function saveItems() {
-    if (!mesa || !comandaId) throw new Error('Selecione uma mesa.')
+  async function removeItem(productIdToRemove: string) {
     setMessage('')
+    const nextCart = cart.filter(item => item.product.id !== productIdToRemove)
+    try {
+      if (nextCart.length === 0) {
+        if (comandaId) {
+          await cancelVenda.mutateAsync(comandaId)
+        }
+        onComandaChange(undefined)
+        setCart([])
+        setMessage('Conta esvaziada.')
+        return
+      }
+      await saveItems(nextCart, 'Receita removida.')
+      setCart(nextCart)
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'Não foi possível remover a receita.')
+    }
+  }
+
+  async function ensureComanda() {
+    if (comandaId) return comandaId
+    const pedido = await createMesaPedido.mutateAsync(mesaNumero)
+    onComandaChange(pedido.comanda_id)
+    return pedido.comanda_id
+  }
+
+  async function saveItems(itemsToSave = cart, successMessage = 'Conta atualizada.') {
+    const totalToSave = itemsToSave.reduce(
+      (total, item) => total + item.qty * item.product.sale_price,
+      0,
+    )
+    if (itemsToSave.length === 0 || totalToSave <= 0) {
+      throw new Error('Adicione ao menos uma receita.')
+    }
+    const targetComandaId = await ensureComanda()
     const saved = await updateItens.mutateAsync({
-      id: comandaId,
+      id: targetComandaId,
       payload: {
-        mesa_numero: mesa.numero,
+        mesa_numero: mesaNumero,
         customer_name: customerName.trim() || undefined,
         cpf_cliente: onlyDigits(cpfCliente) || undefined,
-        items: cart.map(item => ({
+        notes: notes.trim() || undefined,
+        items: itemsToSave.map(item => ({
           recipe_id: item.product.id,
           quantity: item.qty,
           unit_price: item.product.sale_price,
         })),
       },
     })
-    onSaleSaved(saved)
-    setMessage('Comanda salva.')
-    return saved
+    onComandaChange(saved.comanda_id ?? saved.id)
+    setMessage(successMessage)
+    return saved.comanda_id ?? saved.id
   }
 
   async function closeTable() {
-    if (!comandaId || !canClose) return
     setMessage('')
     try {
-      await saveItems()
+      const targetComandaId = await saveItems(cart, '')
       await fecharVenda.mutateAsync({
-        id: comandaId,
+        id: targetComandaId,
         payload: {
           payment_method: paymentMethod,
-          paid_amount: effectivePaid,
           cpf_cliente: onlyDigits(cpfCliente) || undefined,
           customer_name: customerName.trim() || undefined,
+          notes: notes.trim() || undefined,
         },
       })
-      setCart([])
-      setCustomerName('')
-      setCpfCliente('')
-      setPaidAmount('')
       setMessage('Mesa fechada e liberada.')
+      onDone()
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : 'Nao foi possivel fechar a mesa.')
+      setMessage(error instanceof Error ? error.message : 'Não foi possível fechar a mesa.')
     }
   }
 
-  if (!mesa) {
-    return (
-      <aside className="rounded-lg border border-stone-200 bg-white p-4">
-        <h2 className="text-sm font-black text-stone-900">Comanda</h2>
-        <EmptyPanel>Selecione uma mesa.</EmptyPanel>
-      </aside>
-    )
+  async function cancelTable() {
+    setMessage('')
+    try {
+      if (comandaId) {
+        await cancelVenda.mutateAsync(comandaId)
+      }
+      setMessage('Mesa cancelada.')
+      onDone()
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'Não foi possível cancelar a mesa.')
+    }
   }
 
   return (
-    <aside className="rounded-lg border border-stone-200 bg-white p-4">
-      <div className="flex items-center justify-between gap-3">
-        <div>
-          <h2 className="text-sm font-black text-stone-900">Mesa {mesa.numero}</h2>
-          <p className="mt-1 text-xs font-bold text-stone-400">
-            {comandaId ? `Comanda ${comandaId}` : 'Nova comanda'}
-          </p>
+    <section className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_380px]">
+      <div className="min-w-0 rounded-xl border border-stone-200 bg-white p-4">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <h2 className="text-sm font-black text-stone-900">Receitas da conta</h2>
+            <p className="mt-1 text-xs text-stone-400">
+              {mesa?.status === 'ocupada' ? 'Mesa ocupada' : 'Mesa livre'}
+            </p>
+          </div>
+          <StatusPill status={sale?.status ?? mesa?.status ?? 'livre'} />
         </div>
-        <StatusPill status={sale?.status ?? 'aberta'} />
-      </div>
 
-      <div className="mt-4 grid gap-3">
-        <FieldLabel icon={Package} label="Itens" />
-        <AppSelect
-          value={productId}
-          options={productOptions}
-          onChange={setProductId}
-          placeholder={isFetching ? 'Carregando produtos...' : 'Produto'}
-        />
-        <div className="grid grid-cols-[1fr_auto] gap-2">
+        <div className="mt-4 grid gap-3 md:grid-cols-[minmax(0,1fr)_120px_auto]">
+          <AppSelect
+            value={productId}
+            options={productOptions}
+            onChange={setProductId}
+            placeholder={isFetching ? 'Carregando receitas...' : 'Receita'}
+          />
           <input
             value={qty}
             onChange={event => setQty(event.target.value)}
             type="number"
             min="0.01"
             step="0.01"
-            className="h-9 rounded-lg border border-stone-200 bg-stone-50 px-3 text-sm font-medium text-stone-900 outline-none transition focus:border-brand-600 focus:ring-4 focus:ring-brand-100"
+            disabled={!canEdit}
+            className="h-9 rounded-lg border border-stone-200 bg-stone-50 px-3 text-sm font-medium text-stone-900 outline-none transition focus:border-brand-600 focus:ring-4 focus:ring-brand-100 disabled:opacity-50"
           />
           <button
             type="button"
-            onClick={addItem}
-            className="inline-flex h-9 items-center justify-center gap-2 rounded-lg bg-brand-600 px-4 text-sm font-bold text-white transition hover:bg-brand-700"
+            disabled={!canEdit || updateItens.isPending || createMesaPedido.isPending}
+            onClick={() => void addItem()}
+            className="inline-flex h-9 items-center justify-center gap-2 rounded-lg bg-brand-600 px-4 text-sm font-bold text-white transition hover:bg-brand-700 disabled:opacity-50"
           >
             <Plus className="size-4" strokeWidth={2} />
             Adicionar
           </button>
         </div>
-      </div>
 
-      <div className="mt-4 max-h-[250px] space-y-2 overflow-auto">
-        {cart.length === 0 ? (
-          <EmptyPanel>Nenhum item na comanda.</EmptyPanel>
-        ) : (
-          cart.map(item => (
-            <div key={item.product.id} className="grid grid-cols-[minmax(0,1fr)_auto] gap-2 rounded-lg border border-stone-200 bg-stone-50 p-3">
-              <div className="min-w-0">
-                <p className="truncate text-sm font-black text-stone-900">{item.product.name}</p>
-                <p className="mt-1 text-xs text-stone-500">
-                  {fmt.number(item.qty, 2)} x {fmt.currency(item.product.sale_price)}
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => removeItem(item.product.id)}
-                className="inline-flex size-8 items-center justify-center rounded-lg text-stone-400 transition hover:bg-red-50 hover:text-red-600"
-                title="Remover"
+        <div className="mt-4 space-y-2">
+          {cart.length === 0 ? (
+            <EmptyPanel>Nenhuma receita adicionada.</EmptyPanel>
+          ) : (
+            cart.map(item => (
+              <div
+                key={item.product.id}
+                className="grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-3 rounded-lg border border-stone-200 bg-stone-50 p-3"
               >
-                <Trash2 className="size-4" strokeWidth={2} />
-              </button>
-            </div>
-          ))
-        )}
-      </div>
-
-      <div className="mt-5 grid gap-3">
-        <FieldLabel icon={User} label="Cliente" />
-        <input
-          value={customerName}
-          onChange={event => setCustomerName(event.target.value)}
-          placeholder="Nome opcional"
-          className="h-9 w-full rounded-lg border border-stone-200 bg-stone-50 px-3 text-sm font-medium text-stone-900 outline-none transition focus:border-brand-600 focus:ring-4 focus:ring-brand-100"
-        />
-        <input
-          value={cpfCliente}
-          onChange={event => setCpfCliente(maskCpf(event.target.value))}
-          placeholder="CPF"
-          inputMode="numeric"
-          className="h-9 w-full rounded-lg border border-stone-200 bg-stone-50 px-3 text-sm font-medium text-stone-900 outline-none transition focus:border-brand-600 focus:ring-4 focus:ring-brand-100"
-        />
-      </div>
-
-      <div className="mt-5 grid gap-3">
-        <FieldLabel icon={CreditCard} label="Pagamento" />
-        <AppSelect value={paymentMethod} options={PAYMENT_OPTIONS} onChange={setPaymentMethod} />
-        <input
-          value={paidAmount}
-          onChange={event => setPaidAmount(event.target.value)}
-          type="number"
-          min="0"
-          step="0.01"
-          placeholder={fmt.currency(subtotal)}
-          className="h-9 w-full rounded-lg border border-stone-200 bg-stone-50 px-3 text-sm font-medium text-stone-900 outline-none transition focus:border-brand-600 focus:ring-4 focus:ring-brand-100"
-        />
-      </div>
-
-      <div className="mt-5 space-y-2 rounded-lg border border-stone-200 bg-stone-50 p-3">
-        <SummaryRow label="Subtotal" value={fmt.currency(subtotal)} />
-        <SummaryRow label="Pago" value={fmt.currency(effectivePaid || 0)} />
-        <SummaryRow label="Troco" value={fmt.currency(changeAmount)} />
-        <div className="border-t border-stone-200 pt-2">
-          <SummaryRow label="Total" value={fmt.currency(subtotal)} strong />
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-black text-stone-900">{item.product.name}</p>
+                  <p className="mt-1 text-xs text-stone-500">
+                    {fmt.number(item.qty, 2)} x {fmt.currency(item.product.sale_price)}
+                  </p>
+                </div>
+                <p className="text-sm font-black tabular-nums text-stone-900">
+                  {fmt.currency(item.qty * item.product.sale_price)}
+                </p>
+                <button
+                  type="button"
+                  disabled={!canEdit || updateItens.isPending || cancelVenda.isPending}
+                  onClick={() => void removeItem(item.product.id)}
+                  className="inline-flex size-8 items-center justify-center rounded-lg text-stone-400 transition hover:bg-red-50 hover:text-red-600 disabled:opacity-40"
+                  title="Remover"
+                >
+                  <Trash2 className="size-4" strokeWidth={2} />
+                </button>
+              </div>
+            ))
+          )}
         </div>
       </div>
 
-      {message && (
-        <p className="mt-3 rounded-lg border border-stone-200 bg-stone-50 px-3 py-2 text-xs font-bold text-stone-600">
-          {message}
-        </p>
-      )}
+      <aside className="rounded-xl border border-stone-200 bg-white p-4">
+        <h2 className="text-sm font-black text-stone-900">Ações da mesa</h2>
+        <div className="mt-4 space-y-2 rounded-lg border border-stone-200 bg-stone-50 p-3">
+          <SummaryRow label="Receitas" value={fmt.number(cart.length, 0)} />
+          <SummaryRow label="Total" value={fmt.currency(subtotal)} strong />
+        </div>
 
-      <div className="mt-4 grid gap-2 sm:grid-cols-2">
         <button
           type="button"
-          disabled={!canSave || updateItens.isPending}
-          onClick={() => void saveItems().catch(error => {
-            setMessage(error instanceof Error ? error.message : 'Nao foi possivel salvar a comanda.')
-          })}
-          className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-stone-200 bg-white px-4 text-sm font-black text-stone-700 transition hover:bg-stone-50 disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          <Check className="size-4" strokeWidth={2.2} />
-          Salvar
-        </button>
-        <button
-          type="button"
-          disabled={!canClose || fecharVenda.isPending}
-          onClick={() => void closeTable()}
-          className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-brand-600 px-4 text-sm font-black text-white transition hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-50"
+          disabled={!canEdit || !hasItems}
+          onClick={() => setIsClosing(true)}
+          className="mt-4 inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-brand-600 px-4 text-sm font-black text-white transition hover:bg-brand-700 disabled:opacity-50"
         >
           <Banknote className="size-4" strokeWidth={2.2} />
           Fechar mesa
         </button>
-      </div>
-    </aside>
+
+        <button
+          type="button"
+          disabled={cancelVenda.isPending}
+          onClick={() => void cancelTable()}
+          className="mt-2 inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 text-sm font-black text-red-700 transition hover:bg-red-100 disabled:opacity-50"
+        >
+          <XCircle className="size-4" strokeWidth={2.2} />
+          Cancelar mesa
+        </button>
+
+        {isClosing && (
+          <div className="mt-4 space-y-3 rounded-lg border border-stone-200 bg-white p-3">
+            <FieldLabel icon={User} label="Cliente" />
+            <input
+              value={customerName}
+              onChange={event => setCustomerName(event.target.value)}
+              placeholder="Nome opcional"
+              className="h-9 w-full rounded-lg border border-stone-200 bg-stone-50 px-3 text-sm font-medium text-stone-900 outline-none transition focus:border-brand-600 focus:ring-4 focus:ring-brand-100"
+            />
+            <input
+              value={cpfCliente}
+              onChange={event => setCpfCliente(maskCpf(event.target.value))}
+              placeholder="CPF"
+              inputMode="numeric"
+              className="h-9 w-full rounded-lg border border-stone-200 bg-stone-50 px-3 text-sm font-medium text-stone-900 outline-none transition focus:border-brand-600 focus:ring-4 focus:ring-brand-100"
+            />
+            <FieldLabel icon={CreditCard} label="Forma de pagamento" />
+            <AppSelect value={paymentMethod} options={PAYMENT_OPTIONS} onChange={setPaymentMethod} />
+            <textarea
+              value={notes}
+              onChange={event => setNotes(event.target.value)}
+              placeholder="Observações"
+              rows={3}
+              className="w-full resize-none rounded-lg border border-stone-200 bg-stone-50 px-3 py-2 text-sm font-medium text-stone-900 outline-none transition focus:border-brand-600 focus:ring-4 focus:ring-brand-100"
+            />
+            <button
+              type="button"
+              disabled={fecharVenda.isPending}
+              onClick={() => void closeTable()}
+              className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-stone-900 px-4 text-sm font-black text-white transition hover:bg-stone-700 disabled:opacity-50"
+            >
+              <Banknote className="size-4" strokeWidth={2.2} />
+              Efetuar pagamento
+            </button>
+          </div>
+        )}
+
+        {message && (
+          <p className="mt-3 rounded-lg border border-stone-200 bg-stone-50 px-3 py-2 text-xs font-bold text-stone-600">
+            {message}
+          </p>
+        )}
+      </aside>
+    </section>
   )
 }
 
@@ -587,13 +752,12 @@ function HistoryPanel({
   setSelectedSaleId: (value?: string) => void
 }) {
   const { data: selectedSale } = useVendaDetail(selectedSaleId)
-  const cancelVenda = useCancelVenda()
-  const emptyMessage = isError ? 'Nao foi possivel carregar as vendas.' : 'Nenhuma venda encontrada.'
+  const emptyMessage = isError ? 'Não foi possível carregar as vendas.' : 'Nenhuma venda encontrada.'
 
   return (
     <section className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1fr)_380px]">
       <div className="min-w-0">
-        <div className="mb-3 grid gap-3 rounded-lg border border-stone-200 bg-white p-4 lg:grid-cols-[180px_minmax(0,1fr)_150px_150px]">
+        <div className="mb-3 grid gap-3 rounded-xl border border-stone-200 bg-white p-4 lg:grid-cols-[180px_minmax(0,1fr)_150px_150px]">
           <AppSelect value={status} options={STATUS_OPTIONS} onChange={setStatus} />
           <div className="relative">
             <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-stone-400" />
@@ -642,7 +806,7 @@ function HistoryPanel({
             <tr key={item.id} className="border-b border-stone-100 last:border-0">
               <BodyCell strong>{item.id}</BodyCell>
               <BodyCell>{fmt.dateTime(item.date_time)}</BodyCell>
-              <BodyCell>{item.mesa_numero ? `Mesa ${item.mesa_numero}` : 'Balcao'}</BodyCell>
+              <BodyCell>{item.mesa_numero ? `Mesa ${item.mesa_numero}` : 'Balcão'}</BodyCell>
               <BodyCell>{item.customer_name ?? formatCpf(item.cpf_cliente) ?? '-'}</BodyCell>
               <BodyCell align="right">{fmt.number(item.items_qty, 2)}</BodyCell>
               <BodyCell align="right">{fmt.currency(item.total)}</BodyCell>
@@ -664,7 +828,7 @@ function HistoryPanel({
         </DataTable>
       </div>
 
-      <aside className="rounded-lg border border-stone-200 bg-white p-4">
+      <aside className="rounded-xl border border-stone-200 bg-white p-4">
         <div className="flex items-center justify-between gap-3">
           <h2 className="text-sm font-black text-stone-900">Detalhe</h2>
           {selectedSale?.status && <StatusPill status={selectedSale.status} />}
@@ -684,9 +848,9 @@ function HistoryPanel({
 
             <div className="grid grid-cols-2 gap-2">
               <MiniMetric icon={Package} label="Itens" value={fmt.number(selectedSale.items.length, 0)} />
-              <MiniMetric icon={Banknote} label="Pago" value={fmt.currency(selectedSale.payments.reduce((total, payment) => total + payment.amount, 0))} />
-              <MiniMetric icon={User} label="Cliente" value={selectedSale.customer_name ?? selectedSale.customer?.name ?? 'Balcao'} />
-              <MiniMetric icon={FileText} label="CPF" value={formatCpf(selectedSale.cpf_cliente ?? selectedSale.customer?.document) ?? '-'} />
+              <MiniMetric icon={Banknote} label="Pagamento" value={paymentLabel(selectedSale.payment_method)} />
+              <MiniMetric icon={User} label="Cliente" value={selectedSale.customer_name ?? selectedSale.customer?.name ?? 'Balcão'} />
+              <MiniMetric icon={ReceiptText} label="CPF" value={formatCpf(selectedSale.cpf_cliente ?? selectedSale.customer?.document) ?? '-'} />
             </div>
 
             <div className="space-y-2">
@@ -699,18 +863,6 @@ function HistoryPanel({
                 </div>
               ))}
             </div>
-
-            {selectedSale.status !== 'cancelada' && (
-              <button
-                type="button"
-                disabled={cancelVenda.isPending}
-                onClick={() => cancelVenda.mutate(selectedSale.id)}
-                className="inline-flex h-9 w-full items-center justify-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 text-sm font-black text-red-700 transition hover:bg-red-100 disabled:opacity-50"
-              >
-                <XCircle className="size-4" strokeWidth={2} />
-                {cancelVenda.isPending ? 'Cancelando...' : 'Cancelar venda'}
-              </button>
-            )}
           </div>
         )}
       </aside>
@@ -766,9 +918,9 @@ function BodyCell({
 
 function StatusPill({ status }: { status: string }) {
   const classes =
-    status === 'paga' || status === 'pronto_para_integracao' || status === 'livre'
+    status === 'paga' || status === 'livre'
       ? 'saltim-success-soft'
-      : status === 'cancelada' || status === 'cancelado' || status === 'erro'
+      : status === 'cancelada' || status === 'cancelado' || status === 'erro' || status === 'ocupada'
         ? 'saltim-danger-soft'
         : 'saltim-alert-soft'
 
@@ -782,15 +934,19 @@ function StatusPill({ status }: { status: string }) {
 function statusLabel(status: string) {
   const labels: Record<string, string> = {
     aberta: 'Aberta',
+    ocupada: 'Ocupada',
     livre: 'Livre',
     paga: 'Paga',
     cancelada: 'Cancelada',
-    pendente_preparacao: 'Pendente fiscal',
-    pronto_para_integracao: 'Preparada fiscal',
     cancelado: 'Cancelado',
     erro: 'Erro',
   }
   return labels[status] ?? status
+}
+
+function paymentLabel(value?: string | null) {
+  if (!value) return '-'
+  return PAYMENT_OPTIONS.find(option => option.value === value)?.label ?? value
 }
 
 function FieldLabel({

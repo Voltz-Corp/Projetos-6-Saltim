@@ -1242,7 +1242,7 @@ export function DashboardPage() {
       await downloadDashboardExport(format, apiFilters, themeId);
     } catch (err) {
       setExportError(
-        err instanceof Error ? err.message : 'Nao foi possivel exportar.',
+        err instanceof Error ? err.message : 'Não foi possível exportar.',
       );
     } finally {
       setExportingFormat(null);

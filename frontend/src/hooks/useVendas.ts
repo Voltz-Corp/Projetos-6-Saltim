@@ -31,14 +31,6 @@ export interface VendaItemCreate {
   discount_value?: number
 }
 
-export interface VendaPagamentoCreate {
-  method: string
-  amount: number
-  status?: string
-  change_amount?: number
-  external_reference?: string
-}
-
 export interface VendaCreateRequest {
   customer_id?: string
   customer?: {
@@ -48,7 +40,6 @@ export interface VendaCreateRequest {
     phone?: string
   }
   items: VendaItemCreate[]
-  payments?: VendaPagamentoCreate[]
   discount_total?: number
   source?: string
   notes?: string
@@ -84,7 +75,7 @@ export interface VendaItensUpdateRequest {
 
 export interface VendaFecharRequest {
   payment_method: string
-  paid_amount: number
+  paid_amount?: number
   cpf_cliente?: string
   customer_name?: string
   notes?: string
@@ -101,32 +92,6 @@ export interface VendaItem {
   venda_historica_id?: string | null
 }
 
-export interface VendaPagamento {
-  id: string
-  method: string
-  amount: number
-  status: string
-  paid_at?: string | null
-  change_amount: number
-  external_reference?: string | null
-}
-
-export interface VendaFiscalDocument {
-  id: string
-  venda_id: string
-  document_type: string
-  status: string
-  provider?: string | null
-  access_key?: string | null
-  protocol?: string | null
-  issued_at?: string | null
-  cancelled_at?: string | null
-  payload?: Record<string, unknown> | null
-  error_message?: string | null
-  created_at?: string | null
-  updated_at?: string | null
-}
-
 export interface VendaDetail {
   id: string
   comanda_id?: string | null
@@ -136,7 +101,7 @@ export interface VendaDetail {
   cpf_cliente?: string | null
   mesa_numero?: number | null
   status: string
-  fiscal_status: string
+  payment_method?: string | null
   subtotal: number
   discount_total: number
   total: number
@@ -145,8 +110,6 @@ export interface VendaDetail {
   confirmed_at?: string | null
   canceled_at?: string | null
   items: VendaItem[]
-  payments: VendaPagamento[]
-  fiscal_document?: VendaFiscalDocument | null
 }
 
 export interface VendaListItem {
@@ -157,7 +120,7 @@ export interface VendaListItem {
   cpf_cliente?: string | null
   mesa_numero?: number | null
   status: string
-  fiscal_status: string
+  payment_method?: string | null
   items_count: number
   items_qty: number
   total: number
@@ -179,6 +142,19 @@ export interface VendasPaginadas {
   page: number
   page_size: number
   total_pages: number
+  paid_revenue_total: number
+}
+
+export interface VendaFechamentoDia {
+  date: string
+  vendas_dia: number
+  is_holiday: number
+  is_carnaval_window: number
+  is_sao_joao: number
+  is_summer: number
+  is_promo_day: number
+  is_rain_event: number
+  is_closure: number
 }
 
 async function parseError(response: Response, fallback: string) {
@@ -315,44 +291,27 @@ export function useFecharVenda() {
       queryClient.invalidateQueries({ queryKey: ['vendas'] })
       queryClient.invalidateQueries({ queryKey: ['vendas-mesas'] })
       queryClient.invalidateQueries({ queryKey: ['venda', data.id] })
-      queryClient.invalidateQueries({ queryKey: ['vendas-produtos'] })
-      queryClient.invalidateQueries({ queryKey: ['estoque'] })
-      queryClient.invalidateQueries({ queryKey: ['estoque-paginado'] })
       queryClient.invalidateQueries({ queryKey: ['dashboard'] })
     },
   })
 }
 
-export function useCreateAndConfirmVenda() {
+export function useFecharDiaVendas() {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: async (payload: VendaCreateRequest): Promise<VendaDetail> => {
-      const createResponse = await fetch(`${API_URL}/api/vendas`, {
+    mutationFn: async (date?: string): Promise<VendaFechamentoDia> => {
+      const params = new URLSearchParams()
+      if (date) params.set('date', date)
+      const suffix = params.toString() ? `?${params}` : ''
+      const response = await fetch(`${API_URL}/api/vendas/fechamento-dia${suffix}`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...payload, payments: [] }),
       })
-      if (!createResponse.ok) {
-        throw new Error(await parseError(createResponse, 'Falha ao criar venda'))
-      }
-      const created: VendaDetail = await createResponse.json()
-      const confirmResponse = await fetch(`${API_URL}/api/vendas/${created.id}/confirmar`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ payments: payload.payments ?? [] }),
-      })
-      if (!confirmResponse.ok) {
-        throw new Error(await parseError(confirmResponse, 'Falha ao confirmar venda'))
-      }
-      return confirmResponse.json()
+      if (!response.ok) throw new Error(await parseError(response, 'Falha ao fechar o dia'))
+      return response.json()
     },
-    onSuccess: data => {
+    onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['vendas'] })
-      queryClient.invalidateQueries({ queryKey: ['venda', data.id] })
-      queryClient.invalidateQueries({ queryKey: ['vendas-produtos'] })
-      queryClient.invalidateQueries({ queryKey: ['estoque'] })
-      queryClient.invalidateQueries({ queryKey: ['estoque-paginado'] })
       queryClient.invalidateQueries({ queryKey: ['dashboard'] })
     },
   })
@@ -371,10 +330,8 @@ export function useCancelVenda() {
     },
     onSuccess: data => {
       queryClient.invalidateQueries({ queryKey: ['vendas'] })
+      queryClient.invalidateQueries({ queryKey: ['vendas-mesas'] })
       queryClient.invalidateQueries({ queryKey: ['venda', data.id] })
-      queryClient.invalidateQueries({ queryKey: ['vendas-produtos'] })
-      queryClient.invalidateQueries({ queryKey: ['estoque'] })
-      queryClient.invalidateQueries({ queryKey: ['estoque-paginado'] })
       queryClient.invalidateQueries({ queryKey: ['dashboard'] })
     },
   })

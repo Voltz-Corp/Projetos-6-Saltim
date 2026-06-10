@@ -261,8 +261,8 @@ function PedidosPage() {
 
         <ExportPanel
           area="pedidos"
-          title="Exportar historico de pedidos"
-          subtitle="Baixe os pedidos realizados dentro do periodo selecionado."
+          title="Exportar histórico de pedidos"
+          subtitle="Baixe os pedidos realizados dentro do período selecionado."
           requiresDateRange
         />
 
@@ -275,7 +275,7 @@ function PedidosPage() {
               <div className="min-w-0">
                 <p className="text-sm font-black">Entregas aguardando recebimento</p>
                 <p className="mt-1 text-xs font-semibold leading-5">
-                  {dueTransit.length} pedido{dueTransit.length === 1 ? '' : 's'} com previsao vencida ou para hoje. Ao marcar como entregue, os ingredientes entram no estoque atual.
+                  {dueTransit.length} pedido{dueTransit.length === 1 ? '' : 's'} com previsão vencida ou para hoje. Ao marcar como entregue, os ingredientes entram no estoque atual.
                 </p>
               </div>
             </div>
@@ -1251,7 +1251,7 @@ function PedidosTable({
       minWidth={showExpectedDate ? '1120px' : '980px'}
       isEmpty={isError || pedidos.length === 0}
       isLoading={isLoading}
-      emptyMessage={isError ? 'Nao foi possivel carregar os pedidos.' : emptyMessage}
+      emptyMessage={isError ? 'Não foi possível carregar os pedidos.' : emptyMessage}
       loadingMessage="Carregando pedidos..."
       pagination={pagination}
       embedded
@@ -1432,7 +1432,7 @@ function formatEmailNotice(results: PedidoEmailResult[]) {
   const parts: string[] = []
 
   if (disabled.length > 0) {
-    parts.push('SMTP nao configurado; nenhum email foi enviado.')
+    parts.push('SMTP não configurado; nenhum email foi enviado.')
   }
   if (missing.length > 0) {
     parts.push(

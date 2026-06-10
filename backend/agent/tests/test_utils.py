@@ -66,6 +66,15 @@ def test_validar_sql_permite_tabela_ml_qualificada_com_cte():
     assert "ml.criticidade_report_items" in sql
 
 
+def test_validar_sql_permite_schema_ml_em_maiusculo():
+    sql = validar_sql(
+        "SELECT ingredient_id FROM ML.criticidade_report_items",
+        ALLOWED_TABLES,
+    )
+
+    assert "criticidade_report_items" in sql
+
+
 def test_extrair_tabelas_ignora_nome_de_cte():
     tables = extrair_tabelas(
         """

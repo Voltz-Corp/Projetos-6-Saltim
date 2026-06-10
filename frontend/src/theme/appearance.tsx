@@ -412,10 +412,10 @@ export const WORLD_CUP_THEME_OPTIONS: ThemeOption[] = [
   },
   {
     id: 'world-cup-croatia',
-    name: 'Croacia',
+    name: 'Croácia',
     mode: 'light',
     category: 'world-cup',
-    description: 'Xadrez vermelho e branco da selecao croata',
+    description: 'Xadrez vermelho e branco da seleção croata',
     preview: { colors: ['#F7F7F7', '#D20A11', '#171796'], pattern: 'checker' },
     colors: {
       surface: '#FFF1F1',
@@ -427,7 +427,7 @@ export const WORLD_CUP_THEME_OPTIONS: ThemeOption[] = [
   },
   {
     id: 'world-cup-mexico',
-    name: 'Mexico',
+    name: 'México',
     mode: 'light',
     category: 'world-cup',
     continent: 'CONCACAF',
@@ -459,11 +459,11 @@ export const WORLD_CUP_THEME_OPTIONS: ThemeOption[] = [
   },
   {
     id: 'world-cup-south-africa',
-    name: 'Africa do Sul',
+    name: 'África do Sul',
     mode: 'dark',
     category: 'world-cup',
     continent: 'CAF',
-    description: 'Dourado e verde vibrantes da selecao sul-africana',
+    description: 'Dourado e verde vibrantes da seleção sul-africana',
     preview: { colors: ['#FFB612', '#007A4D', '#000000', '#FFFFFF'], pattern: 'bands' },
     colors: {
       surface: '#152414',
@@ -491,7 +491,7 @@ export const WORLD_CUP_THEME_OPTIONS: ThemeOption[] = [
   },
   {
     id: 'world-cup-canada',
-    name: 'Canada',
+    name: 'Canadá',
     mode: 'light',
     category: 'world-cup',
     continent: 'CONCACAF',
@@ -507,7 +507,7 @@ export const WORLD_CUP_THEME_OPTIONS: ThemeOption[] = [
   },
   {
     id: 'world-cup-bosnia-herzegovina',
-    name: 'Bosnia e Herzegovina',
+    name: 'Bósnia e Herzegovina',
     mode: 'dark',
     category: 'world-cup',
     continent: 'UEFA',
@@ -527,7 +527,7 @@ export const WORLD_CUP_THEME_OPTIONS: ThemeOption[] = [
     mode: 'dark',
     category: 'world-cup',
     continent: 'AFC',
-    description: 'Bordo elegante com branco da selecao catari',
+    description: 'Bordô elegante com branco da seleção catari',
     preview: { colors: ['#8A1538', '#FFFFFF', '#5B0F28'], pattern: 'bands' },
     colors: {
       surface: '#240711',
@@ -539,11 +539,11 @@ export const WORLD_CUP_THEME_OPTIONS: ThemeOption[] = [
   },
   {
     id: 'world-cup-switzerland',
-    name: 'Suica',
+    name: 'Suíça',
     mode: 'light',
     category: 'world-cup',
     continent: 'UEFA',
-    description: 'Vermelho forte com branco da bandeira suica',
+    description: 'Vermelho forte com branco da bandeira suíça',
     preview: { colors: ['#D52B1E', '#FFFFFF', '#B61F16'], pattern: 'cross' },
     colors: {
       surface: '#FFF2F0',
@@ -587,7 +587,7 @@ export const WORLD_CUP_THEME_OPTIONS: ThemeOption[] = [
   },
   {
     id: 'world-cup-scotland',
-    name: 'Escocia',
+    name: 'Escócia',
     mode: 'dark',
     category: 'world-cup',
     continent: 'UEFA',
@@ -619,7 +619,7 @@ export const WORLD_CUP_THEME_OPTIONS: ThemeOption[] = [
   },
   {
     id: 'world-cup-australia',
-    name: 'Australia',
+    name: 'Austrália',
     mode: 'light',
     category: 'world-cup',
     continent: 'AFC',
@@ -667,7 +667,7 @@ export const WORLD_CUP_THEME_OPTIONS: ThemeOption[] = [
   },
   {
     id: 'world-cup-curacao',
-    name: 'Curacao',
+    name: 'Curaçao',
     mode: 'dark',
     category: 'world-cup',
     continent: 'CONCACAF',
@@ -715,7 +715,7 @@ export const WORLD_CUP_THEME_OPTIONS: ThemeOption[] = [
   },
   {
     id: 'world-cup-japan',
-    name: 'Japao',
+    name: 'Japão',
     mode: 'dark',
     category: 'world-cup',
     continent: 'AFC',
@@ -731,7 +731,7 @@ export const WORLD_CUP_THEME_OPTIONS: ThemeOption[] = [
   },
   {
     id: 'world-cup-sweden',
-    name: 'Suecia',
+    name: 'Suécia',
     mode: 'dark',
     category: 'world-cup',
     continent: 'UEFA',
@@ -747,7 +747,7 @@ export const WORLD_CUP_THEME_OPTIONS: ThemeOption[] = [
   },
   {
     id: 'world-cup-tunisia',
-    name: 'Tunisia',
+    name: 'Tunísia',
     mode: 'light',
     category: 'world-cup',
     continent: 'CAF',
@@ -767,7 +767,7 @@ export const WORLD_CUP_THEME_OPTIONS: ThemeOption[] = [
     mode: 'dark',
     category: 'world-cup',
     continent: 'CAF',
-    description: 'Vermelho egipcio com preto, branco e dourado',
+    description: 'Vermelho egípcio com preto, branco e dourado',
     preview: { colors: ['#CE1126', '#FFFFFF', '#000000', '#C09300'], pattern: 'bands' },
     colors: {
       surface: '#1F0D10',
@@ -779,7 +779,7 @@ export const WORLD_CUP_THEME_OPTIONS: ThemeOption[] = [
   },
   {
     id: 'world-cup-iran',
-    name: 'Ira',
+    name: 'Irã',
     mode: 'light',
     category: 'world-cup',
     continent: 'AFC',
@@ -795,11 +795,11 @@ export const WORLD_CUP_THEME_OPTIONS: ThemeOption[] = [
   },
   {
     id: 'world-cup-new-zealand',
-    name: 'Nova Zelandia',
+    name: 'Nova Zelândia',
     mode: 'dark',
     category: 'world-cup',
     continent: 'OFC',
-    description: 'Preto sobrio com branco da identidade esportiva',
+    description: 'Preto sóbrio com branco da identidade esportiva',
     preview: { colors: ['#111111', '#FFFFFF', '#2D3748'], pattern: 'bands' },
     colors: {
       surface: '#0B0B0B',
@@ -827,7 +827,7 @@ export const WORLD_CUP_THEME_OPTIONS: ThemeOption[] = [
   },
   {
     id: 'world-cup-saudi-arabia',
-    name: 'Arabia Saudita',
+    name: 'Arábia Saudita',
     mode: 'dark',
     category: 'world-cup',
     continent: 'AFC',
@@ -847,7 +847,7 @@ export const WORLD_CUP_THEME_OPTIONS: ThemeOption[] = [
     mode: 'light',
     category: 'world-cup',
     continent: 'UEFA',
-    description: 'Vermelho noruegues com azul escuro e branco',
+    description: 'Vermelho norueguês com azul escuro e branco',
     preview: { colors: ['#BA0C2F', '#FFFFFF', '#00205B'], pattern: 'cross' },
     colors: {
       surface: '#FFF2F4',
@@ -863,7 +863,7 @@ export const WORLD_CUP_THEME_OPTIONS: ThemeOption[] = [
     mode: 'dark',
     category: 'world-cup',
     continent: 'CAF',
-    description: 'Verde senegales com amarelo e vermelho vibrantes',
+    description: 'Verde senegalês com amarelo e vermelho vibrantes',
     preview: { colors: ['#00853F', '#FDEF42', '#E31B23'], pattern: 'bands' },
     colors: {
       surface: '#062314',
@@ -891,7 +891,7 @@ export const WORLD_CUP_THEME_OPTIONS: ThemeOption[] = [
   },
   {
     id: 'world-cup-algeria',
-    name: 'Argelia',
+    name: 'Argélia',
     mode: 'light',
     category: 'world-cup',
     continent: 'CAF',
@@ -907,11 +907,11 @@ export const WORLD_CUP_THEME_OPTIONS: ThemeOption[] = [
   },
   {
     id: 'world-cup-austria',
-    name: 'Austria',
+    name: 'Áustria',
     mode: 'light',
     category: 'world-cup',
     continent: 'UEFA',
-    description: 'Vermelho e branco classicos da bandeira austriaca',
+    description: 'Vermelho e branco clássicos da bandeira austríaca',
     preview: { colors: ['#ED2939', '#FFFFFF', '#C8102E'], pattern: 'stripes' },
     colors: {
       surface: '#FFF2F3',

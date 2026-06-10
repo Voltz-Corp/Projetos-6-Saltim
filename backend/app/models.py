@@ -176,7 +176,6 @@ class Receita(Base):
     )
     ingredientes = relationship("ReceitaIngrediente", back_populates="receita")
     vendas = relationship("Venda", back_populates="receita")
-    venda_itens = relationship("VendaItem", back_populates="receita")
 
 
 class ReceitaIngrediente(Base):
@@ -218,7 +217,6 @@ class Venda(Base):
     discount_total = Column(Numeric(14, 4), nullable=False, default=0)
     total = Column(Numeric(14, 4), nullable=False, default=0)
     source = Column(String, nullable=False, default="historico")
-    fiscal_status = Column(String, nullable=False, default="pendente_preparacao")
     notes = Column(String)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
@@ -243,83 +241,6 @@ class Cliente(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
-    vendas = relationship("VendaTransacao", back_populates="cliente")
-
-
-class VendaTransacao(Base):
-    __tablename__ = "venda_transacoes"
-    __table_args__ = (
-        Index("idx_venda_transacoes_date", "date_time"),
-        Index("idx_venda_transacoes_status", "status"),
-        Index("idx_venda_transacoes_cliente", "cliente_id"),
-        Index("idx_venda_transacoes_fiscal_status", "fiscal_status"),
-    )
-
-    id = Column(String, primary_key=True)
-    date_time = Column(DateTime(timezone=True), nullable=False)
-    cliente_id = Column(String, ForeignKey("clientes.id"))
-    status = Column(String, nullable=False, default="aberta")
-    subtotal = Column(Numeric(14, 4), nullable=False, default=0)
-    discount_total = Column(Numeric(14, 4), nullable=False, default=0)
-    total = Column(Numeric(14, 4), nullable=False, default=0)
-    source = Column(String, nullable=False, default="balcao")
-    fiscal_status = Column(String, nullable=False, default="pendente_preparacao")
-    notes = Column(String)
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-    confirmed_at = Column(DateTime(timezone=True))
-    canceled_at = Column(DateTime(timezone=True))
-
-    cliente = relationship("Cliente", back_populates="vendas")
-    items = relationship("VendaItem", back_populates="venda", cascade="all, delete-orphan")
-    payments = relationship("VendaPagamento", back_populates="venda", cascade="all, delete-orphan")
-    fiscal_documents = relationship(
-        "VendaDocumentoFiscal",
-        back_populates="venda",
-        cascade="all, delete-orphan",
-    )
-
-
-class VendaItem(Base):
-    __tablename__ = "venda_itens"
-    __table_args__ = (
-        Index("idx_venda_itens_venda", "venda_id"),
-        Index("idx_venda_itens_recipe", "recipe_id"),
-        Index("idx_venda_itens_historical", "venda_historica_id"),
-    )
-
-    id = Column(String, primary_key=True)
-    venda_id = Column(String, ForeignKey("venda_transacoes.id", ondelete="CASCADE"), nullable=False)
-    recipe_id = Column(String, ForeignKey("receitas.id"), nullable=False)
-    recipe_name = Column(String, nullable=False)
-    quantity = Column(Numeric(14, 4), nullable=False)
-    unit_price = Column(Numeric(14, 4), nullable=False)
-    discount_value = Column(Numeric(14, 4), nullable=False, default=0)
-    total_value = Column(Numeric(14, 4), nullable=False)
-    venda_historica_id = Column(String, ForeignKey("vendas.id"))
-
-    venda = relationship("VendaTransacao", back_populates="items")
-    receita = relationship("Receita", back_populates="venda_itens")
-    venda_historica = relationship("Venda")
-
-
-class VendaPagamento(Base):
-    __tablename__ = "venda_pagamentos"
-    __table_args__ = (
-        Index("idx_venda_pagamentos_venda", "venda_id"),
-        Index("idx_venda_pagamentos_status", "status"),
-    )
-
-    id = Column(String, primary_key=True)
-    venda_id = Column(String, ForeignKey("venda_transacoes.id", ondelete="CASCADE"), nullable=False)
-    method = Column(String, nullable=False)
-    amount = Column(Numeric(14, 4), nullable=False)
-    status = Column(String, nullable=False, default="pago")
-    paid_at = Column(DateTime(timezone=True))
-    change_amount = Column(Numeric(14, 4), nullable=False, default=0)
-    external_reference = Column(String)
-
-    venda = relationship("VendaTransacao", back_populates="payments")
 
 
 class EstoqueMovimento(Base):
@@ -341,30 +262,6 @@ class EstoqueMovimento(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     ingrediente = relationship("Ingrediente")
-
-
-class VendaDocumentoFiscal(Base):
-    __tablename__ = "venda_documentos_fiscais"
-    __table_args__ = (
-        Index("idx_venda_documentos_fiscais_venda", "venda_id"),
-        Index("idx_venda_documentos_fiscais_status", "status"),
-    )
-
-    id = Column(String, primary_key=True)
-    venda_id = Column(String, ForeignKey("venda_transacoes.id", ondelete="CASCADE"), nullable=False)
-    document_type = Column(String, nullable=False, default="NFC-e")
-    status = Column(String, nullable=False, default="pendente_preparacao")
-    provider = Column(String)
-    access_key = Column(String)
-    protocol = Column(String)
-    issued_at = Column(DateTime(timezone=True))
-    cancelled_at = Column(DateTime(timezone=True))
-    payload = Column(JSON)
-    error_message = Column(String)
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-
-    venda = relationship("VendaTransacao", back_populates="fiscal_documents")
 
 
 class Pedido(Base):

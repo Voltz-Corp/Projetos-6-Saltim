@@ -222,7 +222,7 @@ export function useSendPurchaseQuotes() {
       const response = await fetch(`${API_URL}/api/compras/planos/${planId}/cotacoes/enviar`, {
         method: 'POST',
       })
-      if (!response.ok) throw new Error(await readError(response, 'Falha ao enviar cotacoes'))
+      if (!response.ok) throw new Error(await readError(response, 'Falha ao enviar cotações'))
       return response.json()
     },
     onSuccess: data => {

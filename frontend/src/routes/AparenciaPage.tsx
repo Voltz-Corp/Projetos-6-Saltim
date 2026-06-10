@@ -84,15 +84,15 @@ function AparenciaPage() {
       <header className="flex h-[73px] flex-shrink-0 items-center justify-between gap-4 border-b border-stone-200 bg-white px-8">
         <div>
           <p className="text-xs font-bold uppercase tracking-wide text-brand-600">
-            Configuracoes
+            Configurações
           </p>
           <h1 className="text-xl font-semibold text-stone-900">
-            Aparencia
+            Aparência
           </h1>
         </div>
         <div className="hidden items-center gap-2 rounded-lg border border-stone-200 bg-stone-50 px-3 py-2 text-xs font-bold text-stone-600 sm:flex">
           <Palette className="size-4 text-brand-600" strokeWidth={2} />
-          Aplicacao global e persistente
+          Aplicação global e persistente
         </div>
       </header>
 
@@ -130,7 +130,7 @@ function AparenciaPage() {
               <div>
                 <h2 className="text-base font-black text-stone-900">Temas visuais</h2>
                 <p className="mt-1 text-sm font-medium text-stone-500">
-                  Escolha uma identidade completa para cores, fundos, cards, tabelas, formularios e menus.
+                  Escolha uma identidade completa para cores, fundos, cards, tabelas, formulários e menus.
                 </p>
               </div>
               <ThemeCollectionToggle
@@ -156,7 +156,7 @@ function AparenciaPage() {
 
             <div className="mb-4 flex items-center justify-between gap-3">
               <p className="text-xs font-bold uppercase tracking-wide text-stone-400">
-                {visibleThemes.length} opcoes
+                {visibleThemes.length} opções
               </p>
               {collection === 'world-cup' && (
                 <span className="inline-flex items-center gap-1.5 rounded-full border border-brand-200 bg-brand-50 px-3 py-1 text-[11px] font-black uppercase text-brand-700">
@@ -179,7 +179,7 @@ function AparenciaPage() {
 
             {visibleThemes.length === 0 && (
               <div className="rounded-lg border border-dashed border-stone-300 bg-stone-50 p-8 text-center">
-                <p className="text-sm font-black text-stone-900">Nenhuma selecao encontrada</p>
+                <p className="text-sm font-black text-stone-900">Nenhuma seleção encontrada</p>
                 <p className="mt-1 text-sm font-medium text-stone-500">
                   Ajuste a busca ou selecione outro continente.
                 </p>
@@ -265,7 +265,7 @@ function ThemeCollectionToggle({
   return (
     <div className="grid w-full max-w-md grid-cols-2 rounded-full bg-stone-100 p-1">
       {[
-        ['classic', 'Temas Classicos'],
+        ['classic', 'Temas Clássicos'],
         ['world-cup', 'Copa do Mundo'],
       ].map(([key, label]) => (
         <button
@@ -299,7 +299,7 @@ function WorldCupHeader() {
               Copa 2026
             </p>
             <h3 className="truncate text-base font-black text-stone-900">
-              Temas inspirados em selecoes
+              Temas inspirados em seleções
             </h3>
           </div>
         </div>
@@ -338,7 +338,7 @@ function WorldCupControls({
     <div className="mb-5 rounded-lg border border-stone-200 bg-stone-50 p-3">
       <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_220px_auto] lg:items-center">
         <label className="relative block">
-          <span className="sr-only">Buscar selecao</span>
+          <span className="sr-only">Buscar seleção</span>
           <Search
             className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-stone-400"
             strokeWidth={2}
@@ -346,7 +346,7 @@ function WorldCupControls({
           <input
             value={search}
             onChange={(event) => onSearchChange(event.target.value)}
-            placeholder="Buscar selecao"
+            placeholder="Buscar seleção"
             className="h-10 w-full rounded-md border border-stone-200 bg-white pl-9 pr-3 text-sm font-semibold text-stone-900 outline-none transition placeholder:text-stone-400 focus:border-brand-600"
           />
         </label>

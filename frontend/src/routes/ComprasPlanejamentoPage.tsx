@@ -90,9 +90,9 @@ function PlanEmptyState({
         <div className="min-w-0">
           <h2 className="text-lg font-black text-stone-900">Plano de compra Maestro</h2>
           <p className="mt-1 text-sm font-medium leading-relaxed text-stone-500">
-            Gere uma sugestao simples usando o consumo dos ultimos {horizonDays} dias
-            para estimar a necessidade dos proximos {horizonDays} dias. A aprovacao final
-            continua nas suas maos.
+            Gere uma sugestão simples usando o consumo dos últimos {horizonDays} dias
+            para estimar a necessidade dos próximos {horizonDays} dias. A aprovação final
+            continua nas suas mãos.
           </p>
           <button
             type="button"
@@ -321,7 +321,7 @@ function PurchasePlanTable({
                       onDelete(item)
                     }}
                     disabled={readOnly || itemBusy}
-                    title={readOnly ? 'Planos aprovados nao podem ser alterados' : 'Remover ingrediente'}
+                    title={readOnly ? 'Planos aprovados não podem ser alterados' : 'Remover ingrediente'}
                     aria-label={`Remover ${item.ingredient_name}`}
                     className="flex size-9 items-center justify-center rounded-lg border border-stone-200 bg-white text-stone-400 transition hover:border-red-200 hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-50"
                   >
@@ -392,7 +392,7 @@ export function ComprasPlanejamentoPage() {
     try {
       await generate.mutateAsync({ horizon_days: Number(horizon) })
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Nao foi possivel gerar o plano.')
+      setError(err instanceof Error ? err.message : 'Não foi possível gerar o plano.')
     }
   }
 
@@ -411,7 +411,7 @@ export function ComprasPlanejamentoPage() {
       })
       return true
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Nao foi possivel salvar o item.')
+      setError(err instanceof Error ? err.message : 'Não foi possível salvar o item.')
       return false
     } finally {
       setSavingKey(undefined)
@@ -447,7 +447,7 @@ export function ComprasPlanejamentoPage() {
     try {
       await deleteItem.mutateAsync({ planId: plan.id, ingredientId: item.ingredient_id })
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Nao foi possivel remover o item.')
+      setError(err instanceof Error ? err.message : 'Não foi possível remover o item.')
     } finally {
       setDeletingKey(undefined)
     }
@@ -460,7 +460,7 @@ export function ComprasPlanejamentoPage() {
     try {
       await downloadPurchasePlanExport(plan.id, exportFormat, themeId)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Nao foi possivel exportar.')
+      setError(err instanceof Error ? err.message : 'Não foi possível exportar.')
     } finally {
       setExporting(false)
     }
@@ -472,7 +472,7 @@ export function ComprasPlanejamentoPage() {
     try {
       await sendQuotes.mutateAsync(plan.id)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Nao foi possivel enviar cotacoes.')
+      setError(err instanceof Error ? err.message : 'Não foi possível enviar cotações.')
     }
   }
 
@@ -483,7 +483,7 @@ export function ComprasPlanejamentoPage() {
       await approve.mutateAsync(plan.id)
       await latest.refetch()
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Nao foi possivel aprovar o plano.')
+      setError(err instanceof Error ? err.message : 'Não foi possível aprovar o plano.')
     }
   }
 
@@ -499,12 +499,12 @@ export function ComprasPlanejamentoPage() {
     <main className="h-screen overflow-y-auto bg-surface p-6 lg:p-8">
       <div className="mb-6 flex flex-wrap items-start justify-between gap-4">
         <div>
-          <p className="text-xs font-black uppercase tracking-wide text-brand-700">Centro de Compras Autonomo</p>
+          <p className="text-xs font-black uppercase tracking-wide text-brand-700">Centro de Compras Autônomo</p>
           <h1 className="mt-1 text-2xl font-black text-stone-900">Plano de compra Maestro</h1>
           <p className="mt-1 text-sm font-semibold text-stone-500">
             {plan
               ? `Plano #${plan.id} · ${fmt.date(plan.date_from)} a ${fmt.date(plan.date_to)} · ${plan.status}`
-              : `Sugestao baseada no consumo dos ultimos ${horizonDays} dias para estimar os proximos ${horizonDays} dias.`}
+              : `Sugestão baseada no consumo dos últimos ${horizonDays} dias para estimar os próximos ${horizonDays} dias.`}
           </p>
         </div>
 
@@ -543,7 +543,7 @@ export function ComprasPlanejamentoPage() {
 
       {(error || latest.isError) && (
         <div className="mb-5 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm font-bold text-red-700">
-          {error || 'Nao foi possivel carregar o plano de compra.'}
+          {error || 'Não foi possível carregar o plano de compra.'}
         </div>
       )}
 
@@ -556,29 +556,29 @@ export function ComprasPlanejamentoPage() {
       ) : (
         <div className="space-y-6">
           <section className="rounded-xl border border-brand-100 bg-brand-50 px-5 py-4 text-sm font-semibold leading-relaxed text-stone-700">
-            Esta sugestao considera o consumo dos ultimos {plan.horizon_days} dias para estimar
-            a necessidade dos proximos {plan.horizon_days} dias. Itens sem consumo nesse periodo
-            nao recebem compra artificial.
+            Esta sugestão considera o consumo dos últimos {plan.horizon_days} dias para estimar
+            a necessidade dos próximos {plan.horizon_days} dias. Itens sem consumo nesse período
+            não recebem compra artificial.
           </section>
 
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
             <KpiCard icon={ShoppingCart} label="Custo estimado" value={fmt.currency(plan.approved_total || plan.total_estimated)} detail={`${plan.items.length} itens no plano`} />
-            <KpiCard icon={ShieldAlert} label="Itens criticos" value={String(plan.critical_items_count)} detail="Prioridade de revisao" tone="red" />
-            <KpiCard icon={Timer} label="Cobertura media" value={`${plan.avg_coverage_days.toLocaleString('pt-BR', { maximumFractionDigits: 1 })} dias`} detail={`Horizonte de ${plan.horizon_days} dias`} tone="blue" />
-            <KpiCard icon={PiggyBank} label="Economia potencial" value={fmt.currency(plan.savings_potential)} detail="Comparacao com menor preco viavel" tone="green" />
+            <KpiCard icon={ShieldAlert} label="Itens críticos" value={String(plan.critical_items_count)} detail="Prioridade de revisão" tone="red" />
+            <KpiCard icon={Timer} label="Cobertura média" value={`${plan.avg_coverage_days.toLocaleString('pt-BR', { maximumFractionDigits: 1 })} dias`} detail={`Horizonte de ${plan.horizon_days} dias`} tone="blue" />
+            <KpiCard icon={PiggyBank} label="Economia potencial" value={fmt.currency(plan.savings_potential)} detail="Comparação com menor preço viável" tone="green" />
           </div>
 
           <section className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-stone-200 bg-white p-3">
             <div>
-              <p className="text-xs font-black uppercase tracking-wide text-stone-500">Visualizacao do plano</p>
+              <p className="text-xs font-black uppercase tracking-wide text-stone-500">Visualização do plano</p>
               <p className="mt-1 text-sm font-semibold text-stone-600">
-                Revise os itens antes de enviar cotacoes e aprovar os pedidos.
+                Revise os itens antes de enviar cotações e aprovar os pedidos.
               </p>
             </div>
             <div className="inline-flex rounded-lg border border-stone-200 bg-stone-50 p-1">
               {([
                 ['items', 'Itens recomendados'],
-                ['quotes', 'Cotacoes e aprovacao'],
+                ['quotes', 'Cotações e aprovação'],
               ] as Array<[PlanView, string]>).map(([value, label]) => (
                 <button
                   key={value}
@@ -627,9 +627,9 @@ export function ComprasPlanejamentoPage() {
             <section className="rounded-xl border border-stone-200 bg-white p-5">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
-                  <h2 className="text-base font-black text-stone-900">Cotacoes e aprovacao</h2>
+                  <h2 className="text-base font-black text-stone-900">Cotações e aprovação</h2>
                   <p className="mt-1 text-sm font-semibold text-stone-500">
-                    Emails corporativos por fornecedor e criacao de pedidos em transito.
+                    Emails corporativos por fornecedor e criação de pedidos em trânsito.
                   </p>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
@@ -640,7 +640,7 @@ export function ComprasPlanejamentoPage() {
                     className="inline-flex items-center gap-2 rounded-lg border border-stone-200 bg-white px-4 py-2 text-sm font-black text-stone-800 transition hover:border-brand-300 hover:text-brand-700 disabled:opacity-60"
                   >
                     <Mail className="size-4" strokeWidth={2.1} />
-                    {sendQuotes.isPending ? 'Enviando...' : 'Enviar cotacoes'}
+                    {sendQuotes.isPending ? 'Enviando...' : 'Enviar cotações'}
                   </button>
                   <button
                     type="button"

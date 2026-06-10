@@ -3,11 +3,7 @@
 
 DROP SCHEMA IF EXISTS dados CASCADE;
 DROP TABLE IF EXISTS
-    venda_documentos_fiscais,
     estoque_movimentos,
-    venda_pagamentos,
-    venda_itens,
-    venda_transacoes,
     clientes,
     contagem_log,
     contagens,
@@ -46,6 +42,9 @@ CREATE TABLE IF NOT EXISTS ml.job_status (
 );
 
 CREATE INDEX IF NOT EXISTS idx_job_status_dia ON ml.job_status (dia);
+
+GRANT USAGE ON SCHEMA ml TO CURRENT_USER;
+GRANT SELECT ON ALL TABLES IN SCHEMA ml TO CURRENT_USER;
 
 CREATE TABLE categorias (
     id TEXT PRIMARY KEY,
@@ -166,7 +165,6 @@ CREATE TABLE vendas (
     discount_total NUMERIC(14, 4) NOT NULL DEFAULT 0,
     total NUMERIC(14, 4) NOT NULL DEFAULT 0,
     source TEXT NOT NULL DEFAULT 'historico',
-    fiscal_status TEXT NOT NULL DEFAULT 'pendente_preparacao',
     notes TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -184,46 +182,6 @@ CREATE TABLE clientes (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE TABLE venda_transacoes (
-    id TEXT PRIMARY KEY,
-    date_time TIMESTAMPTZ NOT NULL,
-    cliente_id TEXT REFERENCES clientes (id),
-    status TEXT NOT NULL DEFAULT 'aberta',
-    subtotal NUMERIC(14, 4) NOT NULL DEFAULT 0,
-    discount_total NUMERIC(14, 4) NOT NULL DEFAULT 0,
-    total NUMERIC(14, 4) NOT NULL DEFAULT 0,
-    source TEXT NOT NULL DEFAULT 'balcao',
-    fiscal_status TEXT NOT NULL DEFAULT 'pendente_preparacao',
-    notes TEXT,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    confirmed_at TIMESTAMPTZ,
-    canceled_at TIMESTAMPTZ
-);
-
-CREATE TABLE venda_itens (
-    id TEXT PRIMARY KEY,
-    venda_id TEXT NOT NULL REFERENCES venda_transacoes (id) ON DELETE CASCADE,
-    recipe_id TEXT NOT NULL REFERENCES receitas (id),
-    recipe_name TEXT NOT NULL,
-    quantity NUMERIC(14, 4) NOT NULL,
-    unit_price NUMERIC(14, 4) NOT NULL,
-    discount_value NUMERIC(14, 4) NOT NULL DEFAULT 0,
-    total_value NUMERIC(14, 4) NOT NULL,
-    venda_historica_id TEXT REFERENCES vendas (id)
-);
-
-CREATE TABLE venda_pagamentos (
-    id TEXT PRIMARY KEY,
-    venda_id TEXT NOT NULL REFERENCES venda_transacoes (id) ON DELETE CASCADE,
-    method TEXT NOT NULL,
-    amount NUMERIC(14, 4) NOT NULL,
-    status TEXT NOT NULL DEFAULT 'pago',
-    paid_at TIMESTAMPTZ,
-    change_amount NUMERIC(14, 4) NOT NULL DEFAULT 0,
-    external_reference TEXT
-);
-
 CREATE TABLE estoque_movimentos (
     id TEXT PRIMARY KEY,
     ingredient_id TEXT NOT NULL REFERENCES ingredientes (id),
@@ -235,22 +193,6 @@ CREATE TABLE estoque_movimentos (
     unit TEXT NOT NULL,
     reason TEXT NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-
-CREATE TABLE venda_documentos_fiscais (
-    id TEXT PRIMARY KEY,
-    venda_id TEXT NOT NULL REFERENCES venda_transacoes (id) ON DELETE CASCADE,
-    document_type TEXT NOT NULL DEFAULT 'NFC-e',
-    status TEXT NOT NULL DEFAULT 'pendente_preparacao',
-    provider TEXT,
-    access_key TEXT,
-    protocol TEXT,
-    issued_at TIMESTAMPTZ,
-    cancelled_at TIMESTAMPTZ,
-    payload JSON,
-    error_message TEXT,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 CREATE TABLE pedidos (
@@ -504,44 +446,11 @@ CREATE INDEX idx_clientes_name
 CREATE INDEX idx_clientes_document
     ON clientes (document);
 
-CREATE INDEX idx_venda_transacoes_date
-    ON venda_transacoes (date_time);
-
-CREATE INDEX idx_venda_transacoes_status
-    ON venda_transacoes (status);
-
-CREATE INDEX idx_venda_transacoes_cliente
-    ON venda_transacoes (cliente_id);
-
-CREATE INDEX idx_venda_transacoes_fiscal_status
-    ON venda_transacoes (fiscal_status);
-
-CREATE INDEX idx_venda_itens_venda
-    ON venda_itens (venda_id);
-
-CREATE INDEX idx_venda_itens_recipe
-    ON venda_itens (recipe_id);
-
-CREATE INDEX idx_venda_itens_historical
-    ON venda_itens (venda_historica_id);
-
-CREATE INDEX idx_venda_pagamentos_venda
-    ON venda_pagamentos (venda_id);
-
-CREATE INDEX idx_venda_pagamentos_status
-    ON venda_pagamentos (status);
-
 CREATE INDEX idx_estoque_movimentos_ingredient_date
     ON estoque_movimentos (ingredient_id, created_at);
 
 CREATE INDEX idx_estoque_movimentos_source
     ON estoque_movimentos (source_type, source_id);
-
-CREATE INDEX idx_venda_documentos_fiscais_venda
-    ON venda_documentos_fiscais (venda_id);
-
-CREATE INDEX idx_venda_documentos_fiscais_status
-    ON venda_documentos_fiscais (status);
 
 CREATE INDEX idx_pedidos_supplier_date
     ON pedidos (supplier_id, data_pedido);
@@ -566,11 +475,7 @@ ANALYZE receitas;
 ANALYZE receitas_ingredientes;
 ANALYZE vendas;
 ANALYZE clientes;
-ANALYZE venda_transacoes;
-ANALYZE venda_itens;
-ANALYZE venda_pagamentos;
 ANALYZE estoque_movimentos;
-ANALYZE venda_documentos_fiscais;
 ANALYZE pedidos;
 ANALYZE pedidos_log;
 ANALYZE resumo_diario_estoques;

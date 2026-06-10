@@ -55,8 +55,8 @@ def _cte_names(tree: exp.Expression) -> set[str]:
 
 
 def _normalize_table_ref(table: exp.Table) -> str:
-    schema = table.db or "public"
-    return f"{schema}.{table.name}"
+    schema = (table.db or "public").lower()
+    return f"{schema}.{table.name.lower()}"
 
 
 def extrair_tabelas(sql: str) -> set[str]:
