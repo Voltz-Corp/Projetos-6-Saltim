@@ -412,6 +412,7 @@ def ensure_purchase_plan_schema() -> None:
             estimated_total NUMERIC(14,4) NOT NULL DEFAULT 0,
             coverage_days DOUBLE PRECISION NOT NULL DEFAULT 0,
             criticality VARCHAR NOT NULL DEFAULT 'OK',
+            criticality_source VARCHAR NOT NULL DEFAULT 'operational_rule',
             justification VARCHAR,
             note VARCHAR,
             CONSTRAINT uq_purchase_plan_item UNIQUE (plan_id, ingredient_id)
@@ -453,6 +454,7 @@ def ensure_purchase_plan_schema() -> None:
         """,
         "CREATE INDEX IF NOT EXISTS idx_purchase_plans_created_at ON purchase_plans(created_at)",
         "CREATE INDEX IF NOT EXISTS idx_purchase_plans_status ON purchase_plans(status)",
+        "ALTER TABLE purchase_plan_items ADD COLUMN IF NOT EXISTS criticality_source VARCHAR NOT NULL DEFAULT 'operational_rule'",
         "CREATE INDEX IF NOT EXISTS idx_purchase_plan_items_plan ON purchase_plan_items(plan_id)",
         "CREATE INDEX IF NOT EXISTS idx_purchase_plan_supplier_options_item ON purchase_plan_supplier_options(item_id)",
         "CREATE INDEX IF NOT EXISTS idx_supplier_quotes_plan ON supplier_quotes(plan_id)",
@@ -1145,7 +1147,7 @@ def run_criticidade_report(response: Response, db: Session = Depends(get_db)):
     )
     python_executable = str(next((path for path in python_candidates if path.exists()), sys.executable))
     env = os.environ.copy()
-    env.setdefault("DATABASE_URL", "postgresql+psycopg://saltim:saltim123@localhost:55432/saltim_db")
+    env.setdefault("DATABASE_URL", "postgresql+psycopg://saltim:saltim123@localhost:5433/saltim_db")
     env.setdefault("MLFLOW_TRACKING_URI", "http://localhost:5000")
 
     result = subprocess.run(
@@ -2751,14 +2753,17 @@ def _apply_date_filters(
     years: Optional[list[int]] = None,
     months: Optional[list[int]] = None,
     event_dates: Optional[list[date]] = None,
+    default_reference_date: Optional[date] = None,
 ):
     date_column = func.date(column)
     has_explicit_filter = bool(date_from or date_to or month_keys or years or months or event_dates or all_period)
 
     if not has_explicit_filter and days:
-        reference_date = db.query(func.max(date_column)).scalar()
+        reference_date = default_reference_date or db.query(func.max(date_column)).scalar()
         if reference_date is not None:
             query = query.filter(date_column >= reference_date - timedelta(days=days - 1))
+            if default_reference_date is not None:
+                query = query.filter(date_column <= reference_date)
 
     if date_from:
         query = query.filter(date_column >= date_from)
@@ -2790,6 +2795,13 @@ def _apply_date_filters(
         query = query.filter(date_column.in_(event_dates))
 
     return query
+
+
+def _dashboard_history_reference_date(db: Session) -> Optional[date]:
+    stock_date = db.query(func.max(func.date(Estoque.date_time))).scalar()
+    sales_date = db.query(func.max(func.date(Venda.date_time))).scalar()
+    available_dates = [value for value in (stock_date, sales_date) if value is not None]
+    return min(available_dates) if available_dates else None
 
 
 def _event_dates_for_types(db: Session, event_types: Optional[list[str]]) -> list[date]:
@@ -3704,6 +3716,7 @@ def get_dashboard_estoque_historico(
     db: Session = Depends(get_db),
 ):
     event_dates = _event_dates_for_types(db, event_types)
+    history_reference_date = _dashboard_history_reference_date(db)
     date_expr = func.date(Estoque.date_time).label("date")
     value_expr = func.coalesce(func.sum(Estoque.quantity), 0).label("value")
     query = (
@@ -3723,6 +3736,7 @@ def get_dashboard_estoque_historico(
         years=years,
         months=month_numbers,
         event_dates=event_dates,
+        default_reference_date=history_reference_date,
     )
 
     if ingredient_id:
@@ -3775,6 +3789,7 @@ def get_dashboard_vendas_historico(
     db: Session = Depends(get_db),
 ):
     event_dates = _event_dates_for_types(db, event_types)
+    history_reference_date = _dashboard_history_reference_date(db)
     date_expr = func.date(Venda.date_time).label("date")
     value_expr = func.coalesce(func.sum(Venda.quantity), 0).label("value")
     query = db.query(date_expr, value_expr)
@@ -3790,6 +3805,7 @@ def get_dashboard_vendas_historico(
         years=years,
         months=month_numbers,
         event_dates=event_dates,
+        default_reference_date=history_reference_date,
     )
 
     if ingredient_id or category_id or category_ids:
@@ -5788,6 +5804,74 @@ def _purchase_in_transit_map(db: Session) -> dict[str, float]:
     return {ingredient_id: _as_float(qty) for ingredient_id, qty in rows}
 
 
+def _latest_abt_criticality_by_ingredient(db: Session) -> dict[str, str]:
+    try:
+        with db.begin_nested():
+            rows = db.execute(
+                text(
+                    """
+                    SELECT ingredient_id, y_nivel_criticidade
+                    FROM (
+                        SELECT
+                            ingredient_id,
+                            y_nivel_criticidade,
+                            ROW_NUMBER() OVER (
+                                PARTITION BY ingredient_id
+                                ORDER BY "date" DESC
+                            ) AS row_number
+                        FROM ml.abt_reposicao
+                        WHERE y_nivel_criticidade IS NOT NULL
+                    ) latest
+                    WHERE row_number = 1
+                    """
+                )
+            ).all()
+    except Exception:
+        logger.exception("Falha ao carregar criticidade de ml.abt_reposicao")
+        return {}
+    return {
+        str(ingredient_id): str(criticality)
+        for ingredient_id, criticality in rows
+        if ingredient_id and criticality
+    }
+
+
+def _purchase_display_criticality(label: str) -> str:
+    normalized = (
+        normalize("NFKD", label or "")
+        .encode("ascii", "ignore")
+        .decode("ascii")
+        .strip()
+        .lower()
+    )
+    labels = {
+        "emergencial": "Emergencial",
+        "critico": "Crítico",
+        "atencao": "Atenção",
+        "alerta de compra": "Alerta de compra",
+        "ok": "OK",
+    }
+    return labels.get(normalized, label or "OK")
+
+
+def _resolve_purchase_criticality(
+    item: Optional[CriticalityReportItem],
+    abt_criticality: Optional[str],
+    stock_position: float,
+    forecast_qty: float,
+) -> tuple[str, str]:
+    if item is not None and item.criticidade_predita:
+        return _purchase_display_criticality(item.criticidade_predita), "model_report"
+    if abt_criticality:
+        return _purchase_display_criticality(abt_criticality), "abt_reposicao"
+    return (
+        _purchase_display_criticality(
+            _purchase_criticality_label(None, stock_position, forecast_qty)
+        ),
+        "operational_rule",
+    )
+
+
 def _purchase_criticality_label(item: Optional[CriticalityReportItem], stock_position: float, forecast_qty: float) -> str:
     if item is not None and item.criticidade_predita:
         return item.criticidade_predita
@@ -5805,7 +5889,10 @@ def _purchase_status_is_critical(label: str) -> bool:
         .decode("ascii")
         .lower()
     )
-    return any(token in normalized for token in ("critico", "alerta", "zerado", "ruptura"))
+    return any(
+        token in normalized
+        for token in ("emergencial", "critico", "atencao", "alerta", "zerado", "ruptura")
+    )
 
 
 def _purchase_option_score(
@@ -5874,9 +5961,9 @@ def _sync_purchase_plan_quotes(db: Session, plan: PurchasePlan) -> None:
         quote.email = payload.get("email")
         quote.total_estimated = round(payload["total"], 2)
 
-    for quote in plan.quotes:
+    for quote in list(plan.quotes):
         if quote.supplier_id not in selected_totals and quote.status == "rascunho":
-            quote.total_estimated = 0
+            plan.quotes.remove(quote)
 
 
 def _recalculate_purchase_plan(plan: PurchasePlan) -> None:
@@ -5942,6 +6029,7 @@ def _serialize_purchase_item(item: PurchasePlanItem) -> PurchasePlanItemOut:
         estimated_total=_as_float(item.estimated_total),
         coverage_days=_as_float(item.coverage_days),
         criticality=item.criticality,
+        criticality_source=item.criticality_source,
         justification=item.justification,
         note=item.note,
         options=[_serialize_purchase_option(option) for option in options],
@@ -6012,7 +6100,16 @@ def _build_purchase_plan(payload: PurchasePlanGenerateRequest, db: Session) -> P
     usage_by_ingredient = _purchase_recent_usage_window(db, horizon_days, date_from)
     in_transit_by_ingredient = _purchase_in_transit_map(db)
     criticidade_run, criticidade_by_ingredient = _latest_criticidade_by_ingredient(db)
-    source = "contagem" if payload.contagem_id else ("criticidade" if criticidade_run else "manual")
+    abt_criticality_by_ingredient = _latest_abt_criticality_by_ingredient(db)
+    source = (
+        "contagem"
+        if payload.contagem_id
+        else (
+            "model_report"
+            if criticidade_run
+            else ("abt_reposicao" if abt_criticality_by_ingredient else "operational_rule")
+        )
+    )
 
     rows = (
         db.query(Ingrediente, Categoria.name.label("category_name"), EstoqueAtual.qtd.label("current_qty"))
@@ -6042,7 +6139,12 @@ def _build_purchase_plan(payload: PurchasePlanGenerateRequest, db: Session) -> P
         in_transit_qty = _as_float(in_transit_by_ingredient.get(ingredient.id))
         stock_position = current_qty + in_transit_qty
         criticality_item = criticidade_by_ingredient.get(ingredient.id)
-        criticality = _purchase_criticality_label(criticality_item, stock_position, forecast_qty)
+        criticality, criticality_source = _resolve_purchase_criticality(
+            criticality_item,
+            abt_criticality_by_ingredient.get(ingredient.id),
+            stock_position,
+            forecast_qty,
+        )
         recommended_qty = max(0.0, forecast_qty)
         recommended_qty = round(recommended_qty, 2)
         if recommended_qty <= 0 and not _purchase_status_is_critical(criticality):
@@ -6128,6 +6230,7 @@ def _build_purchase_plan(payload: PurchasePlanGenerateRequest, db: Session) -> P
             estimated_total=round(selected_unit_price * recommended_qty, 2),
             coverage_days=round(min(coverage_after, 999.0), 2),
             criticality=criticality,
+            criticality_source=criticality_source,
             justification=justification,
         )
         plan.items.append(item)
@@ -6257,6 +6360,8 @@ def update_purchase_plan_item(
     db: Session = Depends(get_db),
 ):
     plan = _get_purchase_plan_or_404(db, plan_id)
+    if plan.status == "aprovado":
+        raise HTTPException(status_code=409, detail="Plano aprovado não pode ser alterado")
     item = next((plan_item for plan_item in plan.items if plan_item.ingredient_id == ingredient_id), None)
     if item is None:
         raise HTTPException(status_code=404, detail="Item do plano não encontrado")
@@ -6277,6 +6382,28 @@ def update_purchase_plan_item(
     avg_usage = _as_float(item.avg_daily_usage)
     stock_after = _as_float(item.current_qty) + _as_float(item.in_transit_qty) + _as_float(item.approved_qty)
     item.coverage_days = round(min(stock_after / avg_usage if avg_usage > 0 else 90.0, 999.0), 2)
+    plan.status = "em_revisao" if plan.status == "rascunho" else plan.status
+    _sync_purchase_plan_quotes(db, plan)
+    _recalculate_purchase_plan(plan)
+    db.commit()
+    db.refresh(plan)
+    return _serialize_purchase_plan(plan)
+
+
+@app.delete("/api/compras/planos/{plan_id}/items/{ingredient_id}", response_model=PurchasePlanOut)
+def delete_purchase_plan_item(
+    plan_id: int,
+    ingredient_id: str,
+    db: Session = Depends(get_db),
+):
+    plan = _get_purchase_plan_or_404(db, plan_id)
+    if plan.status == "aprovado":
+        raise HTTPException(status_code=409, detail="Plano aprovado não pode ser alterado")
+    item = next((plan_item for plan_item in plan.items if plan_item.ingredient_id == ingredient_id), None)
+    if item is None:
+        raise HTTPException(status_code=404, detail="Item do plano não encontrado")
+
+    plan.items.remove(item)
     plan.status = "em_revisao" if plan.status == "rascunho" else plan.status
     _sync_purchase_plan_quotes(db, plan)
     _recalculate_purchase_plan(plan)
@@ -6402,6 +6529,7 @@ def export_purchase_plan(
             "total": _as_float(item.estimated_total),
             "cobertura_dias": _as_float(item.coverage_days),
             "criticidade": item.criticality,
+            "origem_criticidade": item.criticality_source,
             "justificativa": item.justification,
         }
         for item in plan.items

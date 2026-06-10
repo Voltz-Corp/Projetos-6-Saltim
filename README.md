@@ -153,7 +153,8 @@ SMTP local de desenvolvimento:
 
 * Inbox de emails: `http://localhost:8025`
 * SMTP local: `localhost:1025`
-* O backend ja inicia com `SMTP_HOST=localhost`, `SMTP_PORT=1025`, `SMTP_FROM_EMAIL=pedidos@saltim.local` e `SMTP_USE_TLS=0`.
+* O backend usa `SMTP_HOST=localhost`, `SMTP_PORT=1025`, `SMTP_FROM_EMAIL=pedidos@saltim.local` e `SMTP_USE_TLS=0` como defaults locais, mesmo quando iniciado manualmente.
+* Para desativar o envio, use `SMTP_ENABLED=0`. Para um SMTP real, sobrescreva as variaveis `SMTP_*`.
 
 ### **2. Executar manualmente o backend**
 
@@ -267,7 +268,7 @@ Pré-condições:
 
 Variáveis do job:
 
-* `DATABASE_URL` (default: `postgresql://saltim:saltim123@localhost:5432/saltim_db`)
+* `DATABASE_URL` (default: `postgresql://saltim:saltim123@localhost:5433/saltim_db`)
 * `MLFLOW_TRACKING_URI` (default: `http://localhost:5000`)
 * `CRITICIDADE_MODEL_URI` (default: um `runs:/.../model`)
 * `CRITICIDADE_DAILY_MLFLOW_EXPERIMENT` (default: `jobs/criticidade/relatorio_diario`)

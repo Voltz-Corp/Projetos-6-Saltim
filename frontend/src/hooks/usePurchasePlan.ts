@@ -35,6 +35,7 @@ export interface PurchasePlanItem {
   estimated_total: number
   coverage_days: number
   criticality: string
+  criticality_source: 'model_report' | 'abt_reposicao' | 'operational_rule' | string
   justification?: string | null
   note?: string | null
   options: SupplierOption[]
@@ -179,6 +180,31 @@ export function useUpdatePurchasePlanItem() {
         },
       )
       if (!response.ok) throw new Error(await readError(response, 'Falha ao atualizar item'))
+      return response.json()
+    },
+    onSuccess: data => {
+      queryClient.setQueryData(['purchase-plan-latest'], data)
+      queryClient.setQueryData(['purchase-plan', data.id], data)
+    },
+  })
+}
+
+export function useDeletePurchasePlanItem() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async ({
+      planId,
+      ingredientId,
+    }: {
+      planId: number
+      ingredientId: string
+    }): Promise<PurchasePlan> => {
+      const response = await fetch(
+        `${API_URL}/api/compras/planos/${planId}/items/${ingredientId}`,
+        { method: 'DELETE' },
+      )
+      if (!response.ok) throw new Error(await readError(response, 'Falha ao remover item'))
       return response.json()
     },
     onSuccess: data => {

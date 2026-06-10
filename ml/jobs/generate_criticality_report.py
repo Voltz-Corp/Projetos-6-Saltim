@@ -48,7 +48,7 @@ except ImportError:  # pragma: no cover - handled as a runtime failure in the jo
 
 
 DATABASE_URL = os.getenv(
-    "DATABASE_URL", "postgresql://saltim:saltim123@localhost:5432/saltim_db"
+    "DATABASE_URL", "postgresql://saltim:saltim123@localhost:5433/saltim_db"
 )
 MLFLOW_TRACKING_URI = os.getenv("MLFLOW_TRACKING_URI", "http://localhost:5000")
 DEFAULT_MODEL_URI = os.getenv(

@@ -48,19 +48,23 @@ class SmtpSettings:
 
 
 def get_smtp_settings() -> SmtpSettings | None:
-    host = os.getenv("SMTP_HOST", "").strip()
-    from_email = os.getenv("SMTP_FROM_EMAIL", "").strip()
+    enabled = os.getenv("SMTP_ENABLED", "1").strip().lower()
+    if enabled in {"0", "false", "no", "off"}:
+        return None
+
+    host = os.getenv("SMTP_HOST", "localhost").strip()
+    from_email = os.getenv("SMTP_FROM_EMAIL", "pedidos@saltim.local").strip()
     if not host or not from_email:
         return None
 
     return SmtpSettings(
         host=host,
-        port=int(os.getenv("SMTP_PORT", "587")),
-        username=os.getenv("SMTP_USER") or None,
+        port=int(os.getenv("SMTP_PORT", "1025")),
+        username=os.getenv("SMTP_USER") or os.getenv("SMTP_USERNAME") or None,
         password=os.getenv("SMTP_PASSWORD") or None,
         from_email=from_email,
         from_name=os.getenv("SMTP_FROM_NAME", "Saltim Café"),
-        use_tls=os.getenv("SMTP_USE_TLS", "1").strip().lower()
+        use_tls=os.getenv("SMTP_USE_TLS", "0").strip().lower()
         not in {"0", "false", "no", "off"},
         timeout_seconds=float(os.getenv("SMTP_TIMEOUT_SECONDS", "10")),
     )

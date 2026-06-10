@@ -157,6 +157,7 @@ export function AppSelect({
   placeholder = 'Selecionar',
   className,
   isClearable = false,
+  isDisabled = false,
 }: {
   value: string
   options: SelectOption[]
@@ -164,6 +165,7 @@ export function AppSelect({
   placeholder?: string
   className?: string
   isClearable?: boolean
+  isDisabled?: boolean
 }) {
   const selected = options.find(option => option.value === value) ?? null
 
@@ -182,6 +184,7 @@ export function AppSelect({
       classNamePrefix="saltim-select"
       isSearchable
       isClearable={isClearable}
+      isDisabled={isDisabled}
       menuPortalTarget={typeof document !== 'undefined' ? document.body : undefined}
       menuPosition="fixed"
     />

@@ -644,6 +644,7 @@ class PurchasePlanItem(Base):
     estimated_total = Column(Numeric(14, 4), nullable=False, default=0)
     coverage_days = Column(Float, nullable=False, default=0)
     criticality = Column(String, nullable=False, default="OK")
+    criticality_source = Column(String, nullable=False, default="operational_rule")
     justification = Column(String)
     note = Column(String)
 

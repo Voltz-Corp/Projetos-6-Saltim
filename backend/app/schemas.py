@@ -704,6 +704,7 @@ class PurchasePlanItemOut(BaseModel):
     estimated_total: float
     coverage_days: float
     criticality: str
+    criticality_source: str
     justification: Optional[str] = None
     note: Optional[str] = None
     options: List[PurchasePlanSupplierOptionOut] = Field(default_factory=list)

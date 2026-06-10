@@ -502,17 +502,17 @@ function WorldCupConfetti({
   onDone: () => void
 }) {
   useEffect(() => {
-    const timeoutId = window.setTimeout(onDone, 1100)
+    const timeoutId = window.setTimeout(onDone, 3100)
     return () => window.clearTimeout(timeoutId)
   }, [burst.id, onDone])
 
   const pieces = useMemo(
     () =>
-      Array.from({ length: 42 }, (_, index) => ({
+      Array.from({ length: 96 }, (_, index) => ({
         color: burst.colors[index % burst.colors.length],
-        delay: (index % 8) * 24,
-        drift: ((index * 37) % 180) - 90,
-        left: 6 + ((index * 19) % 88),
+        delay: (index % 12) * 45,
+        drift: ((index * 37) % 260) - 130,
+        left: 2 + ((index * 19) % 96),
         rotate: 180 + ((index * 47) % 360),
         width: 6 + (index % 3) * 3,
       })),
