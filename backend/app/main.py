@@ -19,15 +19,21 @@ from xml.etree.ElementTree import Element, SubElement, tostring
 from fastapi import FastAPI, Depends, HTTPException, Query, Response
 from fastapi.middleware.cors import CORSMiddleware
 from openpyxl import Workbook
-from openpyxl.chart import BarChart as ExcelBarChart, LineChart as ExcelLineChart, Reference
+from openpyxl.chart import (
+    BarChart as ExcelBarChart,
+    LineChart as ExcelLineChart,
+    Reference,
+)
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 from reportlab.lib import colors
-from reportlab.lib.enums import TA_RIGHT
+from reportlab.graphics import renderPDF
+from reportlab.lib.enums import TA_CENTER, TA_RIGHT
 from reportlab.lib.pagesizes import A4, landscape
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import mm
 from reportlab.platypus import (
+    Image as PlatypusImage,
     PageBreak,
     Paragraph,
     SimpleDocTemplate,
@@ -36,6 +42,7 @@ from reportlab.platypus import (
     TableStyle,
 )
 from reportlab.graphics.shapes import Drawing, Line as DrawingLine, Rect, String
+
 try:
     from svglib.svglib import svg2rlg
 except ImportError:  # pragma: no cover - optional PDF logo renderer
@@ -54,12 +61,14 @@ from .smtp_mailer import (
 )
 from .models import (
     Categoria,
+    Cliente,
     Contagem,
     ContagemLog,
     CriticalityReportItem,
     CriticalityReportRun,
     Estoque,
     EstoqueAtual,
+    EstoqueMovimento,
     FeriadoRecife,
     Fornecedor,
     FornecedorIngrediente,
@@ -79,6 +88,8 @@ from .models import (
 from .schemas import (
     AgentChatRequest,
     AgentChatResponse,
+    ClienteCreate,
+    ClienteOut,
     IngredienteOut,
     ContagemCreate,
     ContagemDetalheCategoria,
@@ -101,6 +112,10 @@ from .schemas import (
     FornecedorProfileKpis,
     FornecedorProfileResponse,
     JobStatusOut,
+    MesaPedidoCreate,
+    MesaPedidoOut,
+    MesasResponse,
+    MesaVendaOut,
     PedidoCreateRequest,
     PedidoCreateResponse,
     PedidoCreateItem,
@@ -113,6 +128,15 @@ from .schemas import (
     PedidoRecommendationItem,
     PedidoRecommendationRequest,
     PedidoRecommendationResponse,
+    VendaCreateRequest,
+    VendaDetailOut,
+    VendaFechamentoDiaOut,
+    VendaFecharRequest,
+    VendaItemOut,
+    VendaItensUpdateRequest,
+    VendaListItem,
+    VendaPaginado,
+    VendaProdutoOut,
     PurchasePlanGenerateRequest,
     PurchasePlanItemOut,
     PurchasePlanItemUpdateRequest,
@@ -145,7 +169,6 @@ from .schemas import (
     DashboardUnitCategoryGroup,
     DashboardUnitRankGroup,
 )
-
 
 PRODUCTION_CATEGORY_ID = "CAT0015"
 DASHBOARD_STOCK_UNITS = ("KG", "UND", "L")
@@ -209,6 +232,7 @@ async def lifespan(app: FastAPI):
     ensure_contagem_estoque_schema()
     ensure_pedidos_schema()
     ensure_purchase_plan_schema()
+    ensure_sales_schema()
     yield
 
 
@@ -391,6 +415,7 @@ def ensure_purchase_plan_schema() -> None:
             estimated_total NUMERIC(14,4) NOT NULL DEFAULT 0,
             coverage_days DOUBLE PRECISION NOT NULL DEFAULT 0,
             criticality VARCHAR NOT NULL DEFAULT 'OK',
+            criticality_source VARCHAR NOT NULL DEFAULT 'operational_rule',
             justification VARCHAR,
             note VARCHAR,
             CONSTRAINT uq_purchase_plan_item UNIQUE (plan_id, ingredient_id)
@@ -432,9 +457,79 @@ def ensure_purchase_plan_schema() -> None:
         """,
         "CREATE INDEX IF NOT EXISTS idx_purchase_plans_created_at ON purchase_plans(created_at)",
         "CREATE INDEX IF NOT EXISTS idx_purchase_plans_status ON purchase_plans(status)",
+        "ALTER TABLE purchase_plan_items ADD COLUMN IF NOT EXISTS criticality_source VARCHAR NOT NULL DEFAULT 'operational_rule'",
         "CREATE INDEX IF NOT EXISTS idx_purchase_plan_items_plan ON purchase_plan_items(plan_id)",
         "CREATE INDEX IF NOT EXISTS idx_purchase_plan_supplier_options_item ON purchase_plan_supplier_options(item_id)",
         "CREATE INDEX IF NOT EXISTS idx_supplier_quotes_plan ON supplier_quotes(plan_id)",
+    )
+    raw_conn = engine.raw_connection()
+    try:
+        with raw_conn.cursor() as cursor:
+            for statement in statements:
+                cursor.execute(statement)
+        raw_conn.commit()
+    except Exception:
+        raw_conn.rollback()
+        raise
+    finally:
+        raw_conn.close()
+
+
+def ensure_sales_schema() -> None:
+    statements = (
+        "DROP TABLE IF EXISTS venda_documentos_fiscais, venda_pagamentos, venda_itens, venda_transacoes CASCADE",
+        "ALTER TABLE vendas ADD COLUMN IF NOT EXISTS comanda_id VARCHAR",
+        "ALTER TABLE vendas ADD COLUMN IF NOT EXISTS mesa_numero INTEGER",
+        "ALTER TABLE vendas ADD COLUMN IF NOT EXISTS status VARCHAR NOT NULL DEFAULT 'paga'",
+        "ALTER TABLE vendas ADD COLUMN IF NOT EXISTS cpf_cliente VARCHAR",
+        "ALTER TABLE vendas ADD COLUMN IF NOT EXISTS customer_name VARCHAR",
+        "ALTER TABLE vendas ADD COLUMN IF NOT EXISTS payment_method VARCHAR",
+        "ALTER TABLE vendas ADD COLUMN IF NOT EXISTS paid_amount NUMERIC(14,4) NOT NULL DEFAULT 0",
+        "ALTER TABLE vendas ADD COLUMN IF NOT EXISTS change_amount NUMERIC(14,4) NOT NULL DEFAULT 0",
+        "ALTER TABLE vendas ADD COLUMN IF NOT EXISTS discount_total NUMERIC(14,4) NOT NULL DEFAULT 0",
+        "ALTER TABLE vendas ADD COLUMN IF NOT EXISTS total NUMERIC(14,4) NOT NULL DEFAULT 0",
+        "ALTER TABLE vendas ADD COLUMN IF NOT EXISTS source VARCHAR NOT NULL DEFAULT 'historico'",
+        "ALTER TABLE vendas DROP COLUMN IF EXISTS fiscal_status",
+        "ALTER TABLE vendas ADD COLUMN IF NOT EXISTS notes VARCHAR",
+        "ALTER TABLE vendas ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT now()",
+        "ALTER TABLE vendas ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT now()",
+        "ALTER TABLE vendas ADD COLUMN IF NOT EXISTS confirmed_at TIMESTAMPTZ",
+        "ALTER TABLE vendas ADD COLUMN IF NOT EXISTS canceled_at TIMESTAMPTZ",
+        "UPDATE vendas SET comanda_id = id WHERE comanda_id IS NULL",
+        "UPDATE vendas SET total = quantity * unit_price WHERE total = 0 OR total IS NULL",
+        "UPDATE vendas SET paid_amount = total WHERE paid_amount = 0 OR paid_amount IS NULL",
+        "UPDATE vendas SET confirmed_at = date_time WHERE confirmed_at IS NULL AND status = 'paga'",
+        "CREATE INDEX IF NOT EXISTS idx_vendas_comanda ON vendas(comanda_id)",
+        "CREATE INDEX IF NOT EXISTS idx_vendas_mesa_status ON vendas(mesa_numero, status)",
+        """
+        CREATE TABLE IF NOT EXISTS clientes (
+            id VARCHAR PRIMARY KEY,
+            name VARCHAR NOT NULL,
+            document VARCHAR,
+            email VARCHAR,
+            phone VARCHAR,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS estoque_movimentos (
+            id VARCHAR PRIMARY KEY,
+            ingredient_id VARCHAR NOT NULL REFERENCES ingredientes(id),
+            source_type VARCHAR NOT NULL,
+            source_id VARCHAR NOT NULL,
+            delta_qty NUMERIC(14,4) NOT NULL,
+            previous_qty NUMERIC(14,4) NOT NULL,
+            new_qty NUMERIC(14,4) NOT NULL,
+            unit VARCHAR NOT NULL,
+            reason VARCHAR NOT NULL,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        )
+        """,
+        "CREATE INDEX IF NOT EXISTS idx_clientes_name ON clientes(name)",
+        "CREATE INDEX IF NOT EXISTS idx_clientes_document ON clientes(document)",
+        "CREATE INDEX IF NOT EXISTS idx_estoque_movimentos_ingredient_date ON estoque_movimentos(ingredient_id, created_at)",
+        "CREATE INDEX IF NOT EXISTS idx_estoque_movimentos_source ON estoque_movimentos(source_type, source_id)",
     )
     raw_conn = engine.raw_connection()
     try:
@@ -458,7 +553,9 @@ def _countable_items_total(db: Session) -> int:
     )
 
 
-def _resolve_estoque_snapshot_data(db: Session, reference_date: Optional[date] = None) -> Optional[date]:
+def _resolve_estoque_snapshot_data(
+    db: Session, reference_date: Optional[date] = None
+) -> Optional[date]:
     reference_date = reference_date or _now_recife().date()
     snapshot = (
         db.query(func.max(func.date(Estoque.date_time)))
@@ -508,7 +605,9 @@ def _contagem_counts(
     )
     latest_logs = _latest_logs_by_ingredient(logs)
     itens_contados = len(latest_logs)
-    itens_alterados = sum(1 for log in latest_logs.values() if round(float(log.delta), 3) != 0)
+    itens_alterados = sum(
+        1 for log in latest_logs.values() if round(float(log.delta), 3) != 0
+    )
     itens_sem_alteracao = itens_contados - itens_alterados
 
     return {
@@ -575,7 +674,9 @@ def create_contagem(payload: ContagemCreate, db: Session = Depends(get_db)):
 
 @app.get("/api/contagens", response_model=list[ContagemListItem])
 def list_contagens(db: Session = Depends(get_db)):
-    contagens = db.query(Contagem).order_by(Contagem.criada_em.desc(), Contagem.id.desc()).all()
+    contagens = (
+        db.query(Contagem).order_by(Contagem.criada_em.desc(), Contagem.id.desc()).all()
+    )
     total_itens = _countable_items_total(db)
     return [_contagem_list_item(contagem, db, total_itens) for contagem in contagens]
 
@@ -718,6 +819,7 @@ def finalizar_contagem(contagem_id: int, db: Session = Depends(get_db)):
     db.refresh(contagem)
     return contagem
 
+
 def _compute_status(item: Ingrediente) -> str:
     qty = float(item.current_qty)
     min_qty = float(item.min_qty)
@@ -735,12 +837,16 @@ def _latest_criticidade_run(db: Session) -> Optional[CriticalityReportRun]:
         db.query(CriticalityReportRun)
         .filter(CriticalityReportRun.status == "success")
         .filter(CriticalityReportRun.total_items > 0)
-        .order_by(CriticalityReportRun.generated_at.desc(), CriticalityReportRun.id.desc())
+        .order_by(
+            CriticalityReportRun.generated_at.desc(), CriticalityReportRun.id.desc()
+        )
         .first()
     )
 
 
-def _latest_criticidade_by_ingredient(db: Session) -> tuple[Optional[CriticalityReportRun], dict[str, CriticalityReportItem]]:
+def _latest_criticidade_by_ingredient(
+    db: Session,
+) -> tuple[Optional[CriticalityReportRun], dict[str, CriticalityReportItem]]:
     run = _latest_criticidade_run(db)
     if run is None:
         return None, {}
@@ -752,7 +858,9 @@ def _latest_criticidade_by_ingredient(db: Session) -> tuple[Optional[Criticality
     return run, {item.ingredient_id: item for item in items}
 
 
-def _model_stock_status(ingrediente: Ingrediente, criticidade: Optional[CriticalityReportItem]) -> str:
+def _model_stock_status(
+    ingrediente: Ingrediente, criticidade: Optional[CriticalityReportItem]
+) -> str:
     if float(ingrediente.current_qty) <= 0:
         return "Esgotado"
     if criticidade is not None and bool(criticidade.necessita_compra):
@@ -778,7 +886,9 @@ def _ingrediente_out(
         status=_model_stock_status(ingrediente, criticidade),
         criticidade_predita=criticidade.criticidade_predita if criticidade else None,
         criticidade_report_id=criticidade_run.id if criticidade_run else None,
-        criticidade_reference_date=criticidade_run.reference_date if criticidade_run else None,
+        criticidade_reference_date=(
+            criticidade_run.reference_date if criticidade_run else None
+        ),
     )
 
 
@@ -802,11 +912,15 @@ def _criticidade_item_out(item: CriticalityReportItem) -> CriticidadeReportItemO
     )
 
 
-def _criticidade_report_for_date(db: Session, reference_date: date) -> CriticidadeReportLatestOut:
+def _criticidade_report_for_date(
+    db: Session, reference_date: date
+) -> CriticidadeReportLatestOut:
     run = (
         db.query(CriticalityReportRun)
         .filter(CriticalityReportRun.reference_date == reference_date)
-        .order_by(CriticalityReportRun.generated_at.desc(), CriticalityReportRun.id.desc())
+        .order_by(
+            CriticalityReportRun.generated_at.desc(), CriticalityReportRun.id.desc()
+        )
         .first()
     )
     if run is None:
@@ -836,14 +950,20 @@ def _criticidade_report_for_date(db: Session, reference_date: date) -> Criticida
     item_outputs = [_criticidade_item_out(item) for item in items]
     zero_outputs = [item for item in item_outputs if item.estoque_atual <= 0]
     critical_outputs = [
-        item for item in item_outputs if item.necessita_compra and item.estoque_atual > 0
+        item
+        for item in item_outputs
+        if item.necessita_compra and item.estoque_atual > 0
     ]
     ok_outputs = [item for item in item_outputs if not item.necessita_compra]
 
     categories: list[CriticidadeReportCategoryOut] = []
     category_names = sorted({item.category or "Sem categoria" for item in item_outputs})
     for category in category_names:
-        category_items = [(item) for item in item_outputs if (item.category or "Sem categoria") == category]
+        category_items = [
+            (item)
+            for item in item_outputs
+            if (item.category or "Sem categoria") == category
+        ]
         total_items = len(category_items)
         alert_count = sum(1 for item in category_items if item.necessita_compra)
         ok_count = total_items - alert_count
@@ -862,7 +982,11 @@ def _criticidade_report_for_date(db: Session, reference_date: date) -> Criticida
     if run.total_items > 0:
         distribution = [
             {"status": "OK", "count": run.ok_count, "rate": 1 - run.alert_rate},
-            {"status": "Alerta de compra", "count": run.alert_count, "rate": run.alert_rate},
+            {
+                "status": "Alerta de compra",
+                "count": run.alert_count,
+                "rate": run.alert_rate,
+            },
         ]
 
     return CriticidadeReportLatestOut(
@@ -889,7 +1013,9 @@ def _criticidade_report_for_date(db: Session, reference_date: date) -> Criticida
         critical_items=critical_outputs,
         zero_items=zero_outputs,
         examples_critical=critical_outputs[:5],
-        examples_ok=sorted(ok_outputs, key=lambda item: abs(item.score_alerta_compra))[:5],
+        examples_ok=sorted(ok_outputs, key=lambda item: abs(item.score_alerta_compra))[
+            :5
+        ],
     )
 
 
@@ -957,7 +1083,9 @@ def _ensure_criticidade_failed_run(
     existing = (
         db.query(CriticalityReportRun)
         .filter(CriticalityReportRun.reference_date == reference_date)
-        .order_by(CriticalityReportRun.generated_at.desc(), CriticalityReportRun.id.desc())
+        .order_by(
+            CriticalityReportRun.generated_at.desc(), CriticalityReportRun.id.desc()
+        )
         .first()
     )
     if existing is not None:
@@ -982,18 +1110,24 @@ def _ensure_criticidade_failed_run(
 
 
 @app.get("/api/ml/criticidade/job-status/latest", response_model=JobStatusOut)
-def get_latest_criticidade_job_status(response: Response, db: Session = Depends(get_db)):
+def get_latest_criticidade_job_status(
+    response: Response, db: Session = Depends(get_db)
+):
     response.headers["Cache-Control"] = "no-store"
     return _job_status_for_date(db, _now_recife().date())
 
 
-@app.get("/api/ml/criticidade/relatorio/latest", response_model=CriticidadeReportLatestOut)
+@app.get(
+    "/api/ml/criticidade/relatorio/latest", response_model=CriticidadeReportLatestOut
+)
 def get_latest_criticidade_report(response: Response, db: Session = Depends(get_db)):
     response.headers["Cache-Control"] = "no-store"
     return _criticidade_report_for_date(db, _now_recife().date())
 
 
-@app.post("/api/ml/criticidade/relatorio/run", response_model=CriticidadeReportLatestOut)
+@app.post(
+    "/api/ml/criticidade/relatorio/run", response_model=CriticidadeReportLatestOut
+)
 def run_criticidade_report(response: Response, db: Session = Depends(get_db)):
     response.headers["Cache-Control"] = "no-store"
     reference_date = _now_recife().date()
@@ -1006,9 +1140,17 @@ def run_criticidade_report(response: Response, db: Session = Depends(get_db)):
         project_root / "backend" / ".venv" / "bin" / "python",
         project_root / "backend" / ".venv" / "Scripts" / "python.exe",
     )
-    python_executable = str(next((path for path in python_candidates if path.exists()), sys.executable))
+    python_executable = str(
+        next((path for path in python_candidates if path.exists()), sys.executable)
+    )
     env = os.environ.copy()
-    env.setdefault("DATABASE_URL", "postgresql+psycopg://saltim:saltim123@localhost:55432/saltim_db")
+    database_url = env.get(
+        "DATABASE_URL",
+        "postgresql://saltim:saltim123@localhost:5432/saltim_db",
+    )
+    if database_url.startswith("postgresql+psycopg://"):
+        database_url = database_url.replace("postgresql+psycopg://", "postgresql://", 1)
+    env["DATABASE_URL"] = database_url
     env.setdefault("MLFLOW_TRACKING_URI", "http://localhost:5000")
 
     result = subprocess.run(
@@ -1068,9 +1210,34 @@ SALTIM_ORANGE = "#F07820"
 SALTIM_DARK = "#232323"
 SALTIM_CREAM = "#FEF4E8"
 SALTIM_STONE = "#5F5E5A"
-SALTIM_LOGO_PATH = (
-    Path(__file__).resolve().parents[2] / "frontend" / "public" / "images" / "maestro-logo.svg"
+PDF_PAGE_SIZE = landscape(A4)
+PDF_PROJECT_NAME = "Maestro"
+PDF_PROJECT_CONTEXT = "Compras, Estoque & Operacoes"
+PDF_CLIENT_NAME = "Saltim Cafe"
+PDF_SIGNATURE = "Equipe Maestro"
+PDF_GENERATOR_NOTE = "Relatorio oficial do projeto Maestro para Saltim Cafe"
+PDF_PROJECT_LOGO_PATH = (
+    Path(__file__).resolve().parents[2]
+    / "frontend"
+    / "public"
+    / "images"
+    / "maestro-logo.svg"
 )
+PDF_CLIENT_LOGO_PATH = (
+    Path(__file__).resolve().parents[2]
+    / "frontend"
+    / "public"
+    / "images"
+    / "saltim_logo.jpg"
+)
+PDF_LAYOUT = {
+    "page_margin_x": 12 * mm,
+    "page_margin_top": 31 * mm,
+    "page_margin_bottom": 18 * mm,
+    "card_radius": 7,
+    "card_padding": 9,
+    "section_gap": 6 * mm,
+}
 
 EXPORT_THEMES = {
     "maestro-light": {
@@ -1136,6 +1303,186 @@ def _export_theme(theme_id: Optional[str]) -> dict[str, str]:
 
 def _hex(value: str) -> str:
     return value.replace("#", "")
+
+
+def _pdf_palette(theme: Optional[dict[str, str]] = None) -> dict[str, str]:
+    source = theme or _export_theme(None)
+    return {
+        **source,
+        "card": "#FFFFFF",
+        "card_border": source.get("grid", "#E4E0EF"),
+        "header_soft": source.get("soft", "#EFEDFF"),
+        "accent_soft": "#FFF2EC",
+        "table_alt": source.get("soft", "#EFEDFF"),
+        "footer_text": source.get("muted", "#6F6787"),
+    }
+
+
+def _apply_drawing_fill(drawing, fill_color: colors.Color) -> None:
+    for child in getattr(drawing, "contents", []):
+        if hasattr(child, "fillColor") and child.fillColor is not None:
+            child.fillColor = fill_color
+        if hasattr(child, "strokeColor") and child.strokeColor is not None:
+            child.strokeColor = fill_color
+        _apply_drawing_fill(child, fill_color)
+
+
+def _fit_svg_logo(
+    path: Path,
+    max_width: float,
+    max_height: float,
+    fill_color: Optional[colors.Color] = None,
+):
+    if svg2rlg is None or not path.exists():
+        return None
+    drawing = svg2rlg(str(path))
+    if drawing is None or not drawing.width or not drawing.height:
+        return None
+    if fill_color is not None:
+        _apply_drawing_fill(drawing, fill_color)
+    scale = min(max_width / drawing.width, max_height / drawing.height)
+    drawing.width *= scale
+    drawing.height *= scale
+    drawing.scale(scale, scale)
+    return drawing
+
+
+def _pdf_logo_flowable(
+    path: Path,
+    max_width: float,
+    max_height: float,
+    fallback: str,
+    style: ParagraphStyle,
+    fill_color: Optional[colors.Color] = None,
+):
+    suffix = path.suffix.lower()
+    if suffix == ".svg":
+        drawing = _fit_svg_logo(path, max_width, max_height, fill_color)
+        if drawing is not None:
+            return drawing
+    if path.exists() and suffix in {".jpg", ".jpeg", ".png"}:
+        image = PlatypusImage(str(path))
+        image._restrictSize(max_width, max_height)
+        return image
+    return Paragraph(_xml_escape(fallback), style)
+
+
+def _draw_pdf_logo(
+    canvas,
+    path: Path,
+    x: float,
+    y: float,
+    max_width: float,
+    max_height: float,
+    fill_color: Optional[colors.Color] = None,
+) -> None:
+    suffix = path.suffix.lower()
+    if suffix == ".svg":
+        drawing = _fit_svg_logo(path, max_width, max_height, fill_color)
+        if drawing is not None:
+            renderPDF.draw(drawing, canvas, x, y)
+            return
+    if path.exists() and suffix in {".jpg", ".jpeg", ".png"}:
+        canvas.drawImage(
+            str(path),
+            x,
+            y,
+            width=max_width,
+            height=max_height,
+            preserveAspectRatio=True,
+            anchor="c",
+            mask="auto",
+        )
+
+
+def _pdf_styles(theme: Optional[dict[str, str]] = None) -> dict[str, ParagraphStyle]:
+    palette = _pdf_palette(theme)
+    styles = getSampleStyleSheet()
+    return {
+        "report_title": ParagraphStyle(
+            "PdfReportTitle",
+            parent=styles["Title"],
+            fontName="Helvetica-Bold",
+            fontSize=18,
+            leading=21,
+            textColor=colors.HexColor(palette["text"]),
+            spaceAfter=3,
+        ),
+        "section_title": ParagraphStyle(
+            "PdfSectionTitle",
+            parent=styles["Heading1"],
+            fontName="Helvetica-Bold",
+            fontSize=14,
+            leading=17,
+            textColor=colors.HexColor(palette["primary"]),
+            spaceAfter=3,
+        ),
+        "chart_title": ParagraphStyle(
+            "PdfChartTitle",
+            parent=styles["Heading2"],
+            fontName="Helvetica-Bold",
+            fontSize=10.5,
+            leading=13,
+            textColor=colors.HexColor(palette["primary"]),
+            spaceAfter=4,
+        ),
+        "meta": ParagraphStyle(
+            "PdfMeta",
+            parent=styles["Normal"],
+            fontSize=8,
+            leading=10,
+            textColor=colors.HexColor(palette["muted"]),
+        ),
+        "body": ParagraphStyle(
+            "PdfBody",
+            parent=styles["Normal"],
+            fontSize=8.2,
+            leading=11,
+            textColor=colors.HexColor(palette["text"]),
+        ),
+        "table_header": ParagraphStyle(
+            "PdfTableHeader",
+            parent=styles["Normal"],
+            alignment=TA_CENTER,
+            fontName="Helvetica-Bold",
+            fontSize=7,
+            leading=8.5,
+            textColor=colors.white,
+        ),
+        "table_cell": ParagraphStyle(
+            "PdfTableCell",
+            parent=styles["Normal"],
+            fontSize=6.5,
+            leading=8,
+            textColor=colors.HexColor(palette["text"]),
+        ),
+        "table_number": ParagraphStyle(
+            "PdfTableNumber",
+            parent=styles["Normal"],
+            alignment=TA_RIGHT,
+            fontSize=6.5,
+            leading=8,
+            textColor=colors.HexColor(palette["text"]),
+        ),
+        "table_date": ParagraphStyle(
+            "PdfTableDate",
+            parent=styles["Normal"],
+            alignment=TA_CENTER,
+            fontSize=6.5,
+            leading=8,
+            textColor=colors.HexColor(palette["text"]),
+        ),
+    }
+
+
+def _rounded_table(data, style_commands, **kwargs) -> Table:
+    try:
+        table = Table(data, cornerRadii=[PDF_LAYOUT["card_radius"]] * 4, **kwargs)
+    except TypeError:
+        table = Table(data, **kwargs)
+    table.setStyle(TableStyle(style_commands))
+    return table
+
 
 EXPORT_COLUMN_LABELS = {
     "id": "ID",
@@ -1218,7 +1565,9 @@ def _export_response(
     return Response(
         content=content,
         media_type=media_type,
-        headers={"Content-Disposition": f'attachment; filename="{filename}.{extension}"'},
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}.{extension}"'
+        },
     )
 
 
@@ -1250,7 +1599,10 @@ def _export_columns(rows: list[dict], columns: Optional[list[str]]) -> list[str]
 
 
 def _export_headers(columns: list[str]) -> list[str]:
-    return [EXPORT_COLUMN_LABELS.get(column, column.replace("_", " ").title()) for column in columns]
+    return [
+        EXPORT_COLUMN_LABELS.get(column, column.replace("_", " ").title())
+        for column in columns
+    ]
 
 
 def _export_cell_value(value):
@@ -1267,7 +1619,9 @@ def _serialize_csv(rows: list[dict], columns: Optional[list[str]]) -> str:
     writer = csv.DictWriter(output, fieldnames=export_columns)
     writer.writeheader()
     for row in rows:
-        writer.writerow({key: _stringify_export_value(value) for key, value in row.items()})
+        writer.writerow(
+            {key: _stringify_export_value(value) for key, value in row.items()}
+        )
     return output.getvalue()
 
 
@@ -1288,7 +1642,9 @@ def _serialize_yaml(rows: list[dict]) -> str:
     for row in rows:
         lines.append("-")
         for key, value in row.items():
-            text = _stringify_export_value(value).replace("\\", "\\\\").replace('"', '\\"')
+            text = (
+                _stringify_export_value(value).replace("\\", "\\\\").replace('"', '\\"')
+            )
             lines.append(f'  {key}: "{text}"')
     return "\n".join(lines) + "\n"
 
@@ -1310,7 +1666,9 @@ def _numeric_export_columns(rows: list[dict], columns: list[str]) -> list[str]:
     ]
 
 
-def _style_export_worksheet(worksheet, columns: list[str], theme: dict[str, str]) -> None:
+def _style_export_worksheet(
+    worksheet, columns: list[str], theme: dict[str, str]
+) -> None:
     header_fill = PatternFill("solid", fgColor=_hex(theme["primary"]))
     header_font = Font(color="FFFFFF", bold=True)
     thin = Side(style="thin", color=_hex(theme["grid"]))
@@ -1326,14 +1684,16 @@ def _style_export_worksheet(worksheet, columns: list[str], theme: dict[str, str]
         worksheet.auto_filter.ref = f"A1:{last_column}{max(1, worksheet.max_row)}"
 
     for row_index, row_cells in enumerate(worksheet.iter_rows(min_row=2), start=2):
-        fill = PatternFill("solid", fgColor=_hex(theme["soft"] if row_index % 2 == 0 else "#FFFFFF"))
+        fill = PatternFill(
+            "solid", fgColor=_hex(theme["soft"] if row_index % 2 == 0 else "#FFFFFF")
+        )
         for cell in row_cells:
             cell.fill = fill
             cell.border = Border(bottom=thin)
             cell.alignment = Alignment(vertical="top")
             if isinstance(cell.value, (int, float)):
                 cell.alignment = Alignment(horizontal="right", vertical="top")
-                cell.number_format = '#,##0.00'
+                cell.number_format = "#,##0.00"
 
     for column_cells in worksheet.columns:
         column_letter = column_cells[0].column_letter
@@ -1341,10 +1701,14 @@ def _style_export_worksheet(worksheet, columns: list[str], theme: dict[str, str]
         for cell in column_cells:
             value = "" if cell.value is None else _stringify_export_value(cell.value)
             max_length = max(max_length, len(value))
-        worksheet.column_dimensions[column_letter].width = min(max(max_length + 2, 12), 54)
+        worksheet.column_dimensions[column_letter].width = min(
+            max(max_length + 2, 12), 54
+        )
 
 
-def _add_cover_sheet(workbook: Workbook, title: str, row_count: int, theme: dict[str, str]) -> None:
+def _add_cover_sheet(
+    workbook: Workbook, title: str, row_count: int, theme: dict[str, str]
+) -> None:
     worksheet = workbook.create_sheet("Capa", 0)
     worksheet.sheet_view.showGridLines = False
     worksheet["B2"] = "Maestro"
@@ -1356,7 +1720,9 @@ def _add_cover_sheet(workbook: Workbook, title: str, row_count: int, theme: dict
     worksheet["B6"] = "Registros"
     worksheet["C6"] = row_count
     worksheet["B8"] = "Observacao"
-    worksheet["C8"] = "Use os filtros da aba Dados e confira o Resumo para uma leitura executiva."
+    worksheet["C8"] = (
+        "Use os filtros da aba Dados e confira o Resumo para uma leitura executiva."
+    )
     for cell in ("B5", "B6", "B8"):
         worksheet[cell].font = Font(bold=True, color=_hex(theme["muted"]))
     for column in ("B", "C", "D"):
@@ -1377,21 +1743,38 @@ def _add_summary_sheet(
     worksheet.append(["Registros", len(rows)])
     worksheet.append(["Colunas", len(columns)])
     for column in numeric_columns:
-        values = [_as_float(row.get(column)) for row in rows if row.get(column) is not None]
+        values = [
+            _as_float(row.get(column)) for row in rows if row.get(column) is not None
+        ]
         worksheet.append([f"Soma - {_export_headers([column])[0]}", sum(values)])
-        worksheet.append([f"Media - {_export_headers([column])[0]}", sum(values) / max(1, len(values))])
+        worksheet.append(
+            [
+                f"Media - {_export_headers([column])[0]}",
+                sum(values) / max(1, len(values)),
+            ]
+        )
     _style_export_worksheet(worksheet, ["metrica", "valor"], theme)
     worksheet.column_dimensions["A"].width = 34
     worksheet.column_dimensions["B"].width = 18
 
 
-def _add_numeric_chart(worksheet, rows: list[dict], columns: list[str], theme: dict[str, str]) -> None:
+def _add_numeric_chart(
+    worksheet, rows: list[dict], columns: list[str], theme: dict[str, str]
+) -> None:
     numeric_columns = _numeric_export_columns(rows, columns)
     if not numeric_columns or not rows:
         return
     numeric_index = columns.index(numeric_columns[0]) + 1
     label_index = 1
-    for candidate in ("ingrediente", "fornecedor", "nome", "categoria", "receita", "data_pedido", "data_hora"):
+    for candidate in (
+        "ingrediente",
+        "fornecedor",
+        "nome",
+        "categoria",
+        "receita",
+        "data_pedido",
+        "data_hora",
+    ):
         if candidate in columns:
             label_index = columns.index(candidate) + 1
             break
@@ -1412,7 +1795,9 @@ def _add_numeric_chart(worksheet, rows: list[dict], columns: list[str], theme: d
     worksheet.add_chart(chart, f"{get_column_letter(len(columns) + 2)}2")
 
 
-def _serialize_excel(rows: list[dict], title: str, columns: Optional[list[str]], theme: dict[str, str]) -> bytes:
+def _serialize_excel(
+    rows: list[dict], title: str, columns: Optional[list[str]], theme: dict[str, str]
+) -> bytes:
     export_columns = _export_columns(rows, columns)
     headers = _export_headers(export_columns)
     workbook = Workbook()
@@ -1425,7 +1810,9 @@ def _serialize_excel(rows: list[dict], title: str, columns: Optional[list[str]],
     worksheet = workbook.create_sheet(_safe_sheet_title(title))
     worksheet.append(headers)
     for row in rows:
-        worksheet.append([_export_cell_value(row.get(column)) for column in export_columns])
+        worksheet.append(
+            [_export_cell_value(row.get(column)) for column in export_columns]
+        )
     _style_export_worksheet(worksheet, export_columns, theme)
     _add_numeric_chart(worksheet, rows, export_columns, theme)
 
@@ -1441,39 +1828,52 @@ def _pdf_header_block(
     theme: Optional[dict[str, str]] = None,
 ) -> Table:
     theme = theme or _export_theme(None)
+    palette = _pdf_palette(theme)
     generated_at = _now_recife().strftime("%d/%m/%Y %H:%M")
     title_cell = [
-        Paragraph("Maestro", meta_style),
+        Paragraph(PDF_PROJECT_NAME, meta_style),
         Paragraph(_xml_escape(title), title_style),
-        Paragraph(f"Gerado em {generated_at}", meta_style),
+        Paragraph(f"{PDF_PROJECT_CONTEXT} | Gerado em {generated_at}", meta_style),
     ]
-    logo = Paragraph("Saltim", title_style)
-    if SALTIM_LOGO_PATH.exists() and svg2rlg is not None:
-        drawing = svg2rlg(str(SALTIM_LOGO_PATH))
-        if drawing is not None:
-            scale = min((18 * mm) / drawing.width, (18 * mm) / drawing.height)
-            drawing.width *= scale
-            drawing.height *= scale
-            drawing.scale(scale, scale)
-            logo = drawing
+    logo_style = ParagraphStyle(
+        "PdfFallbackLogo",
+        parent=meta_style,
+        fontName="Helvetica-Bold",
+        fontSize=10,
+        textColor=colors.HexColor(palette["primary"]),
+    )
+    project_logo = _pdf_logo_flowable(
+        PDF_PROJECT_LOGO_PATH,
+        14 * mm,
+        14 * mm,
+        PDF_PROJECT_NAME,
+        logo_style,
+        fill_color=colors.HexColor(palette["primary"]),
+    )
+    client_logo = _pdf_logo_flowable(
+        PDF_CLIENT_LOGO_PATH,
+        16 * mm,
+        16 * mm,
+        PDF_CLIENT_NAME,
+        logo_style,
+    )
 
-    table = Table(
-        [[logo, title_cell]],
-        colWidths=[23 * mm, 235 * mm],
+    return _rounded_table(
+        [[project_logo, title_cell, client_logo]],
+        [
+            ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor(palette["card"])),
+            ("BOX", (0, 0), (-1, -1), 0.7, colors.HexColor(palette["card_border"])),
+            ("LINEBELOW", (0, 0), (-1, -1), 1.3, colors.HexColor(palette["primary"])),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("ALIGN", (2, 0), (2, 0), "RIGHT"),
+            ("LEFTPADDING", (0, 0), (-1, -1), 9),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 9),
+            ("TOPPADDING", (0, 0), (-1, -1), 8),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
+        ],
+        colWidths=[21 * mm, 215 * mm, 22 * mm],
         hAlign="LEFT",
     )
-    table.setStyle(
-        TableStyle(
-            [
-                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-                ("LEFTPADDING", (0, 0), (-1, -1), 0),
-                ("RIGHTPADDING", (0, 0), (-1, -1), 0),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
-                ("LINEBELOW", (0, 0), (-1, -1), 1.4, colors.HexColor(theme["primary"])),
-            ]
-        )
-    )
-    return table
 
 
 def _pdf_table(
@@ -1482,11 +1882,16 @@ def _pdf_table(
     header_style: ParagraphStyle,
     cell_style: ParagraphStyle,
     number_style: ParagraphStyle,
+    date_style: ParagraphStyle,
     available_width: float,
     theme: Optional[dict[str, str]] = None,
 ) -> Table:
     theme = theme or _export_theme(None)
-    headers = [Paragraph(_xml_escape(header), header_style) for header in _export_headers(columns)]
+    palette = _pdf_palette(theme)
+    headers = [
+        Paragraph(_xml_escape(header), header_style)
+        for header in _export_headers(columns)
+    ]
     data = [headers]
     numeric_columns = {
         "quantidade",
@@ -1494,6 +1899,26 @@ def _pdf_table(
         "preco_medio",
         "itens_fornecidos",
         "prazo_medio_entrega_dias",
+        "estoque_atual",
+        "uso_dia",
+        "cobertura_dias",
+        "sugestao_compra",
+        "posicao",
+        "unidades_vendidas",
+        "faturamento",
+        "valor",
+        "estoque",
+        "vendas",
+    } | {
+        column
+        for column in columns
+        if any(isinstance(row.get(column), (int, float)) for row in rows)
+    }
+    date_columns = {
+        column
+        for column in columns
+        if "data" in column
+        or any(isinstance(row.get(column), (date, datetime)) for row in rows)
     }
 
     if rows:
@@ -1502,53 +1927,96 @@ def _pdf_table(
                 [
                     Paragraph(
                         _xml_escape(_stringify_export_value(row.get(column))),
-                        number_style if column in numeric_columns else cell_style,
+                        (
+                            number_style
+                            if column in numeric_columns
+                            else date_style if column in date_columns else cell_style
+                        ),
                     )
                     for column in columns
                 ]
             )
     else:
-        data.append([Paragraph("Nenhum registro encontrado.", cell_style)] + [""] * (len(columns) - 1))
+        data.append(
+            [Paragraph("Nenhum registro encontrado.", cell_style)]
+            + [""] * (len(columns) - 1)
+        )
 
-    table = Table(
+    highlight_rows = []
+    for row_index, row in enumerate(rows, start=1):
+        values = " ".join(
+            _stringify_export_value(value).lower() for value in row.values()
+        )
+        if any(token in values for token in ("total", "media", "média")):
+            highlight_rows.append(row_index)
+
+    style_commands = [
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor(palette["primary"])),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("LINEBELOW", (0, 0), (-1, 0), 0.9, colors.HexColor(palette["accent"])),
+        (
+            "ROWBACKGROUNDS",
+            (0, 1),
+            (-1, -1),
+            [colors.white, colors.HexColor(palette["table_alt"])],
+        ),
+        ("BOX", (0, 0), (-1, -1), 0.55, colors.HexColor(palette["card_border"])),
+        ("INNERGRID", (0, 0), (-1, -1), 0.25, colors.HexColor(palette["grid"])),
+        ("LEFTPADDING", (0, 0), (-1, -1), 6),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+        ("TOPPADDING", (0, 0), (-1, -1), 5),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+    ]
+    for row_index in highlight_rows:
+        style_commands.extend(
+            [
+                (
+                    "BACKGROUND",
+                    (0, row_index),
+                    (-1, row_index),
+                    colors.HexColor(palette["accent_soft"]),
+                ),
+                (
+                    "LINEABOVE",
+                    (0, row_index),
+                    (-1, row_index),
+                    0.7,
+                    colors.HexColor(palette["accent"]),
+                ),
+            ]
+        )
+    if not rows and columns:
+        style_commands.append(("SPAN", (0, 1), (-1, 1)))
+
+    return _rounded_table(
         data,
+        style_commands,
         colWidths=_pdf_column_widths(rows, columns, available_width),
         repeatRows=1,
         splitByRow=1,
         hAlign="LEFT",
     )
-    style_commands = [
-        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor(theme["primary"])),
-        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-        ("VALIGN", (0, 0), (-1, -1), "TOP"),
-        ("GRID", (0, 0), (-1, -1), 0.35, colors.HexColor(theme["grid"])),
-        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor(theme["soft"])]),
-        ("LEFTPADDING", (0, 0), (-1, -1), 4),
-        ("RIGHTPADDING", (0, 0), (-1, -1), 4),
-        ("TOPPADDING", (0, 0), (-1, -1), 4),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
-    ]
-    if not rows and columns:
-        style_commands.append(("SPAN", (0, 1), (-1, 1)))
-    table.setStyle(TableStyle(style_commands))
-    return table
 
 
-def _pdf_column_widths(rows: list[dict], columns: list[str], available_width: float) -> list[float]:
+def _pdf_column_widths(
+    rows: list[dict], columns: list[str], available_width: float
+) -> list[float]:
     if not columns:
         return []
     weights: list[float] = []
     for column, header in zip(columns, _export_headers(columns)):
         sample_lengths = [
-            len(_stringify_export_value(row.get(column)))
-            for row in rows[:80]
+            len(_stringify_export_value(row.get(column))) for row in rows[:80]
         ]
         content_length = max(sample_lengths, default=0)
         weights.append(max(len(header), min(content_length, 26), 5))
     total_weight = sum(weights) or 1
     min_width = 20 * mm
-    widths = [max(min_width, available_width * weight / total_weight) for weight in weights]
+    widths = [
+        max(min_width, available_width * weight / total_weight) for weight in weights
+    ]
     width_total = sum(widths)
     if width_total > available_width:
         scale = available_width / width_total
@@ -1556,92 +2024,138 @@ def _pdf_column_widths(rows: list[dict], columns: list[str], available_width: fl
     return widths
 
 
-def _draw_pdf_footer(canvas, document):
+def _draw_pdf_page_frame(canvas, document):
     theme = getattr(document, "export_theme", _export_theme(None))
+    palette = _pdf_palette(theme)
+    page_width, page_height = document.pagesize
+    generated_at = getattr(
+        document, "generated_at_text", _now_recife().strftime("%d/%m/%Y %H:%M")
+    )
+    report_title = getattr(document, "report_title", "Relatorio")
     canvas.saveState()
-    canvas.setStrokeColor(colors.HexColor(theme["primary"]))
-    canvas.setLineWidth(0.6)
-    canvas.line(document.leftMargin, 10 * mm, landscape(A4)[0] - document.rightMargin, 10 * mm)
+
+    header_top = page_height - 7 * mm
+    header_bottom = page_height - 25 * mm
+    canvas.setFillColor(colors.HexColor(palette["card"]))
+    canvas.rect(
+        0, header_bottom, page_width, header_top - header_bottom, stroke=0, fill=1
+    )
+    canvas.setFillColor(colors.HexColor(palette["primary"]))
+    canvas.rect(0, header_bottom - 1.5 * mm, page_width, 1.5 * mm, stroke=0, fill=1)
+    canvas.setStrokeColor(colors.HexColor(palette["grid"]))
+    canvas.setLineWidth(0.35)
+    canvas.line(
+        document.leftMargin,
+        header_bottom,
+        page_width - document.rightMargin,
+        header_bottom,
+    )
+
+    _draw_pdf_logo(
+        canvas,
+        PDF_PROJECT_LOGO_PATH,
+        document.leftMargin,
+        page_height - 21 * mm,
+        13 * mm,
+        13 * mm,
+        fill_color=colors.HexColor(palette["primary"]),
+    )
+    _draw_pdf_logo(
+        canvas,
+        PDF_CLIENT_LOGO_PATH,
+        page_width - document.rightMargin - 17 * mm,
+        page_height - 22 * mm,
+        16 * mm,
+        16 * mm,
+    )
+
+    text_x = document.leftMargin + 19 * mm
+    canvas.setFont("Helvetica-Bold", 8.5)
+    canvas.setFillColor(colors.HexColor(palette["primary"]))
+    canvas.drawString(text_x, page_height - 13 * mm, PDF_PROJECT_NAME)
+    canvas.setFont("Helvetica-Bold", 7)
+    canvas.setFillColor(colors.HexColor(palette["accent"]))
+    canvas.drawString(text_x, page_height - 17 * mm, PDF_PROJECT_CONTEXT)
     canvas.setFont("Helvetica", 7)
-    canvas.setFillColor(colors.HexColor(theme["muted"]))
-    canvas.drawString(document.leftMargin, 6 * mm, "Maestro")
+    canvas.setFillColor(colors.HexColor(palette["muted"]))
+    canvas.drawString(text_x, page_height - 21 * mm, str(report_title)[:95])
+
+    footer_y = 11 * mm
+    canvas.setStrokeColor(colors.HexColor(palette["grid"]))
+    canvas.setLineWidth(0.45)
+    canvas.line(
+        document.leftMargin, footer_y, page_width - document.rightMargin, footer_y
+    )
+    canvas.setFillColor(colors.HexColor(palette["accent"]))
+    canvas.roundRect(
+        document.leftMargin,
+        footer_y - 4.8 * mm,
+        4 * mm,
+        4 * mm,
+        1.4 * mm,
+        stroke=0,
+        fill=1,
+    )
+    canvas.setFont("Helvetica-Bold", 7)
+    canvas.setFillColor(colors.HexColor(palette["primary"]))
+    canvas.drawString(document.leftMargin + 6 * mm, footer_y - 3.4 * mm, PDF_SIGNATURE)
+    canvas.setFont("Helvetica", 7)
+    canvas.setFillColor(colors.HexColor(palette["footer_text"]))
+    canvas.drawString(
+        document.leftMargin + 36 * mm,
+        footer_y - 3.4 * mm,
+        f"{PDF_GENERATOR_NOTE} | Gerado em {generated_at}",
+    )
     canvas.drawRightString(
-        landscape(A4)[0] - document.rightMargin,
-        6 * mm,
+        page_width - document.rightMargin,
+        footer_y - 3.4 * mm,
         f"Pagina {canvas.getPageNumber()}",
     )
     canvas.restoreState()
 
 
-def _serialize_pdf(rows: list[dict], title: str, columns: Optional[list[str]], theme: dict[str, str]) -> bytes:
+def _serialize_pdf(
+    rows: list[dict], title: str, columns: Optional[list[str]], theme: dict[str, str]
+) -> bytes:
     export_columns = _export_columns(rows, columns)
     output = io.BytesIO()
     document = SimpleDocTemplate(
         output,
-        pagesize=landscape(A4),
-        leftMargin=12 * mm,
-        rightMargin=12 * mm,
-        topMargin=14 * mm,
-        bottomMargin=14 * mm,
+        pagesize=PDF_PAGE_SIZE,
+        leftMargin=PDF_LAYOUT["page_margin_x"],
+        rightMargin=PDF_LAYOUT["page_margin_x"],
+        topMargin=PDF_LAYOUT["page_margin_top"],
+        bottomMargin=PDF_LAYOUT["page_margin_bottom"],
         title=title,
     )
     document.export_theme = theme
-    styles = getSampleStyleSheet()
-    title_style = ParagraphStyle(
-        "SaltimTitle",
-        parent=styles["Title"],
-        fontName="Helvetica-Bold",
-        fontSize=18,
-        leading=22,
-        textColor=colors.HexColor(theme["text"]),
-        spaceAfter=4,
-    )
-    meta_style = ParagraphStyle(
-        "SaltimMeta",
-        parent=styles["Normal"],
-        fontSize=8,
-        leading=10,
-        textColor=colors.HexColor(theme["muted"]),
-    )
-    header_style = ParagraphStyle(
-        "SaltimTableHeader",
-        parent=styles["Normal"],
-        alignment=1,
-        fontName="Helvetica-Bold",
-        fontSize=7,
-        leading=8,
-        textColor=colors.white,
-    )
-    cell_style = ParagraphStyle(
-        "SaltimTableCell",
-        parent=styles["Normal"],
-        fontSize=6.4,
-        leading=7.4,
-        textColor=colors.HexColor(theme["text"]),
-    )
-    number_style = ParagraphStyle(
-        "SaltimTableNumber",
-        parent=cell_style,
-        alignment=TA_RIGHT,
-    )
+    document.report_title = title
+    document.generated_at_text = _now_recife().strftime("%d/%m/%Y %H:%M")
+    styles = _pdf_styles(theme)
 
-    story = [_pdf_header_block(title, title_style, meta_style, theme), Spacer(1, 7 * mm)]
+    story = [
+        _pdf_header_block(title, styles["report_title"], styles["meta"], theme),
+        Spacer(1, PDF_LAYOUT["section_gap"]),
+    ]
     if export_columns:
         story.append(
             _pdf_table(
                 rows,
                 export_columns,
-                header_style,
-                cell_style,
-                number_style,
+                styles["table_header"],
+                styles["table_cell"],
+                styles["table_number"],
+                styles["table_date"],
                 document.width,
                 theme,
             )
         )
     else:
-        story.append(Paragraph("Nenhum registro encontrado.", cell_style))
+        story.append(Paragraph("Nenhum registro encontrado.", styles["body"]))
 
-    document.build(story, onFirstPage=_draw_pdf_footer, onLaterPages=_draw_pdf_footer)
+    document.build(
+        story, onFirstPage=_draw_pdf_page_frame, onLaterPages=_draw_pdf_page_frame
+    )
     return output.getvalue()
 
 
@@ -1675,11 +2189,15 @@ def _dashboard_history_rows(
     monthly: dict[str, dict] = {}
     for item in stock:
         key = item.date.strftime("%Y-%m")
-        month = monthly.setdefault(key, {"data": key, "estoque_values": [], "vendas": 0.0})
+        month = monthly.setdefault(
+            key, {"data": key, "estoque_values": [], "vendas": 0.0}
+        )
         month["estoque_values"].append(_as_float(item.value))
     for item in sales:
         key = item.date.strftime("%Y-%m")
-        month = monthly.setdefault(key, {"data": key, "estoque_values": [], "vendas": 0.0})
+        month = monthly.setdefault(
+            key, {"data": key, "estoque_values": [], "vendas": 0.0}
+        )
         month["vendas"] += _as_float(item.value)
 
     return [
@@ -1830,9 +2348,15 @@ def _dashboard_export_tables(
         limit=10000,
         db=db,
     )
-    output_category_groups = _output_category_groups(db, desc, limit=10000, **common_kwargs)
-    stock_product_groups = _stock_product_groups(db, desc, limit=10000, category_ids=category_ids)
-    output_product_groups = _output_product_groups(db, desc, limit=10000, **common_kwargs)
+    output_category_groups = _output_category_groups(
+        db, desc, limit=10000, **common_kwargs
+    )
+    stock_product_groups = _stock_product_groups(
+        db, desc, limit=10000, category_ids=category_ids
+    )
+    output_product_groups = _output_product_groups(
+        db, desc, limit=10000, **common_kwargs
+    )
 
     tables = [
         {
@@ -1856,7 +2380,9 @@ def _dashboard_export_tables(
         },
         {
             "title": "Ranking de estoque",
-            "rows": _dashboard_rank_rows(stock_product_groups, "Estoque por ingrediente"),
+            "rows": _dashboard_rank_rows(
+                stock_product_groups, "Estoque por ingrediente"
+            ),
             "columns": ["posicao", "nome", "categoria", "unidade", "valor"],
         },
         {
@@ -1885,29 +2411,109 @@ def _sample_chart_rows(rows: list[dict], limit: int) -> list[dict]:
     return [rows[round(index * step)] for index in range(limit)]
 
 
-def _line_chart_drawing(rows: list[dict], width: float, height: float, theme: Optional[dict[str, str]] = None) -> Drawing:
+def _line_chart_drawing(
+    rows: list[dict],
+    width: float,
+    height: float,
+    theme: Optional[dict[str, str]] = None,
+) -> Drawing:
     theme = theme or _export_theme(None)
+    palette = _pdf_palette(theme)
     drawing = Drawing(width, height)
-    left = 42
-    right = 42
-    bottom = 30
-    top = 28
+    left = 44
+    right = 44
+    bottom = 31
+    top = 25
     chart_width = width - left - right
     chart_height = height - bottom - top
-    drawing.add(DrawingLine(left, bottom, left, bottom + chart_height, strokeColor=colors.HexColor(theme["grid"])))
-    drawing.add(DrawingLine(left, bottom, left + chart_width, bottom, strokeColor=colors.HexColor(theme["grid"])))
-    drawing.add(DrawingLine(left + chart_width, bottom, left + chart_width, bottom + chart_height, strokeColor=colors.HexColor(theme["grid"])))
     sampled = _sample_chart_rows(rows, 18)
     if not sampled:
-        drawing.add(String(width / 2 - 45, height / 2, "Sem dados para exibir", fontSize=9, fillColor=colors.HexColor(theme["muted"])))
+        drawing.add(
+            String(
+                width / 2 - 45,
+                height / 2,
+                "Sem dados para exibir",
+                fontSize=9,
+                fillColor=colors.HexColor(palette["muted"]),
+            )
+        )
         return drawing
 
     series = [
-        ("estoque", "Estoque medio", colors.HexColor(theme["accent"]), "left"),
-        ("vendas", "Vendas totais", colors.HexColor(theme["primary"]), "right"),
+        ("estoque", "Estoque medio", colors.HexColor(palette["accent"]), "left"),
+        ("vendas", "Vendas totais", colors.HexColor(palette["primary"]), "right"),
     ]
+    drawing.add(
+        DrawingLine(
+            left,
+            bottom,
+            left,
+            bottom + chart_height,
+            strokeColor=colors.HexColor(palette["grid"]),
+            strokeWidth=0.65,
+        )
+    )
+    drawing.add(
+        DrawingLine(
+            left,
+            bottom,
+            left + chart_width,
+            bottom,
+            strokeColor=colors.HexColor(palette["grid"]),
+            strokeWidth=0.65,
+        )
+    )
+    drawing.add(
+        DrawingLine(
+            left + chart_width,
+            bottom,
+            left + chart_width,
+            bottom + chart_height,
+            strokeColor=colors.HexColor(palette["grid"]),
+            strokeWidth=0.65,
+        )
+    )
+
+    max_values = {
+        key: max((_as_float(row.get(key)) for row in sampled), default=0) or 1
+        for key, _label, _color, _axis in series
+    }
+    for tick in range(5):
+        y = bottom + chart_height * tick / 4
+        drawing.add(
+            DrawingLine(
+                left,
+                y,
+                left + chart_width,
+                y,
+                strokeColor=colors.HexColor(palette["grid"]),
+                strokeWidth=0.22,
+            )
+        )
+        left_label = _stringify_export_value(max_values["estoque"] * tick / 4)
+        right_label = _stringify_export_value(max_values["vendas"] * tick / 4)
+        drawing.add(
+            String(
+                left - 35,
+                y - 2,
+                left_label,
+                fontSize=6.2,
+                fillColor=colors.HexColor(palette["muted"]),
+            )
+        )
+        drawing.add(
+            String(
+                left + chart_width + 5,
+                y - 2,
+                right_label,
+                fontSize=6.2,
+                fillColor=colors.HexColor(palette["muted"]),
+            )
+        )
+
     totals = {
-        "estoque": sum(_as_float(row.get("estoque")) for row in sampled) / max(1, len(sampled)),
+        "estoque": sum(_as_float(row.get("estoque")) for row in sampled)
+        / max(1, len(sampled)),
         "vendas": sum(_as_float(row.get("vendas")) for row in sampled),
     }
     legend_x = left + chart_width - 190
@@ -1924,63 +2530,194 @@ def _line_chart_drawing(rows: list[dict], width: float, height: float, theme: Op
             )
         )
 
-    for key, _label, color, axis in series:
+    for key, _label, color, _axis in series:
         values = [_as_float(row.get(key)) for row in sampled]
-        max_value = max(values) or 1
+        max_value = max_values[key]
         points = []
         for index, value in enumerate(values):
             x = left + (chart_width * index / max(1, len(sampled) - 1))
             y = bottom + (value / max_value) * chart_height
             points.append((x, y))
-        for tick in range(5):
-            tick_value = max_value * tick / 4
-            y = bottom + chart_height * tick / 4
-            label = _stringify_export_value(tick_value)
-            drawing.add(DrawingLine(left, y, left + chart_width, y, strokeColor=colors.HexColor(theme["grid"]), strokeWidth=0.35))
-            if axis == "left":
-                drawing.add(String(left - 34, y - 2, label, fontSize=6.5, fillColor=color))
-            else:
-                drawing.add(String(left + chart_width + 5, y - 2, label, fontSize=6.5, fillColor=color))
         for start, end in zip(points, points[1:]):
-            drawing.add(DrawingLine(start[0], start[1], end[0], end[1], strokeColor=color, strokeWidth=2))
+            drawing.add(
+                DrawingLine(
+                    start[0],
+                    start[1],
+                    end[0],
+                    end[1],
+                    strokeColor=color,
+                    strokeWidth=2.2,
+                )
+            )
         for x, y in points:
-            drawing.add(Rect(x - 1.5, y - 1.5, 3, 3, fillColor=color, strokeColor=color))
+            drawing.add(
+                Rect(x - 1.5, y - 1.5, 3, 3, fillColor=color, strokeColor=color)
+            )
 
     for index, row in enumerate(sampled):
         label = str(row.get("periodo") or row.get("data", ""))
         x = left + (chart_width * index / max(1, len(sampled) - 1))
-        drawing.add(String(x - 10, bottom - 14, label, fontSize=6.5, fillColor=colors.HexColor(theme["muted"])))
+        drawing.add(
+            String(
+                x - 10,
+                bottom - 14,
+                label,
+                fontSize=6.3,
+                fillColor=colors.HexColor(palette["muted"]),
+            )
+        )
     return drawing
 
 
-def _bar_chart_drawing(rows: list[dict], width: float, height: float, value_key: str = "valor", theme: Optional[dict[str, str]] = None) -> Drawing:
+def _bar_chart_drawing(
+    rows: list[dict],
+    width: float,
+    height: float,
+    value_key: str = "valor",
+    theme: Optional[dict[str, str]] = None,
+) -> Drawing:
     theme = theme or _export_theme(None)
+    palette = _pdf_palette(theme)
     drawing = Drawing(width, height)
-    left = 32
-    bottom = 28
-    chart_width = width - 52
-    chart_height = height - 48
+    left = 34
+    bottom = 29
+    chart_width = width - 56
+    chart_height = height - 50
     items = rows[:10]
     if not items:
-        drawing.add(String(width / 2 - 45, height / 2, "Sem dados para exibir", fontSize=9, fillColor=colors.HexColor(theme["muted"])))
+        drawing.add(
+            String(
+                width / 2 - 45,
+                height / 2,
+                "Sem dados para exibir",
+                fontSize=9,
+                fillColor=colors.HexColor(palette["muted"]),
+            )
+        )
         return drawing
     max_value = max(_as_float(item.get(value_key)) for item in items) or 1
     gap = 4
     bar_width = max(8, (chart_width - gap * (len(items) - 1)) / len(items))
-    drawing.add(DrawingLine(left, bottom, left, bottom + chart_height, strokeColor=colors.HexColor(theme["grid"])))
-    drawing.add(DrawingLine(left, bottom, left + chart_width, bottom, strokeColor=colors.HexColor(theme["grid"])))
+    drawing.add(
+        DrawingLine(
+            left,
+            bottom,
+            left,
+            bottom + chart_height,
+            strokeColor=colors.HexColor(palette["grid"]),
+            strokeWidth=0.65,
+        )
+    )
+    drawing.add(
+        DrawingLine(
+            left,
+            bottom,
+            left + chart_width,
+            bottom,
+            strokeColor=colors.HexColor(palette["grid"]),
+            strokeWidth=0.65,
+        )
+    )
+    for tick in range(1, 5):
+        y = bottom + chart_height * tick / 4
+        drawing.add(
+            DrawingLine(
+                left,
+                y,
+                left + chart_width,
+                y,
+                strokeColor=colors.HexColor(palette["grid"]),
+                strokeWidth=0.22,
+            )
+        )
     for index, item in enumerate(items):
         value = _as_float(item.get(value_key))
         bar_height = (value / max_value) * chart_height
         x = left + index * (bar_width + gap)
-        drawing.add(Rect(x, bottom, bar_width, bar_height, fillColor=colors.HexColor(theme["primary"]), strokeColor=colors.HexColor(theme["primary"])))
-        label = str(item.get("periodo") or item.get("nome") or item.get("receita") or "")[:12]
-        drawing.add(String(x, bottom - 13, label, fontSize=6.3, fillColor=colors.HexColor(theme["muted"])))
+        bar_color = colors.HexColor(
+            palette["primary"] if index % 2 == 0 else palette["accent"]
+        )
+        drawing.add(
+            Rect(
+                x,
+                bottom,
+                bar_width,
+                bar_height,
+                fillColor=bar_color,
+                strokeColor=bar_color,
+            )
+        )
+        drawing.add(
+            String(
+                x,
+                bottom + bar_height + 4,
+                _stringify_export_value(value),
+                fontSize=6.1,
+                fillColor=colors.HexColor(palette["muted"]),
+            )
+        )
+        label = str(
+            item.get("periodo") or item.get("nome") or item.get("receita") or ""
+        )[:12]
+        drawing.add(
+            String(
+                x,
+                bottom - 13,
+                label,
+                fontSize=6.2,
+                fillColor=colors.HexColor(palette["muted"]),
+            )
+        )
     return drawing
 
 
 def _dashboard_pdf_paragraph(text: str, style: ParagraphStyle) -> Paragraph:
     return Paragraph(_xml_escape(text), style)
+
+
+def _pdf_card(
+    content: list,
+    available_width: float,
+    theme: Optional[dict[str, str]] = None,
+    padding: Optional[float] = None,
+) -> Table:
+    palette = _pdf_palette(theme)
+    inner_padding = PDF_LAYOUT["card_padding"] if padding is None else padding
+    return _rounded_table(
+        [[content]],
+        [
+            ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor(palette["card"])),
+            ("BOX", (0, 0), (-1, -1), 0.65, colors.HexColor(palette["card_border"])),
+            ("LINEBEFORE", (0, 0), (0, -1), 2.3, colors.HexColor(palette["accent"])),
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ("LEFTPADDING", (0, 0), (-1, -1), inner_padding),
+            ("RIGHTPADDING", (0, 0), (-1, -1), inner_padding),
+            ("TOPPADDING", (0, 0), (-1, -1), inner_padding),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), inner_padding),
+        ],
+        colWidths=[available_width],
+        hAlign="LEFT",
+    )
+
+
+def _pdf_chart_card(
+    title: str,
+    description: str,
+    drawing: Drawing,
+    available_width: float,
+    styles: dict[str, ParagraphStyle],
+    theme: Optional[dict[str, str]] = None,
+) -> Table:
+    return _pdf_card(
+        [
+            Paragraph(_xml_escape(title), styles["chart_title"]),
+            drawing,
+            Spacer(1, 3 * mm),
+            Paragraph(_xml_escape(description), styles["body"]),
+        ],
+        available_width,
+        theme,
+    )
 
 
 def _add_dashboard_chart_sheet(
@@ -2013,7 +2750,9 @@ def _add_dashboard_chart_sheet(
         data = Reference(worksheet, min_col=col_index, min_row=1, max_row=max_row)
         chart.add_data(data, titles_from_data=True)
     label_index = columns.index(label_column) + 1
-    chart.set_categories(Reference(worksheet, min_col=label_index, min_row=2, max_row=max_row))
+    chart.set_categories(
+        Reference(worksheet, min_col=label_index, min_row=2, max_row=max_row)
+    )
     if chart.series:
         chart.series[0].graphicalProperties.solidFill = _hex(theme["primary"])
         chart.series[0].graphicalProperties.line.solidFill = _hex(theme["primary"])
@@ -2023,19 +2762,28 @@ def _add_dashboard_chart_sheet(
     worksheet.add_chart(chart, f"{get_column_letter(len(columns) + 2)}2")
 
 
-def _serialize_dashboard_excel(tables: list[dict], chart_data: dict, theme: dict[str, str]) -> bytes:
+def _serialize_dashboard_excel(
+    tables: list[dict], chart_data: dict, theme: dict[str, str]
+) -> bytes:
     workbook = Workbook()
     workbook.remove(workbook.active)
     workbook.properties.creator = "Maestro"
     workbook.properties.title = "Dashboard Maestro"
-    _add_cover_sheet(workbook, "Dashboard Maestro", sum(len(table["rows"]) for table in tables), theme)
+    _add_cover_sheet(
+        workbook,
+        "Dashboard Maestro",
+        sum(len(table["rows"]) for table in tables),
+        theme,
+    )
 
     for table in tables:
         worksheet = workbook.create_sheet(_safe_sheet_title(table["title"]))
         columns = table["columns"]
         worksheet.append(_export_headers(columns))
         for row in table["rows"]:
-            worksheet.append([_export_cell_value(row.get(column)) for column in columns])
+            worksheet.append(
+                [_export_cell_value(row.get(column)) for column in columns]
+            )
         _style_export_worksheet(worksheet, columns, theme)
         _add_numeric_chart(worksheet, table["rows"], columns, theme)
 
@@ -2075,112 +2823,105 @@ def _serialize_dashboard_excel(tables: list[dict], chart_data: dict, theme: dict
     return output.getvalue()
 
 
-def _serialize_dashboard_pdf(tables: list[dict], chart_data: dict, theme: dict[str, str]) -> bytes:
+def _serialize_dashboard_pdf(
+    tables: list[dict], chart_data: dict, theme: dict[str, str]
+) -> bytes:
     output = io.BytesIO()
     document = SimpleDocTemplate(
         output,
-        pagesize=landscape(A4),
-        leftMargin=12 * mm,
-        rightMargin=12 * mm,
-        topMargin=14 * mm,
-        bottomMargin=14 * mm,
+        pagesize=PDF_PAGE_SIZE,
+        leftMargin=PDF_LAYOUT["page_margin_x"],
+        rightMargin=PDF_LAYOUT["page_margin_x"],
+        topMargin=PDF_LAYOUT["page_margin_top"],
+        bottomMargin=PDF_LAYOUT["page_margin_bottom"],
         title="Dashboard Maestro",
     )
     document.export_theme = theme
-    styles = getSampleStyleSheet()
-    title_style = ParagraphStyle(
-        "DashboardTitle",
-        parent=styles["Title"],
-        fontName="Helvetica-Bold",
-        fontSize=18,
-        leading=22,
-        textColor=colors.HexColor(theme["text"]),
-        spaceAfter=4,
-    )
-    meta_style = ParagraphStyle(
-        "DashboardMeta",
-        parent=styles["Normal"],
-        fontSize=8,
-        leading=10,
-        textColor=colors.HexColor(theme["muted"]),
-    )
-    body_style = ParagraphStyle(
-        "DashboardBody",
-        parent=styles["Normal"],
-        fontSize=8.2,
-        leading=11,
-        textColor=colors.HexColor(theme["text"]),
-    )
-    header_style = ParagraphStyle(
-        "DashboardTableHeader",
-        parent=styles["Normal"],
-        alignment=1,
-        fontName="Helvetica-Bold",
-        fontSize=7,
-        leading=8,
-        textColor=colors.white,
-    )
-    cell_style = ParagraphStyle(
-        "DashboardTableCell",
-        parent=styles["Normal"],
-        fontSize=6.4,
-        leading=7.4,
-        textColor=colors.HexColor(SALTIM_DARK),
-    )
-    number_style = ParagraphStyle("DashboardTableNumber", parent=cell_style, alignment=TA_RIGHT)
+    document.report_title = "Dashboard Maestro"
+    document.generated_at_text = _now_recife().strftime("%d/%m/%Y %H:%M")
+    styles = _pdf_styles(theme)
 
     story = [
-        _pdf_header_block("Dashboard", title_style, meta_style, theme),
-        Spacer(1, 7 * mm),
-        _line_chart_drawing(chart_data["history"], document.width, 116 * mm, theme),
-        Spacer(1, 5 * mm),
-        _dashboard_pdf_paragraph(
+        _pdf_header_block("Dashboard", styles["report_title"], styles["meta"], theme),
+        Spacer(1, PDF_LAYOUT["section_gap"]),
+        _pdf_chart_card(
+            "Estoque medio x vendas totais",
             "O grafico agrupa o periodo filtrado por mes e compara estoque medio mensal com vendas totais mensais. "
-            "A linha azul usa o eixo da esquerda para estoque, enquanto a linha laranja usa o eixo da direita para vendas. "
+            "A linha secundaria usa o eixo da esquerda para estoque, enquanto a linha principal usa o eixo da direita para vendas. "
             "A leitura conjunta ajuda a identificar meses em que as saidas cresceram mais rapido do que a reposicao.",
-            body_style,
+            _line_chart_drawing(
+                chart_data["history"], document.width - 18 * mm, 105 * mm, theme
+            ),
+            document.width,
+            styles,
+            theme,
         ),
         PageBreak(),
-        _pdf_header_block("Graficos secundarios", title_style, meta_style, theme),
-        Spacer(1, 7 * mm),
+        _pdf_header_block(
+            "Graficos secundarios", styles["report_title"], styles["meta"], theme
+        ),
+        Spacer(1, PDF_LAYOUT["section_gap"]),
         Table(
             [
                 [
-                    _dashboard_pdf_paragraph("Faturamento", body_style),
-                    _dashboard_pdf_paragraph("Categorias mais vendidas", body_style),
-                ],
-                [
-                    _bar_chart_drawing(chart_data["revenue"], document.width / 2 - 8 * mm, 82 * mm, theme=theme),
-                    _bar_chart_drawing(chart_data["categories"], document.width / 2 - 8 * mm, 82 * mm, theme=theme),
-                ],
-                [
-                    _dashboard_pdf_paragraph(
+                    _pdf_chart_card(
+                        "Faturamento",
                         "Mostra a receita estimada por periodo, facilitando a comparacao entre meses.",
-                        body_style,
+                        _bar_chart_drawing(
+                            chart_data["revenue"],
+                            document.width / 2 - 19 * mm,
+                            78 * mm,
+                            theme=theme,
+                        ),
+                        document.width / 2 - 5 * mm,
+                        styles,
+                        theme,
                     ),
-                    _dashboard_pdf_paragraph(
+                    _pdf_chart_card(
+                        "Categorias mais vendidas",
                         "Apresenta as categorias com maior uso no periodo, indicando concentracao de demanda.",
-                        body_style,
+                        _bar_chart_drawing(
+                            chart_data["categories"],
+                            document.width / 2 - 19 * mm,
+                            78 * mm,
+                            theme=theme,
+                        ),
+                        document.width / 2 - 5 * mm,
+                        styles,
+                        theme,
                     ),
                 ],
             ],
-            colWidths=[document.width / 2 - 4 * mm, document.width / 2 - 4 * mm],
+            colWidths=[document.width / 2 - 2.5 * mm, document.width / 2 - 2.5 * mm],
+            hAlign="LEFT",
+            style=[
+                ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+                ("TOPPADDING", (0, 0), (-1, -1), 0),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ],
         ),
     ]
 
     for index, table in enumerate(tables):
         story.append(PageBreak())
-        story.append(_pdf_header_block(table["title"], title_style, meta_style, theme))
-        story.append(Spacer(1, 7 * mm))
+        story.append(
+            _pdf_header_block(
+                table["title"], styles["report_title"], styles["meta"], theme
+            )
+        )
+        story.append(Spacer(1, PDF_LAYOUT["section_gap"]))
         rows = table["rows"]
         visible_rows = rows[:DASHBOARD_PDF_TABLE_ROWS]
         story.append(
             _pdf_table(
                 visible_rows,
                 table["columns"],
-                header_style,
-                cell_style,
-                number_style,
+                styles["table_header"],
+                styles["table_cell"],
+                styles["table_number"],
+                styles["table_date"],
                 document.width,
                 theme,
             )
@@ -2190,11 +2931,13 @@ def _serialize_dashboard_pdf(tables: list[dict], chart_data: dict, theme: dict[s
             story.append(
                 _dashboard_pdf_paragraph(
                     "Visualizacao limitada para apresentacao em PDF. Os dados completos estao disponiveis na exportacao em Excel.",
-                    body_style,
+                    styles["body"],
                 )
             )
 
-    document.build(story, onFirstPage=_draw_pdf_footer, onLaterPages=_draw_pdf_footer)
+    document.build(
+        story, onFirstPage=_draw_pdf_page_frame, onLaterPages=_draw_pdf_page_frame
+    )
     return output.getvalue()
 
 
@@ -2206,7 +2949,10 @@ def _dashboard_export_response(
 ) -> Response:
     export_format = _normalize_export_format(format_value)
     if export_format not in {"pdf", "excel"}:
-        raise HTTPException(status_code=400, detail="A exportacao do dashboard aceita apenas pdf ou excel.")
+        raise HTTPException(
+            status_code=400,
+            detail="A exportacao do dashboard aceita apenas pdf ou excel.",
+        )
     media_type, extension = EXPORT_FORMATS[export_format]
     theme = _export_theme(theme_id)
     content = (
@@ -2217,7 +2963,9 @@ def _dashboard_export_response(
     return Response(
         content=content,
         media_type=media_type,
-        headers={"Content-Disposition": f'attachment; filename="dashboard.{extension}"'},
+        headers={
+            "Content-Disposition": f'attachment; filename="dashboard.{extension}"'
+        },
     )
 
 
@@ -2311,14 +3059,30 @@ def _apply_date_filters(
     years: Optional[list[int]] = None,
     months: Optional[list[int]] = None,
     event_dates: Optional[list[date]] = None,
+    default_reference_date: Optional[date] = None,
 ):
     date_column = func.date(column)
-    has_explicit_filter = bool(date_from or date_to or month_keys or years or months or event_dates or all_period)
+    has_explicit_filter = bool(
+        date_from
+        or date_to
+        or month_keys
+        or years
+        or months
+        or event_dates
+        or all_period
+    )
 
     if not has_explicit_filter and days:
-        reference_date = db.query(func.max(date_column)).scalar()
+        reference_query = db.query(func.max(date_column))
+        if column is Venda.date_time:
+            reference_query = reference_query.filter(Venda.status == "paga")
+        reference_date = reference_query.scalar()
         if reference_date is not None:
-            query = query.filter(date_column >= reference_date - timedelta(days=days - 1))
+            query = query.filter(
+                date_column >= reference_date - timedelta(days=days - 1)
+            )
+            if default_reference_date is not None:
+                query = query.filter(date_column <= reference_date)
 
     if date_from:
         query = query.filter(date_column >= date_from)
@@ -2326,7 +3090,8 @@ def _apply_date_filters(
         query = query.filter(date_column <= date_to)
 
     parsed_months = [
-        parsed for parsed in (_parse_month_key(value) for value in (month_keys or []))
+        parsed
+        for parsed in (_parse_month_key(value) for value in (month_keys or []))
         if parsed is not None
     ]
     if parsed_months:
@@ -2350,6 +3115,13 @@ def _apply_date_filters(
         query = query.filter(date_column.in_(event_dates))
 
     return query
+
+
+def _dashboard_history_reference_date(db: Session) -> Optional[date]:
+    stock_date = db.query(func.max(func.date(Estoque.date_time))).scalar()
+    sales_date = db.query(func.max(func.date(Venda.date_time))).scalar()
+    available_dates = [value for value in (stock_date, sales_date) if value is not None]
+    return min(available_dates) if available_dates else None
 
 
 def _event_dates_for_types(db: Session, event_types: Optional[list[str]]) -> list[date]:
@@ -2389,7 +3161,10 @@ def _resolve_date_window(
     event_dates: Optional[list[date]] = None,
 ) -> tuple[Optional[date], Optional[date]]:
     date_column = func.date(column)
-    reference_date = db.query(func.max(date_column)).scalar()
+    reference_query = db.query(func.max(date_column))
+    if column is Venda.date_time:
+        reference_query = reference_query.filter(Venda.status == "paga")
+    reference_date = reference_query.scalar()
     if reference_date is None:
         return None, None
 
@@ -2397,7 +3172,8 @@ def _resolve_date_window(
         return min(event_dates), max(event_dates)
 
     parsed_months = [
-        parsed for parsed in (_parse_month_key(value) for value in (month_keys or []))
+        parsed
+        for parsed in (_parse_month_key(value) for value in (month_keys or []))
         if parsed is not None
     ]
     if parsed_months:
@@ -2416,14 +3192,22 @@ def _resolve_date_window(
 
     if months:
         start = date(reference_date.year, min(months), 1)
-        end = _shift_month_start(date(reference_date.year, max(months), 1), 1) - timedelta(days=1)
+        end = _shift_month_start(
+            date(reference_date.year, max(months), 1), 1
+        ) - timedelta(days=1)
         return start, end
 
     if date_from or date_to:
-        return date_from or reference_date - timedelta(days=days - 1), date_to or reference_date
+        return (
+            date_from or reference_date - timedelta(days=days - 1),
+            date_to or reference_date,
+        )
 
     if all_period:
-        start_date = db.query(func.min(date_column)).scalar()
+        start_query = db.query(func.min(date_column))
+        if column is Venda.date_time:
+            start_query = start_query.filter(Venda.status == "paga")
+        start_date = start_query.scalar()
         return start_date, reference_date
 
     return reference_date - timedelta(days=days - 1), reference_date
@@ -2472,15 +3256,14 @@ def _coverage_rows(
         .join(Categoria, Ingrediente.category_id == Categoria.id)
         .join(ReceitaIngrediente, ReceitaIngrediente.ingredient_id == Ingrediente.id)
         .join(Venda, Venda.recipe_id == ReceitaIngrediente.recipe_id)
+        .filter(Venda.status == "paga")
         .filter(func.date(Venda.date_time).between(start_date, end_date))
         .filter(Ingrediente.category_id != PRODUCTION_CATEGORY_ID)
     )
     output_query = _apply_ingredient_category_filters(output_rows, category_ids)
-    output_rows = (
-        output_query
-        .group_by(Ingrediente.id, Ingrediente.name, Ingrediente.unit, Categoria.name)
-        .all()
-    )
+    output_rows = output_query.group_by(
+        Ingrediente.id, Ingrediente.name, Ingrediente.unit, Categoria.name
+    ).all()
 
     if current_stock:
         stock_query = (
@@ -2541,6 +3324,7 @@ def _top_recipe_for_period(
     query = (
         db.query(Receita.id, Receita.name, quantity_expr)
         .join(Venda, Venda.recipe_id == Receita.id)
+        .filter(Venda.status == "paga")
         .filter(func.date(Venda.date_time).between(start_date, end_date))
     )
     if category_ids:
@@ -2554,10 +3338,13 @@ def _top_recipe_for_period(
     )
 
 
-def _recipe_quantity_for_period(db: Session, recipe_id: str, start_date: date, end_date: date) -> float:
+def _recipe_quantity_for_period(
+    db: Session, recipe_id: str, start_date: date, end_date: date
+) -> float:
     value = (
         db.query(func.coalesce(func.sum(Venda.quantity), 0))
         .filter(Venda.recipe_id == recipe_id)
+        .filter(Venda.status == "paga")
         .filter(func.date(Venda.date_time).between(start_date, end_date))
         .scalar()
     )
@@ -2576,28 +3363,41 @@ def _dashboard_kpis(
     months: Optional[list[int]] = None,
     event_dates: Optional[list[date]] = None,
 ) -> list[DashboardKpi]:
-    sales_reference = db.query(func.max(func.date(Venda.date_time))).scalar()
-    stock_reference = db.query(func.max(func.date(Estoque.date_time))).scalar()
-    current_items_query = (
-        db.query(func.count(Ingrediente.id))
-        .filter(Ingrediente.category_id != PRODUCTION_CATEGORY_ID)
+    sales_reference = (
+        db.query(func.max(func.date(Venda.date_time)))
+        .filter(Venda.status == "paga")
+        .scalar()
     )
-    current_items = _apply_ingredient_category_filters(current_items_query, category_ids).scalar() or 0
+    stock_reference = db.query(func.max(func.date(Estoque.date_time))).scalar()
+    current_items_query = db.query(func.count(Ingrediente.id)).filter(
+        Ingrediente.category_id != PRODUCTION_CATEGORY_ID
+    )
+    current_items = (
+        _apply_ingredient_category_filters(current_items_query, category_ids).scalar()
+        or 0
+    )
     current_stock_query = (
         db.query(func.coalesce(func.sum(EstoqueAtual.qtd), 0))
         .join(Ingrediente, EstoqueAtual.ingrediente == Ingrediente.id)
         .filter(Ingrediente.category_id != PRODUCTION_CATEGORY_ID)
     )
-    current_stock_qty = _apply_ingredient_category_filters(current_stock_query, category_ids).scalar() or 0
+    current_stock_qty = (
+        _apply_ingredient_category_filters(current_stock_query, category_ids).scalar()
+        or 0
+    )
     previous_stock_reference = (stock_reference or date.today()) - timedelta(days=7)
-    previous_stock_qty = _stock_total_at_or_before(db, previous_stock_reference, category_ids)
+    previous_stock_qty = _stock_total_at_or_before(
+        db, previous_stock_reference, category_ids
+    )
     stock_delta = _percent_change(_as_float(current_stock_qty), previous_stock_qty)
 
     empty_kpis = [
         DashboardKpi(
             id="ingredients",
             label="Estoque atual",
-            value=f"{_as_float(current_stock_qty):,.1f}".replace(",", "X").replace(".", ",").replace("X", "."),
+            value=f"{_as_float(current_stock_qty):,.1f}".replace(",", "X")
+            .replace(".", ",")
+            .replace("X", "."),
             detail=f"{current_items:,}".replace(",", ".") + " ingredientes cadastrados",
             trend_value=stock_delta,
             trend_label=f"{_format_percent(stock_delta, 'sem histórico')} vs {_week_year_label(previous_stock_reference)}",
@@ -2625,21 +3425,29 @@ def _dashboard_kpis(
     previous_end = current_start - timedelta(days=1)
     previous_start = previous_end - timedelta(days=window_days - 1)
 
-    current_coverage = _coverage_rows(db, current_start, current_end, current_stock=True, category_ids=category_ids)
-    previous_coverage = _coverage_rows(db, previous_start, previous_end, current_stock=False, category_ids=category_ids)
+    current_coverage = _coverage_rows(
+        db, current_start, current_end, current_stock=True, category_ids=category_ids
+    )
+    previous_coverage = _coverage_rows(
+        db, previous_start, previous_end, current_stock=False, category_ids=category_ids
+    )
     current_avg_coverage = (
-        sum(float(item["coverage_days"]) for item in current_coverage) / len(current_coverage)
+        sum(float(item["coverage_days"]) for item in current_coverage)
+        / len(current_coverage)
         if current_coverage
         else 0
     )
     previous_avg_coverage = (
-        sum(float(item["coverage_days"]) for item in previous_coverage) / len(previous_coverage)
+        sum(float(item["coverage_days"]) for item in previous_coverage)
+        / len(previous_coverage)
         if previous_coverage
         else 0
     )
     coverage_delta = _percent_change(current_avg_coverage, previous_avg_coverage)
 
-    top_recipe = _top_recipe_for_period(db, current_start, current_end, category_ids=category_ids)
+    top_recipe = _top_recipe_for_period(
+        db, current_start, current_end, category_ids=category_ids
+    )
     top_recipe_delta = None
     top_recipe_detail = "Sem vendas no período"
     top_recipe_value = "-"
@@ -2653,17 +3461,23 @@ def _dashboard_kpis(
         )
         top_recipe_delta = _percent_change(current_quantity, previous_quantity)
         top_recipe_value = top_recipe.name
-        top_recipe_detail = f"{current_quantity:,.0f}".replace(",", ".") + f" unidades no período"
+        top_recipe_detail = (
+            f"{current_quantity:,.0f}".replace(",", ".") + f" unidades no período"
+        )
 
     previous_by_id = {item["ingredient_id"]: item for item in previous_coverage}
-    critical = min(current_coverage, key=lambda item: float(item["coverage_days"]), default=None)
+    critical = min(
+        current_coverage, key=lambda item: float(item["coverage_days"]), default=None
+    )
     critical_delta = None
     critical_value = "-"
     critical_detail = "Sem consumo recente"
     if critical is not None:
         previous = previous_by_id.get(str(critical["ingredient_id"]))
         previous_days = float(previous["coverage_days"]) if previous else 0
-        critical_delta = _percent_change(float(critical["coverage_days"]), previous_days)
+        critical_delta = _percent_change(
+            float(critical["coverage_days"]), previous_days
+        )
         critical_value = str(critical["name"])
         critical_detail = f"{float(critical['coverage_days']):.1f} dias de cobertura"
 
@@ -2723,12 +3537,7 @@ def _stock_product_rows(
     if unit:
         query = query.filter(Ingrediente.unit == unit)
 
-    rows = (
-        query
-        .order_by(order(value_expr), Ingrediente.name)
-        .limit(limit)
-        .all()
-    )
+    rows = query.order_by(order(value_expr), Ingrediente.name).limit(limit).all()
     return [
         DashboardRankItem(
             id=row.id,
@@ -2761,8 +3570,7 @@ def _stock_category_rows(
         query = query.filter(Ingrediente.unit == unit)
 
     rows = (
-        query
-        .group_by(Categoria.id, Categoria.name)
+        query.group_by(Categoria.id, Categoria.name)
         .order_by(order(value_expr), Categoria.name)
         .limit(limit)
         .all()
@@ -2787,7 +3595,9 @@ def _stock_product_groups(
     return [
         DashboardUnitRankGroup(
             unit=unit,
-            items=_stock_product_rows(db, order, limit=limit, unit=unit, category_ids=category_ids),
+            items=_stock_product_rows(
+                db, order, limit=limit, unit=unit, category_ids=category_ids
+            ),
         )
         for unit in DASHBOARD_STOCK_UNITS
     ]
@@ -2802,7 +3612,9 @@ def _stock_category_groups(
     return [
         DashboardUnitCategoryGroup(
             unit=unit,
-            items=_stock_category_rows(db, order, limit=limit, unit=unit, category_ids=category_ids),
+            items=_stock_category_rows(
+                db, order, limit=limit, unit=unit, category_ids=category_ids
+            ),
         )
         for unit in DASHBOARD_STOCK_UNITS
     ]
@@ -2839,6 +3651,7 @@ def _output_product_rows(
             ReceitaIngrediente, ReceitaIngrediente.ingredient_id == Ingrediente.id
         )
         .outerjoin(Venda, Venda.recipe_id == ReceitaIngrediente.recipe_id)
+        .filter(or_(Venda.id.is_(None), Venda.status == "paga"))
         .filter(Ingrediente.category_id != PRODUCTION_CATEGORY_ID)
     )
     query = _apply_ingredient_category_filters(query, category_ids)
@@ -2859,8 +3672,9 @@ def _output_product_rows(
         query = query.filter(Ingrediente.unit == unit)
 
     rows = (
-        query
-        .group_by(Ingrediente.id, Ingrediente.name, Ingrediente.unit, Categoria.name)
+        query.group_by(
+            Ingrediente.id, Ingrediente.name, Ingrediente.unit, Categoria.name
+        )
         .order_by(order(value_expr), Ingrediente.name)
         .limit(limit)
         .all()
@@ -2902,6 +3716,7 @@ def _output_category_rows(
             ReceitaIngrediente, ReceitaIngrediente.ingredient_id == Ingrediente.id
         )
         .outerjoin(Venda, Venda.recipe_id == ReceitaIngrediente.recipe_id)
+        .filter(or_(Venda.id.is_(None), Venda.status == "paga"))
         .filter(Categoria.id != PRODUCTION_CATEGORY_ID)
     )
     if category_ids:
@@ -2923,8 +3738,7 @@ def _output_category_rows(
         query = query.filter(Ingrediente.unit == unit)
 
     rows = (
-        query
-        .group_by(Categoria.id, Categoria.name)
+        query.group_by(Categoria.id, Categoria.name)
         .order_by(order(value_expr), Categoria.name)
         .limit(limit)
         .all()
@@ -3045,6 +3859,7 @@ def _dashboard_filters(db: Session) -> DashboardFilters:
             year_expr,
             month_expr,
         )
+        .filter(Venda.status == "paga")
         .group_by(year_expr, month_expr)
         .order_by(year_expr, month_expr)
         .all()
@@ -3090,7 +3905,11 @@ def _dashboard_alerts(
     months: Optional[list[int]] = None,
     event_dates: Optional[list[date]] = None,
 ) -> list[DashboardAlert]:
-    reference_date = db.query(func.max(func.date(Venda.date_time))).scalar()
+    reference_date = (
+        db.query(func.max(func.date(Venda.date_time)))
+        .filter(Venda.status == "paga")
+        .scalar()
+    )
     if reference_date is None:
         return []
 
@@ -3108,6 +3927,7 @@ def _dashboard_alerts(
         .outerjoin(EstoqueAtual, EstoqueAtual.ingrediente == Ingrediente.id)
         .join(ReceitaIngrediente, ReceitaIngrediente.ingredient_id == Ingrediente.id)
         .join(Venda, Venda.recipe_id == ReceitaIngrediente.recipe_id)
+        .filter(Venda.status == "paga")
         .filter(Ingrediente.category_id != PRODUCTION_CATEGORY_ID)
     )
     query = _apply_ingredient_category_filters(query, category_ids)
@@ -3124,16 +3944,13 @@ def _dashboard_alerts(
         months=months,
         event_dates=event_dates,
     )
-    rows = (
-        query.group_by(
-            Ingrediente.id,
-            Ingrediente.name,
-            Ingrediente.unit,
-            Categoria.name,
-            EstoqueAtual.qtd,
-        )
-        .all()
-    )
+    rows = query.group_by(
+        Ingrediente.id,
+        Ingrediente.name,
+        Ingrediente.unit,
+        Categoria.name,
+        EstoqueAtual.qtd,
+    ).all()
 
     alerts: list[DashboardAlert] = []
     for row in rows:
@@ -3165,9 +3982,9 @@ def _dashboard_alerts(
             )
         )
 
-    return sorted(alerts, key=lambda item: (item.coverage_days, -item.avg_daily_output))[
-        :limit
-    ]
+    return sorted(
+        alerts, key=lambda item: (item.coverage_days, -item.avg_daily_output)
+    )[:limit]
 
 
 # ---------------------------------------------------------------------------
@@ -3189,10 +4006,18 @@ def get_dashboard(
     db: Session = Depends(get_db),
 ):
     event_dates = _event_dates_for_types(db, event_types)
-    top_stock_products_by_unit = _stock_product_groups(db, desc, category_ids=category_ids)
-    bottom_stock_products_by_unit = _stock_product_groups(db, asc, category_ids=category_ids)
-    top_stock_categories_by_unit = _stock_category_groups(db, desc, category_ids=category_ids)
-    bottom_stock_categories_by_unit = _stock_category_groups(db, asc, category_ids=category_ids)
+    top_stock_products_by_unit = _stock_product_groups(
+        db, desc, category_ids=category_ids
+    )
+    bottom_stock_products_by_unit = _stock_product_groups(
+        db, asc, category_ids=category_ids
+    )
+    top_stock_categories_by_unit = _stock_category_groups(
+        db, desc, category_ids=category_ids
+    )
+    bottom_stock_categories_by_unit = _stock_category_groups(
+        db, asc, category_ids=category_ids
+    )
     output_kwargs = {
         "category_ids": category_ids,
         "days": days,
@@ -3264,6 +4089,7 @@ def get_dashboard_estoque_historico(
     db: Session = Depends(get_db),
 ):
     event_dates = _event_dates_for_types(db, event_types)
+    history_reference_date = _dashboard_history_reference_date(db)
     date_expr = func.date(Estoque.date_time).label("date")
     value_expr = func.coalesce(func.sum(Estoque.quantity), 0).label("value")
     query = (
@@ -3283,6 +4109,7 @@ def get_dashboard_estoque_historico(
         years=years,
         months=month_numbers,
         event_dates=event_dates,
+        default_reference_date=history_reference_date,
     )
 
     if ingredient_id:
@@ -3294,8 +4121,7 @@ def get_dashboard_estoque_historico(
 
     rows = query.group_by(date_expr).order_by(date_expr).all()
     return [
-        DashboardHistoryPoint(date=row.date, value=_as_float(row.value))
-        for row in rows
+        DashboardHistoryPoint(date=row.date, value=_as_float(row.value)) for row in rows
     ]
 
 
@@ -3335,9 +4161,10 @@ def get_dashboard_vendas_historico(
     db: Session = Depends(get_db),
 ):
     event_dates = _event_dates_for_types(db, event_types)
+    history_reference_date = _dashboard_history_reference_date(db)
     date_expr = func.date(Venda.date_time).label("date")
     value_expr = func.coalesce(func.sum(Venda.quantity), 0).label("value")
-    query = db.query(date_expr, value_expr)
+    query = db.query(date_expr, value_expr).filter(Venda.status == "paga")
     query = _apply_date_filters(
         query,
         Venda.date_time,
@@ -3350,6 +4177,7 @@ def get_dashboard_vendas_historico(
         years=years,
         months=month_numbers,
         event_dates=event_dates,
+        default_reference_date=history_reference_date,
     )
 
     if ingredient_id or category_id or category_ids:
@@ -3366,8 +4194,7 @@ def get_dashboard_vendas_historico(
 
     rows = query.group_by(date_expr).order_by(date_expr).all()
     return [
-        DashboardHistoryPoint(date=row.date, value=_as_float(row.value))
-        for row in rows
+        DashboardHistoryPoint(date=row.date, value=_as_float(row.value)) for row in rows
     ]
 
 
@@ -3385,21 +4212,30 @@ def get_dashboard_faturamento_resumo(
     db: Session = Depends(get_db),
 ):
     event_dates = _event_dates_for_types(db, event_types)
-    reference_date = db.query(func.max(func.date(Venda.date_time))).scalar()
+    reference_date = (
+        db.query(func.max(func.date(Venda.date_time)))
+        .filter(Venda.status == "paga")
+        .scalar()
+    )
     if reference_date is None:
         return DashboardRevenueSummary(monthly=[], quarterly=[])
 
     start_date = (
-        db.query(func.min(func.date(Venda.date_time))).scalar()
+        db.query(func.min(func.date(Venda.date_time)))
+        .filter(Venda.status == "paga")
+        .scalar()
         if all_period
         else _shift_month_start(_month_start(reference_date), -(months - 1))
     )
-    revenue_expr = func.coalesce(func.sum(Venda.quantity * Venda.unit_price), 0).label("value")
+    revenue_expr = func.coalesce(func.sum(Venda.quantity * Venda.unit_price), 0).label(
+        "value"
+    )
 
     year_expr = func.extract("year", Venda.date_time).label("year")
     month_expr = func.extract("month", Venda.date_time).label("month")
     month_rows = (
         db.query(year_expr, month_expr, revenue_expr)
+        .filter(Venda.status == "paga")
         .filter(func.date(Venda.date_time) >= start_date)
     )
     month_query = _apply_date_filters(
@@ -3416,9 +4252,15 @@ def get_dashboard_faturamento_resumo(
     )
     if category_ids:
         month_query = month_query.filter(
-            Venda.recipe_id.in_(_filtered_recipe_ids_query(db, category_ids=category_ids))
+            Venda.recipe_id.in_(
+                _filtered_recipe_ids_query(db, category_ids=category_ids)
+            )
         )
-    month_rows = month_query.group_by(year_expr, month_expr).order_by(year_expr, month_expr).all()
+    month_rows = (
+        month_query.group_by(year_expr, month_expr)
+        .order_by(year_expr, month_expr)
+        .all()
+    )
     monthly = [
         DashboardNamedMetric(
             key=f"{int(row.year)}-{int(row.month):02d}",
@@ -3431,6 +4273,7 @@ def get_dashboard_faturamento_resumo(
     quarter_expr = func.extract("quarter", Venda.date_time).label("quarter")
     quarter_rows = (
         db.query(year_expr, quarter_expr, revenue_expr)
+        .filter(Venda.status == "paga")
         .filter(func.date(Venda.date_time) >= start_date)
     )
     quarter_query = _apply_date_filters(
@@ -3447,9 +4290,15 @@ def get_dashboard_faturamento_resumo(
     )
     if category_ids:
         quarter_query = quarter_query.filter(
-            Venda.recipe_id.in_(_filtered_recipe_ids_query(db, category_ids=category_ids))
+            Venda.recipe_id.in_(
+                _filtered_recipe_ids_query(db, category_ids=category_ids)
+            )
         )
-    quarter_rows = quarter_query.group_by(year_expr, quarter_expr).order_by(year_expr, quarter_expr).all()
+    quarter_rows = (
+        quarter_query.group_by(year_expr, quarter_expr)
+        .order_by(year_expr, quarter_expr)
+        .all()
+    )
     quarterly = [
         DashboardNamedMetric(
             key=f"{int(row.year)}-Q{int(row.quarter)}",
@@ -3478,7 +4327,7 @@ def get_dashboard_pedidos_semana(
     event_dates = _event_dates_for_types(db, event_types)
     dow_expr = func.extract("dow", Venda.date_time).label("dow")
     value_expr = func.coalesce(func.sum(Venda.quantity), 0).label("value")
-    query = db.query(dow_expr, value_expr)
+    query = db.query(dow_expr, value_expr).filter(Venda.status == "paga")
     query = _apply_date_filters(
         query,
         Venda.date_time,
@@ -3494,7 +4343,9 @@ def get_dashboard_pedidos_semana(
     )
     if category_ids:
         query = query.filter(
-            Venda.recipe_id.in_(_filtered_recipe_ids_query(db, category_ids=category_ids))
+            Venda.recipe_id.in_(
+                _filtered_recipe_ids_query(db, category_ids=category_ids)
+            )
         )
     rows = query.group_by(dow_expr).all()
     by_dow = {int(row.dow): _as_float(row.value) for row in rows}
@@ -3531,10 +4382,13 @@ def get_dashboard_receitas_ranking(
 ):
     event_dates = _event_dates_for_types(db, event_types)
     quantity_expr = func.coalesce(func.sum(Venda.quantity), 0).label("quantity")
-    revenue_expr = func.coalesce(func.sum(Venda.quantity * Venda.unit_price), 0).label("revenue")
+    revenue_expr = func.coalesce(func.sum(Venda.quantity * Venda.unit_price), 0).label(
+        "revenue"
+    )
     query = (
         db.query(Receita.id, Receita.name, quantity_expr, revenue_expr)
         .join(Venda, Venda.recipe_id == Receita.id)
+        .filter(Venda.status == "paga")
     )
     query = _apply_date_filters(
         query,
@@ -3562,8 +4416,7 @@ def get_dashboard_receitas_ranking(
         )
 
     rows = (
-        query
-        .group_by(Receita.id, Receita.name)
+        query.group_by(Receita.id, Receita.name)
         .order_by(desc(quantity_expr), Receita.name)
         .limit(limit)
         .all()
@@ -3625,7 +4478,9 @@ def get_estoque(
         .order_by(Categoria.name, Ingrediente.name)
     )
     if category:
-        query = query.filter(or_(Ingrediente.category_id == category, Categoria.name == category))
+        query = query.filter(
+            or_(Ingrediente.category_id == category, Categoria.name == category)
+        )
     if q:
         query = query.filter(Ingrediente.name.ilike(f"%{q}%"))
     criticidade_run, criticidade_by_ingredient = _latest_criticidade_by_ingredient(db)
@@ -3634,9 +4489,13 @@ def get_estoque(
         items = [
             item
             for item in items
-            if _model_stock_status(item, criticidade_by_ingredient.get(item.id)) == status
+            if _model_stock_status(item, criticidade_by_ingredient.get(item.id))
+            == status
         ]
-    return [_ingrediente_out(item, criticidade_run, criticidade_by_ingredient) for item in items]
+    return [
+        _ingrediente_out(item, criticidade_run, criticidade_by_ingredient)
+        for item in items
+    ]
 
 
 @app.get("/api/estoque/paginado", response_model=EstoquePaginado)
@@ -3655,7 +4514,9 @@ def get_estoque_paginado(
         .order_by(Categoria.name, Ingrediente.name)
     )
     if category:
-        query = query.filter(or_(Ingrediente.category_id == category, Categoria.name == category))
+        query = query.filter(
+            or_(Ingrediente.category_id == category, Categoria.name == category)
+        )
     if q:
         query = query.filter(Ingrediente.name.ilike(f"%{q}%"))
     criticidade_run, criticidade_by_ingredient = _latest_criticidade_by_ingredient(db)
@@ -3664,16 +4525,20 @@ def get_estoque_paginado(
         items = [
             item
             for item in items
-            if _model_stock_status(item, criticidade_by_ingredient.get(item.id)) == status
+            if _model_stock_status(item, criticidade_by_ingredient.get(item.id))
+            == status
         ]
 
     total = len(items)
     total_pages = max(1, math.ceil(total / page_size))
     offset = (page - 1) * page_size
-    page_items = items[offset: offset + page_size]
+    page_items = items[offset : offset + page_size]
 
     return EstoquePaginado(
-        items=[_ingrediente_out(item, criticidade_run, criticidade_by_ingredient) for item in page_items],
+        items=[
+            _ingrediente_out(item, criticidade_run, criticidade_by_ingredient)
+            for item in page_items
+        ],
         total=total,
         page=page,
         page_size=page_size,
@@ -3807,7 +4672,9 @@ def update_estoque(lote: AtualizacaoLote, db: Session = Depends(get_db)):
                     if snapshot and snapshot.date_time
                     else contagem.estoque_snapshot_data
                 )
-                existing_log.estoque_quantidade = snapshot.quantity if snapshot else None
+                existing_log.estoque_quantidade = (
+                    snapshot.quantity if snapshot else None
+                )
                 existing_log.category_id = ingrediente.category_id
                 existing_log.categoria = ingrediente.category
                 existing_log.quantidade_anterior = anterior
@@ -3835,11 +4702,11 @@ def update_estoque(lote: AtualizacaoLote, db: Session = Depends(get_db)):
             )
         )
         if contagem is None and ingrediente.estoque_atual is None:
-                ingrediente.estoque_atual = EstoqueAtual(
-                    id=f"CUR-{ingrediente.id}",
-                    qtd=atualizacao.new_qty,
-                    data=_now_recife().date(),
-                )
+            ingrediente.estoque_atual = EstoqueAtual(
+                id=f"CUR-{ingrediente.id}",
+                qtd=atualizacao.new_qty,
+                data=_now_recife().date(),
+            )
         elif contagem is None:
             ingrediente.estoque_atual.qtd = atualizacao.new_qty
             ingrediente.estoque_atual.data = _now_recife().date()
@@ -3876,7 +4743,9 @@ def update_ingrediente(
     if category_value:
         categoria = (
             db.query(Categoria)
-            .filter(or_(Categoria.id == category_value, Categoria.name == category_value))
+            .filter(
+                or_(Categoria.id == category_value, Categoria.name == category_value)
+            )
             .first()
         )
         if categoria is None:
@@ -3944,8 +4813,16 @@ def get_fornecedores(db: Session = Depends(get_db)):
     if scored:
         min_price = min(item.avg_price for item in scored if item.avg_price is not None)
         max_price = max(item.avg_price for item in scored if item.avg_price is not None)
-        min_delivery = min(item.avg_delivery_time for item in scored if item.avg_delivery_time is not None)
-        max_delivery = max(item.avg_delivery_time for item in scored if item.avg_delivery_time is not None)
+        min_delivery = min(
+            item.avg_delivery_time
+            for item in scored
+            if item.avg_delivery_time is not None
+        )
+        max_delivery = max(
+            item.avg_delivery_time
+            for item in scored
+            if item.avg_delivery_time is not None
+        )
 
         def score(item: FornecedorListItem) -> float:
             price_range = max_price - min_price
@@ -4010,9 +4887,11 @@ def export_fornecedores(
             "cnpj": fornecedor.cnpj,
             "email": fornecedor.email,
             "telefone": fornecedor.phone,
-            "prazo_medio_entrega_dias": _as_float(fornecedor.avg_delivery_time)
-            if fornecedor.avg_delivery_time is not None
-            else None,
+            "prazo_medio_entrega_dias": (
+                _as_float(fornecedor.avg_delivery_time)
+                if fornecedor.avg_delivery_time is not None
+                else None
+            ),
             "itens_fornecidos": int(item_count or 0),
             "preco_medio": _as_float(avg_price) if avg_price is not None else None,
         }
@@ -4116,7 +4995,9 @@ def get_fornecedor_profile(fornecedor_id: str, db: Session = Depends(get_db)):
             Ingrediente.unit,
             FornecedorIngrediente.price,
         )
-        .join(FornecedorIngrediente, FornecedorIngrediente.ingredient_id == Ingrediente.id)
+        .join(
+            FornecedorIngrediente, FornecedorIngrediente.ingredient_id == Ingrediente.id
+        )
         .join(Categoria, Categoria.id == Ingrediente.category_id)
         .outerjoin(EstoqueAtual, EstoqueAtual.ingrediente == Ingrediente.id)
         .filter(FornecedorIngrediente.supplier_id == fornecedor_id)
@@ -4170,9 +5051,7 @@ def get_fornecedor_profile(fornecedor_id: str, db: Session = Depends(get_db)):
         .scalar()
     )
     orders_count = len(orders)
-    delivered_count = sum(
-        1 for order in orders if order.status.lower() == "entregue"
-    )
+    delivered_count = sum(1 for order in orders if order.status.lower() == "entregue")
     delivery_rate = (delivered_count / orders_count) * 100 if orders_count else 0
 
     return FornecedorProfileResponse(
@@ -4185,6 +5064,707 @@ def get_fornecedor_profile(fornecedor_id: str, db: Session = Depends(get_db)):
         products=products,
         orders=orders,
     )
+
+
+# ---------------------------------------------------------------------------
+# Vendas
+# ---------------------------------------------------------------------------
+
+
+def _next_prefixed_id(
+    db: Session,
+    column,
+    prefix: str,
+    reserved_ids: Optional[set[str]] = None,
+    width: int = 12,
+) -> str:
+    reserved_ids = reserved_ids if reserved_ids is not None else set()
+    last_id = (
+        db.query(column)
+        .filter(column.like(f"{prefix}%"))
+        .order_by(column.desc())
+        .first()
+    )
+    next_number = 1
+    if last_id:
+        try:
+            next_number = int(str(last_id[0]).replace(prefix, "")) + 1
+        except ValueError:
+            next_number = (db.query(func.count(column)).scalar() or 0) + 1
+
+    candidate = f"{prefix}{next_number:0{width}d}"
+    while (
+        candidate in reserved_ids
+        or db.query(column).filter(column == candidate).first()
+    ):
+        next_number += 1
+        candidate = f"{prefix}{next_number:0{width}d}"
+    reserved_ids.add(candidate)
+    return candidate
+
+
+def _next_cliente_id(db: Session, reserved_ids: Optional[set[str]] = None) -> str:
+    return _next_prefixed_id(db, Cliente.id, "CLI", reserved_ids)
+
+
+def _next_estoque_movimento_id(
+    db: Session, reserved_ids: Optional[set[str]] = None
+) -> str:
+    return _next_prefixed_id(db, EstoqueMovimento.id, "MOV", reserved_ids)
+
+
+def _next_historical_venda_id(
+    db: Session, reserved_ids: Optional[set[str]] = None
+) -> str:
+    return _next_prefixed_id(db, Venda.id, "VEN", reserved_ids, width=9)
+
+
+def _next_comanda_id(db: Session, reserved_ids: Optional[set[str]] = None) -> str:
+    return _next_prefixed_id(db, Venda.comanda_id, "CMD", reserved_ids)
+
+
+def _sales_table_count() -> int:
+    raw_value = os.getenv("SALES_TABLE_COUNT", "20")
+    try:
+        return max(1, min(int(raw_value), 200))
+    except ValueError:
+        return 20
+
+
+def _digits_only(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+    digits = re.sub(r"\D", "", value)
+    return digits or None
+
+
+def _money(value: float) -> float:
+    return round(max(float(value or 0), 0), 2)
+
+
+def _serialize_cliente(cliente: Optional[Cliente]) -> Optional[ClienteOut]:
+    if cliente is None:
+        return None
+    return ClienteOut(
+        id=cliente.id,
+        name=cliente.name,
+        document=cliente.document,
+        email=cliente.email,
+        phone=cliente.phone,
+        created_at=cliente.created_at,
+    )
+
+
+def _serialize_venda_group(rows: list[Venda]) -> VendaDetailOut:
+    if not rows:
+        raise HTTPException(status_code=404, detail="Venda nao encontrada")
+    ordered_rows = sorted(rows, key=lambda item: item.id)
+    first = ordered_rows[0]
+    subtotal = _money(
+        sum(
+            _as_float(item.quantity) * _as_float(item.unit_price)
+            for item in ordered_rows
+        )
+    )
+    discount_total = _as_float(first.discount_total)
+    total = (
+        _as_float(first.total)
+        if first.total is not None and _as_float(first.total) > 0
+        else _money(subtotal - discount_total)
+    )
+    customer = None
+    if first.customer_name or first.cpf_cliente:
+        customer = ClienteOut(
+            id=first.cpf_cliente or first.comanda_id or first.id,
+            name=first.customer_name or "Cliente",
+            document=first.cpf_cliente,
+            email=None,
+            phone=None,
+            created_at=None,
+        )
+    return VendaDetailOut(
+        id=first.comanda_id or first.id,
+        comanda_id=first.comanda_id or first.id,
+        date_time=first.date_time,
+        customer=customer,
+        customer_name=first.customer_name,
+        cpf_cliente=first.cpf_cliente,
+        mesa_numero=first.mesa_numero,
+        status=first.status,
+        payment_method=first.payment_method,
+        subtotal=subtotal,
+        discount_total=discount_total,
+        total=total,
+        source=first.source,
+        notes=first.notes,
+        confirmed_at=first.confirmed_at,
+        canceled_at=first.canceled_at,
+        items=[
+            VendaItemOut(
+                id=item.id,
+                recipe_id=item.recipe_id,
+                recipe_name=item.receita.name if item.receita else item.recipe_id,
+                quantity=_as_float(item.quantity),
+                unit_price=_as_float(item.unit_price),
+                discount_value=0,
+                total_value=_money(
+                    _as_float(item.quantity) * _as_float(item.unit_price)
+                ),
+                venda_historica_id=item.id,
+            )
+            for item in ordered_rows
+        ],
+    )
+
+
+def _get_venda_rows_or_404(db: Session, venda_id: str) -> list[Venda]:
+    rows = (
+        db.query(Venda)
+        .filter(or_(Venda.comanda_id == venda_id, Venda.id == venda_id))
+        .order_by(Venda.id.asc())
+        .all()
+    )
+    if not rows:
+        raise HTTPException(status_code=404, detail="Venda nao encontrada")
+    comanda_id = rows[0].comanda_id or rows[0].id
+    return (
+        db.query(Venda)
+        .filter(func.coalesce(Venda.comanda_id, Venda.id) == comanda_id)
+        .order_by(Venda.id.asc())
+        .all()
+    )
+
+
+def _recipe_stock_profile(
+    db: Session, recipe_id: str
+) -> tuple[int, bool, Optional[float], list[str]]:
+    ingredients_count = (
+        db.query(func.count(ReceitaIngrediente.ingredient_id))
+        .join(Ingrediente, Ingrediente.id == ReceitaIngrediente.ingredient_id)
+        .filter(ReceitaIngrediente.recipe_id == recipe_id)
+        .filter(Ingrediente.category_id != PRODUCTION_CATEGORY_ID)
+        .scalar()
+        or 0
+    )
+    return int(ingredients_count), True, None, []
+
+
+def _serialize_venda_produto(db: Session, receita: Receita) -> VendaProdutoOut:
+    ingredients_count, available, max_quantity, warnings = _recipe_stock_profile(
+        db,
+        receita.id,
+    )
+    return VendaProdutoOut(
+        id=receita.id,
+        name=receita.name,
+        recipe_type=receita.recipe_type,
+        sale_price=_as_float(receita.sale_price),
+        yield_qty=(
+            _as_float(receita.yield_qty) if receita.yield_qty is not None else None
+        ),
+        yield_unit=receita.yield_unit,
+        ingredients_count=ingredients_count,
+        available=available,
+        max_quantity=max_quantity,
+        stock_warnings=warnings,
+    )
+
+
+def _resolve_cliente(
+    db: Session,
+    customer_id: Optional[str],
+    customer: Optional[ClienteCreate],
+) -> Optional[Cliente]:
+    if customer_id:
+        cliente = db.query(Cliente).filter(Cliente.id == customer_id).first()
+        if cliente is None:
+            raise HTTPException(status_code=404, detail="Cliente nao encontrado")
+        return cliente
+    if customer is None:
+        return None
+
+    cliente = Cliente(
+        id=_next_cliente_id(db),
+        name=customer.name,
+        document=customer.document,
+        email=customer.email,
+        phone=customer.phone,
+    )
+    db.add(cliente)
+    return cliente
+
+
+def _build_venda_items(
+    db: Session,
+    payload_items: list,
+    discount_total: float,
+) -> tuple[list[dict], float, float]:
+    recipe_ids = {item.recipe_id for item in payload_items}
+    recipes = {
+        receita.id: receita
+        for receita in (
+            db.query(Receita)
+            .filter(Receita.id.in_(recipe_ids))
+            .filter(Receita.recipe_type == "PRODUTO_FINAL")
+            .all()
+        )
+    }
+    missing = sorted(recipe_ids - set(recipes.keys()))
+    if missing:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Produtos invalidos para venda: {', '.join(missing)}",
+        )
+
+    rows: list[dict] = []
+    subtotal = 0.0
+    item_discount_total = 0.0
+    for item in payload_items:
+        receita = recipes[item.recipe_id]
+        unit_price = (
+            _as_float(item.unit_price)
+            if item.unit_price is not None
+            else _as_float(receita.sale_price)
+        )
+        if unit_price <= 0:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Produto sem preco de venda valido: {receita.name}",
+            )
+        gross_total = _money(unit_price * item.quantity)
+        if item.discount_value > gross_total:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Desconto maior que o item: {receita.name}",
+            )
+        line_total = _money(gross_total - item.discount_value)
+        subtotal += gross_total
+        item_discount_total += item.discount_value
+        rows.append(
+            {
+                "recipe": receita,
+                "quantity": item.quantity,
+                "unit_price": unit_price,
+                "discount_value": item.discount_value,
+                "total_value": line_total,
+            }
+        )
+
+    subtotal = _money(subtotal)
+    total_before_sale_discount = _money(subtotal - item_discount_total)
+    if discount_total > total_before_sale_discount:
+        raise HTTPException(
+            status_code=400,
+            detail="Desconto total maior que o valor da venda",
+        )
+    total = _money(total_before_sale_discount - discount_total)
+    return rows, subtotal, total
+
+
+@app.get("/api/vendas/produtos", response_model=list[VendaProdutoOut])
+def get_venda_produtos(
+    q: Optional[str] = None,
+    db: Session = Depends(get_db),
+):
+    query = (
+        db.query(Receita)
+        .filter(Receita.recipe_type == "PRODUTO_FINAL")
+        .filter(Receita.sale_price.isnot(None))
+        .filter(Receita.sale_price > 0)
+        .order_by(Receita.name.asc())
+    )
+    if q:
+        query = query.filter(Receita.name.ilike(f"%{q}%"))
+    receitas = query.limit(250).all()
+    return [_serialize_venda_produto(db, receita) for receita in receitas]
+
+
+@app.get("/api/vendas/clientes", response_model=list[ClienteOut])
+def get_clientes(
+    q: Optional[str] = None,
+    db: Session = Depends(get_db),
+):
+    query = db.query(Cliente).order_by(Cliente.name.asc())
+    if q:
+        like = f"%{q}%"
+        query = query.filter(
+            or_(
+                Cliente.name.ilike(like),
+                Cliente.document.ilike(like),
+                Cliente.email.ilike(like),
+                Cliente.phone.ilike(like),
+            )
+        )
+    return [_serialize_cliente(cliente) for cliente in query.limit(100).all()]
+
+
+@app.post("/api/vendas/clientes", response_model=ClienteOut)
+def create_cliente(payload: ClienteCreate, db: Session = Depends(get_db)):
+    cliente = Cliente(
+        id=_next_cliente_id(db),
+        name=payload.name,
+        document=payload.document,
+        email=payload.email,
+        phone=payload.phone,
+    )
+    db.add(cliente)
+    db.commit()
+    db.refresh(cliente)
+    return _serialize_cliente(cliente)
+
+
+@app.get("/api/vendas/mesas", response_model=MesasResponse)
+def get_venda_mesas(db: Session = Depends(get_db)):
+    total_mesas = _sales_table_count()
+    open_rows = (
+        db.query(Venda)
+        .filter(Venda.status == "aberta")
+        .filter(Venda.mesa_numero.isnot(None))
+        .all()
+    )
+    grouped: dict[int, list[Venda]] = {}
+    for row in open_rows:
+        if row.mesa_numero is not None and 1 <= row.mesa_numero <= total_mesas:
+            grouped.setdefault(row.mesa_numero, []).append(row)
+
+    mesas: list[MesaVendaOut] = []
+    for numero in range(1, total_mesas + 1):
+        rows = grouped.get(numero, [])
+        if not rows:
+            mesas.append(MesaVendaOut(numero=numero, status="livre"))
+            continue
+        first = sorted(rows, key=lambda item: item.date_time)[0]
+        mesas.append(
+            MesaVendaOut(
+                numero=numero,
+                status="ocupada",
+                comanda_id=first.comanda_id or first.id,
+                items_count=len(rows),
+                items_qty=sum(_as_float(item.quantity) for item in rows),
+                total=_money(
+                    sum(
+                        _as_float(item.quantity) * _as_float(item.unit_price)
+                        for item in rows
+                    )
+                ),
+                opened_at=first.date_time,
+            )
+        )
+    return MesasResponse(total_mesas=total_mesas, mesas=mesas)
+
+
+@app.post("/api/vendas/mesas/{mesa_numero}/pedido", response_model=MesaPedidoOut)
+def create_mesa_pedido(
+    mesa_numero: int,
+    payload: MesaPedidoCreate,
+    db: Session = Depends(get_db),
+):
+    total_mesas = _sales_table_count()
+    if mesa_numero < 1 or mesa_numero > total_mesas:
+        raise HTTPException(status_code=400, detail="Mesa fora da configuracao")
+    open_row = (
+        db.query(Venda)
+        .filter(Venda.mesa_numero == mesa_numero)
+        .filter(Venda.status == "aberta")
+        .order_by(Venda.date_time.desc(), Venda.id.desc())
+        .first()
+    )
+    if open_row:
+        return MesaPedidoOut(
+            mesa_numero=mesa_numero, comanda_id=open_row.comanda_id or open_row.id
+        )
+    return MesaPedidoOut(
+        mesa_numero=mesa_numero,
+        comanda_id=payload.comanda_id or _next_comanda_id(db),
+    )
+
+
+@app.post("/api/vendas", response_model=VendaDetailOut)
+def create_venda(payload: VendaCreateRequest, db: Session = Depends(get_db)):
+    comanda_id = _next_comanda_id(db)
+    return update_venda_itens(
+        comanda_id,
+        VendaItensUpdateRequest(
+            items=payload.items,
+            mesa_numero=None,
+            customer_name=payload.customer.name if payload.customer else None,
+            cpf_cliente=payload.customer.document if payload.customer else None,
+            notes=payload.notes,
+        ),
+        db,
+    )
+
+
+@app.patch("/api/vendas/{venda_id}/itens", response_model=VendaDetailOut)
+def update_venda_itens(
+    venda_id: str,
+    payload: VendaItensUpdateRequest,
+    db: Session = Depends(get_db),
+):
+    existing_rows = (
+        db.query(Venda)
+        .filter(or_(Venda.comanda_id == venda_id, Venda.id == venda_id))
+        .all()
+    )
+    closed = [row for row in existing_rows if row.status != "aberta"]
+    if closed:
+        raise HTTPException(
+            status_code=400, detail="Venda fechada nao pode ter itens alterados"
+        )
+    mesa_numero = existing_rows[0].mesa_numero if existing_rows else payload.mesa_numero
+    comanda_id = existing_rows[0].comanda_id or venda_id if existing_rows else venda_id
+    item_rows, subtotal, total = _build_venda_items(db, payload.items, 0)
+
+    for row in existing_rows:
+        db.delete(row)
+    db.flush()
+
+    now = _now_recife()
+    reserved_ids: set[str] = set()
+    created: list[Venda] = []
+    for item in item_rows:
+        receita = item["recipe"]
+        venda = Venda(
+            id=_next_historical_venda_id(db, reserved_ids),
+            date_time=now.replace(tzinfo=None),
+            recipe_id=receita.id,
+            quantity=item["quantity"],
+            unit_price=item["unit_price"],
+            comanda_id=comanda_id,
+            mesa_numero=mesa_numero,
+            status="aberta",
+            cpf_cliente=_digits_only(payload.cpf_cliente),
+            customer_name=payload.customer_name,
+            paid_amount=0,
+            change_amount=0,
+            discount_total=0,
+            total=total,
+            source="mesa" if mesa_numero else "balcao",
+            notes=payload.notes,
+            created_at=now,
+            updated_at=now,
+        )
+        db.add(venda)
+        created.append(venda)
+    db.commit()
+    return _serialize_venda_group(created)
+
+
+@app.post("/api/vendas/{venda_id}/fechar", response_model=VendaDetailOut)
+def fechar_venda(
+    venda_id: str,
+    payload: VendaFecharRequest,
+    db: Session = Depends(get_db),
+):
+    rows = _get_venda_rows_or_404(db, venda_id)
+    if any(row.status == "cancelada" for row in rows):
+        raise HTTPException(
+            status_code=400, detail="Venda cancelada nao pode ser fechada"
+        )
+    if all(row.status == "paga" for row in rows):
+        return _serialize_venda_group(rows)
+    if any(row.status != "aberta" for row in rows):
+        raise HTTPException(status_code=400, detail="Venda com status inconsistente")
+
+    subtotal = _money(
+        sum(_as_float(row.quantity) * _as_float(row.unit_price) for row in rows)
+    )
+
+    now = _now_recife()
+    cpf_cliente = _digits_only(payload.cpf_cliente)
+    paid_amount = payload.paid_amount if payload.paid_amount is not None else subtotal
+    change_amount = _money(paid_amount - subtotal)
+    for row in rows:
+        row.status = "paga"
+        row.cpf_cliente = cpf_cliente
+        row.customer_name = (
+            payload.customer_name.strip()
+            if payload.customer_name
+            else row.customer_name
+        )
+        row.payment_method = payload.payment_method
+        row.paid_amount = paid_amount
+        row.change_amount = change_amount
+        row.discount_total = 0
+        row.total = subtotal
+        row.notes = payload.notes if payload.notes is not None else row.notes
+        row.confirmed_at = now
+        row.updated_at = now
+    db.commit()
+    return _serialize_venda_group(rows)
+
+
+@app.patch("/api/vendas/{venda_id}/cancelar", response_model=VendaDetailOut)
+def cancel_venda(venda_id: str, db: Session = Depends(get_db)):
+    rows = _get_venda_rows_or_404(db, venda_id)
+    if all(row.status == "cancelada" for row in rows):
+        return _serialize_venda_group(rows)
+
+    now = _now_recife()
+    for row in rows:
+        row.status = "cancelada"
+        row.canceled_at = now
+        row.updated_at = now
+    db.commit()
+    return _serialize_venda_group(rows)
+
+
+@app.get("/api/vendas", response_model=VendaPaginado)
+def get_vendas(
+    status: Optional[str] = None,
+    q: Optional[str] = None,
+    date_from: Optional[date] = None,
+    date_to: Optional[date] = None,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=25, ge=1, le=100),
+    db: Session = Depends(get_db),
+):
+    if date_from and date_to and date_from > date_to:
+        raise HTTPException(status_code=400, detail="Data inicial maior que data final")
+    query = db.query(
+        func.coalesce(Venda.comanda_id, Venda.id).label("group_id"),
+        func.max(Venda.date_time).label("date_time"),
+        func.max(Venda.customer_name).label("customer_name"),
+        func.max(Venda.cpf_cliente).label("cpf_cliente"),
+        func.max(Venda.mesa_numero).label("mesa_numero"),
+        func.max(Venda.status).label("status"),
+        func.max(Venda.payment_method).label("payment_method"),
+        func.count(Venda.id).label("items_count"),
+        func.coalesce(func.sum(Venda.quantity), 0).label("items_qty"),
+        func.coalesce(
+            func.max(Venda.total), func.sum(Venda.quantity * Venda.unit_price), 0
+        ).label("total"),
+        func.coalesce(func.max(Venda.paid_amount), 0).label("paid_total"),
+    )
+    if status:
+        query = query.filter(Venda.status == status)
+    if q:
+        like = f"%{q}%"
+        query = query.filter(
+            or_(
+                Venda.id.ilike(like),
+                Venda.comanda_id.ilike(like),
+                Venda.customer_name.ilike(like),
+                Venda.cpf_cliente.ilike(like),
+            )
+        )
+    if date_from:
+        query = query.filter(func.date(Venda.date_time) >= date_from)
+    if date_to:
+        query = query.filter(func.date(Venda.date_time) <= date_to)
+
+    query = query.group_by(func.coalesce(Venda.comanda_id, Venda.id))
+
+    total = query.count()
+    revenue_rows = query.subquery()
+    paid_revenue_total = _as_float(
+        db.query(func.coalesce(func.sum(revenue_rows.c.total), 0))
+        .filter(revenue_rows.c.status == "paga")
+        .scalar()
+    )
+    total_pages = max(1, math.ceil(total / page_size))
+    vendas = (
+        query.order_by(desc("date_time"), desc("group_id"))
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+        .all()
+    )
+    items = [
+        VendaListItem(
+            id=venda.group_id,
+            comanda_id=venda.group_id,
+            date_time=venda.date_time,
+            customer_name=venda.customer_name,
+            cpf_cliente=venda.cpf_cliente,
+            mesa_numero=venda.mesa_numero,
+            status=venda.status,
+            payment_method=venda.payment_method,
+            items_count=int(venda.items_count or 0),
+            items_qty=_as_float(venda.items_qty),
+            total=_as_float(venda.total),
+            paid_total=_as_float(venda.paid_total),
+        )
+        for venda in vendas
+    ]
+    return VendaPaginado(
+        items=items,
+        total=total,
+        page=page,
+        page_size=page_size,
+        total_pages=total_pages,
+        paid_revenue_total=paid_revenue_total,
+    )
+
+
+def _default_daily_sales_flags(db: Session, target_date: date) -> dict[str, int]:
+    holiday = (
+        db.query(FeriadoRecife)
+        .filter(FeriadoRecife.data == target_date)
+        .first()
+    )
+    return {
+        "is_holiday": 1 if holiday else 0,
+        "is_carnaval_window": 0,
+        "is_sao_joao": 1 if target_date.month == 6 else 0,
+        "is_summer": 1 if target_date.month in {12, 1, 2} else 0,
+        "is_promo_day": 0,
+        "is_rain_event": 0,
+        "is_closure": 0,
+    }
+
+
+def _serialize_resumo_diario_venda(row: ResumoDiarioVenda) -> VendaFechamentoDiaOut:
+    return VendaFechamentoDiaOut(
+        date=row.date,
+        vendas_dia=row.vendas_dia,
+        is_holiday=row.is_holiday,
+        is_carnaval_window=row.is_carnaval_window,
+        is_sao_joao=row.is_sao_joao,
+        is_summer=row.is_summer,
+        is_promo_day=row.is_promo_day,
+        is_rain_event=row.is_rain_event,
+        is_closure=row.is_closure,
+    )
+
+
+@app.post("/api/vendas/fechamento-dia", response_model=VendaFechamentoDiaOut)
+def fechar_dia_vendas(
+    target_date: Optional[date] = Query(default=None, alias="date"),
+    db: Session = Depends(get_db),
+):
+    if not isinstance(target_date, date):
+        target_date = None
+    target_date = target_date or _now_recife().date()
+    vendas_dia = (
+        db.query(func.count(Venda.id))
+        .filter(Venda.status == "paga")
+        .filter(func.date(Venda.date_time) == target_date)
+        .scalar()
+        or 0
+    )
+    row = (
+        db.query(ResumoDiarioVenda)
+        .filter(ResumoDiarioVenda.date == target_date)
+        .first()
+    )
+    if row is None:
+        flags = _default_daily_sales_flags(db, target_date)
+        row = ResumoDiarioVenda(
+            date=target_date,
+            vendas_dia=int(vendas_dia),
+            **flags,
+        )
+        db.add(row)
+    else:
+        row.vendas_dia = int(vendas_dia)
+    db.commit()
+    db.refresh(row)
+    return _serialize_resumo_diario_venda(row)
+
+
+@app.get("/api/vendas/{venda_id}", response_model=VendaDetailOut)
+def get_venda_detail(venda_id: str, db: Session = Depends(get_db)):
+    return _serialize_venda_group(_get_venda_rows_or_404(db, venda_id))
 
 
 # ---------------------------------------------------------------------------
@@ -4242,7 +5822,10 @@ def _next_pedido_id(db: Session, reserved_ids: Optional[set[str]] = None) -> str
             next_number = db.query(func.count(Pedido.id)).scalar() + 1
 
     pedido_id = f"PED{next_number:012d}"
-    while pedido_id in reserved_ids or db.query(Pedido).filter(Pedido.id == pedido_id).first():
+    while (
+        pedido_id in reserved_ids
+        or db.query(Pedido).filter(Pedido.id == pedido_id).first()
+    ):
         next_number += 1
         pedido_id = f"PED{next_number:012d}"
     reserved_ids.add(pedido_id)
@@ -4256,22 +5839,19 @@ def _add_pedidos_to_estoque_atual(
 ) -> None:
     received_by_ingredient: dict[str, float] = {}
     for pedido in pedidos:
-        received_by_ingredient[pedido.ingredient_id] = (
-            received_by_ingredient.get(pedido.ingredient_id, 0.0)
-            + _as_float(pedido.qty)
-        )
+        received_by_ingredient[pedido.ingredient_id] = received_by_ingredient.get(
+            pedido.ingredient_id, 0.0
+        ) + _as_float(pedido.qty)
 
     for ingredient_id, received_qty in received_by_ingredient.items():
         db.execute(
-            text(
-                """
+            text("""
                 INSERT INTO estoque_atual (id, ingrediente, qtd, data)
                 VALUES (:id, :ingrediente, :qtd, :data)
                 ON CONFLICT (ingrediente) DO UPDATE
                 SET qtd = estoque_atual.qtd + EXCLUDED.qtd,
                     data = EXCLUDED.data
-                """
-            ),
+                """),
             {
                 "id": f"CUR-{ingredient_id}",
                 "ingrediente": ingredient_id,
@@ -4347,9 +5927,9 @@ def _pedido_group_query(db: Session):
             func.count(func.distinct(Pedido.ingredient_id)).label("ingredients_count"),
             func.sum(Pedido.qty).label("items_qty"),
             func.sum(Pedido.valor).label("total_value"),
-            func.sum(
-                case((Pedido.status == "em_transito", 1), else_=0)
-            ).label("transit_count"),
+            func.sum(case((Pedido.status == "em_transito", 1), else_=0)).label(
+                "transit_count"
+            ),
         )
         .join(Fornecedor, Fornecedor.id == Pedido.supplier_id)
         .join(Ingrediente, Ingrediente.id == Pedido.ingredient_id)
@@ -4502,7 +6082,9 @@ def _send_pedido_emails(
 # ---------------------------------------------------------------------------
 
 
-def _purchase_recent_usage_window(db: Session, days: int, reference_date: date) -> dict[str, float]:
+def _purchase_recent_usage_window(
+    db: Session, days: int, reference_date: date
+) -> dict[str, float]:
     horizon_days = max(1, days)
     end_date = reference_date - timedelta(days=1)
     start_date = reference_date - timedelta(days=horizon_days)
@@ -4517,6 +6099,7 @@ def _purchase_recent_usage_window(db: Session, days: int, reference_date: date) 
         .join(Receita, Receita.id == Venda.recipe_id)
         .join(ReceitaIngrediente, ReceitaIngrediente.recipe_id == Receita.id)
         .join(Ingrediente, Ingrediente.id == ReceitaIngrediente.ingredient_id)
+        .filter(Venda.status == "paga")
         .filter(func.date(Venda.date_time) >= start_date)
         .filter(func.date(Venda.date_time) <= end_date)
         .filter(Ingrediente.category_id != PRODUCTION_CATEGORY_ID)
@@ -4541,7 +6124,73 @@ def _purchase_in_transit_map(db: Session) -> dict[str, float]:
     return {ingredient_id: _as_float(qty) for ingredient_id, qty in rows}
 
 
-def _purchase_criticality_label(item: Optional[CriticalityReportItem], stock_position: float, forecast_qty: float) -> str:
+def _latest_abt_criticality_by_ingredient(db: Session) -> dict[str, str]:
+    try:
+        with db.begin_nested():
+            rows = db.execute(text("""
+                    SELECT ingredient_id, y_nivel_criticidade
+                    FROM (
+                        SELECT
+                            ingredient_id,
+                            y_nivel_criticidade,
+                            ROW_NUMBER() OVER (
+                                PARTITION BY ingredient_id
+                                ORDER BY "date" DESC
+                            ) AS row_number
+                        FROM ml.abt_reposicao
+                        WHERE y_nivel_criticidade IS NOT NULL
+                    ) latest
+                    WHERE row_number = 1
+                    """)).all()
+    except Exception:
+        logger.exception("Falha ao carregar criticidade de ml.abt_reposicao")
+        return {}
+    return {
+        str(ingredient_id): str(criticality)
+        for ingredient_id, criticality in rows
+        if ingredient_id and criticality
+    }
+
+
+def _purchase_display_criticality(label: str) -> str:
+    normalized = (
+        normalize("NFKD", label or "")
+        .encode("ascii", "ignore")
+        .decode("ascii")
+        .strip()
+        .lower()
+    )
+    labels = {
+        "emergencial": "Emergencial",
+        "critico": "Crítico",
+        "atencao": "Atenção",
+        "alerta de compra": "Alerta de compra",
+        "ok": "OK",
+    }
+    return labels.get(normalized, label or "OK")
+
+
+def _resolve_purchase_criticality(
+    item: Optional[CriticalityReportItem],
+    abt_criticality: Optional[str],
+    stock_position: float,
+    forecast_qty: float,
+) -> tuple[str, str]:
+    if item is not None and item.criticidade_predita:
+        return _purchase_display_criticality(item.criticidade_predita), "model_report"
+    if abt_criticality:
+        return _purchase_display_criticality(abt_criticality), "abt_reposicao"
+    return (
+        _purchase_display_criticality(
+            _purchase_criticality_label(None, stock_position, forecast_qty)
+        ),
+        "operational_rule",
+    )
+
+
+def _purchase_criticality_label(
+    item: Optional[CriticalityReportItem], stock_position: float, forecast_qty: float
+) -> str:
     if item is not None and item.criticidade_predita:
         return item.criticidade_predita
     if stock_position <= 0:
@@ -4553,12 +6202,19 @@ def _purchase_criticality_label(item: Optional[CriticalityReportItem], stock_pos
 
 def _purchase_status_is_critical(label: str) -> bool:
     normalized = (
-        normalize("NFKD", label or "")
-        .encode("ascii", "ignore")
-        .decode("ascii")
-        .lower()
+        normalize("NFKD", label or "").encode("ascii", "ignore").decode("ascii").lower()
     )
-    return any(token in normalized for token in ("critico", "alerta", "zerado", "ruptura"))
+    return any(
+        token in normalized
+        for token in (
+            "emergencial",
+            "critico",
+            "atencao",
+            "alerta",
+            "zerado",
+            "ruptura",
+        )
+    )
 
 
 def _purchase_option_score(
@@ -4609,7 +6265,9 @@ def _sync_purchase_plan_quotes(db: Session, plan: PurchasePlan) -> None:
                 "total": 0.0,
             },
         )
-        payload["total"] += _as_float(item.approved_qty) * _as_float(option.effective_unit_price)
+        payload["total"] += _as_float(item.approved_qty) * _as_float(
+            option.effective_unit_price
+        )
 
     existing = {quote.supplier_id: quote for quote in plan.quotes}
     for supplier_id, payload in selected_totals.items():
@@ -4627,38 +6285,51 @@ def _sync_purchase_plan_quotes(db: Session, plan: PurchasePlan) -> None:
         quote.email = payload.get("email")
         quote.total_estimated = round(payload["total"], 2)
 
-    for quote in plan.quotes:
+    for quote in list(plan.quotes):
         if quote.supplier_id not in selected_totals and quote.status == "rascunho":
-            quote.total_estimated = 0
+            plan.quotes.remove(quote)
 
 
 def _recalculate_purchase_plan(plan: PurchasePlan) -> None:
     items = list(plan.items)
-    plan.total_estimated = round(sum(_as_float(item.estimated_total) for item in items), 2)
+    plan.total_estimated = round(
+        sum(_as_float(item.estimated_total) for item in items), 2
+    )
     plan.approved_total = round(
-        sum(_as_float(item.approved_qty) * _as_float(item.estimated_unit_price) for item in items),
+        sum(
+            _as_float(item.approved_qty) * _as_float(item.estimated_unit_price)
+            for item in items
+        ),
         2,
     )
-    plan.critical_items_count = sum(1 for item in items if _purchase_status_is_critical(item.criticality))
+    plan.critical_items_count = sum(
+        1 for item in items if _purchase_status_is_critical(item.criticality)
+    )
     coverages = [
         min(_as_float(item.coverage_days), 90.0)
         for item in items
         if _as_float(item.avg_daily_usage) > 0
     ]
-    plan.avg_coverage_days = round(sum(coverages) / len(coverages), 2) if coverages else 0
+    plan.avg_coverage_days = (
+        round(sum(coverages) / len(coverages), 2) if coverages else 0
+    )
     best_total = 0.0
     selected_total = 0.0
     for item in items:
         qty = _as_float(item.approved_qty)
         if qty <= 0 or not item.options:
             continue
-        best_total += min(_as_float(option.effective_unit_price) * qty for option in item.options)
+        best_total += min(
+            _as_float(option.effective_unit_price) * qty for option in item.options
+        )
         selected_total += _as_float(item.estimated_unit_price) * qty
     plan.savings_potential = round(max(0.0, selected_total - best_total), 2)
     plan.updated_at = _now_recife()
 
 
-def _serialize_purchase_option(option: PurchasePlanSupplierOption) -> PurchasePlanSupplierOptionOut:
+def _serialize_purchase_option(
+    option: PurchasePlanSupplierOption,
+) -> PurchasePlanSupplierOptionOut:
     return PurchasePlanSupplierOptionOut(
         id=option.id,
         supplier_id=option.supplier_id,
@@ -4676,7 +6347,9 @@ def _serialize_purchase_option(option: PurchasePlanSupplierOption) -> PurchasePl
 
 
 def _serialize_purchase_item(item: PurchasePlanItem) -> PurchasePlanItemOut:
-    options = sorted(item.options, key=lambda option: (option.score, option.supplier_name))
+    options = sorted(
+        item.options, key=lambda option: (option.score, option.supplier_name)
+    )
     return PurchasePlanItemOut(
         id=item.id,
         ingredient_id=item.ingredient_id,
@@ -4695,6 +6368,7 @@ def _serialize_purchase_item(item: PurchasePlanItem) -> PurchasePlanItemOut:
         estimated_total=_as_float(item.estimated_total),
         coverage_days=_as_float(item.coverage_days),
         criticality=item.criticality,
+        criticality_source=item.criticality_source,
         justification=item.justification,
         note=item.note,
         options=[_serialize_purchase_option(option) for option in options],
@@ -4747,13 +6421,17 @@ def _serialize_purchase_plan(plan: PurchasePlan) -> PurchasePlanOut:
     )
 
 
-def _build_purchase_plan(payload: PurchasePlanGenerateRequest, db: Session) -> PurchasePlan:
+def _build_purchase_plan(
+    payload: PurchasePlanGenerateRequest, db: Session
+) -> PurchasePlan:
     if payload.contagem_id is not None:
         contagem = db.query(Contagem).filter(Contagem.id == payload.contagem_id).first()
         if contagem is None:
             raise HTTPException(status_code=404, detail="Contagem não encontrada")
         if contagem.status != "finalizada":
-            raise HTTPException(status_code=400, detail="A contagem precisa estar finalizada")
+            raise HTTPException(
+                status_code=400, detail="A contagem precisa estar finalizada"
+            )
 
     today = _now_recife().date()
     horizon_days = max(1, min(30, payload.horizon_days or 7))
@@ -4765,10 +6443,25 @@ def _build_purchase_plan(payload: PurchasePlanGenerateRequest, db: Session) -> P
     usage_by_ingredient = _purchase_recent_usage_window(db, horizon_days, date_from)
     in_transit_by_ingredient = _purchase_in_transit_map(db)
     criticidade_run, criticidade_by_ingredient = _latest_criticidade_by_ingredient(db)
-    source = "contagem" if payload.contagem_id else ("criticidade" if criticidade_run else "manual")
+    abt_criticality_by_ingredient = _latest_abt_criticality_by_ingredient(db)
+    source = (
+        "contagem"
+        if payload.contagem_id
+        else (
+            "model_report"
+            if criticidade_run
+            else (
+                "abt_reposicao" if abt_criticality_by_ingredient else "operational_rule"
+            )
+        )
+    )
 
     rows = (
-        db.query(Ingrediente, Categoria.name.label("category_name"), EstoqueAtual.qtd.label("current_qty"))
+        db.query(
+            Ingrediente,
+            Categoria.name.label("category_name"),
+            EstoqueAtual.qtd.label("current_qty"),
+        )
         .join(Categoria, Categoria.id == Ingrediente.category_id)
         .outerjoin(EstoqueAtual, EstoqueAtual.ingrediente == Ingrediente.id)
         .filter(Ingrediente.category_id != PRODUCTION_CATEGORY_ID)
@@ -4790,12 +6483,19 @@ def _build_purchase_plan(payload: PurchasePlanGenerateRequest, db: Session) -> P
     for ingredient, category_name, current_qty_raw in rows:
         current_qty = _as_float(current_qty_raw)
         recent_usage_qty = max(0.0, _as_float(usage_by_ingredient.get(ingredient.id)))
-        avg_daily_usage = round(recent_usage_qty / horizon_days, 4) if horizon_days > 0 else 0.0
+        avg_daily_usage = (
+            round(recent_usage_qty / horizon_days, 4) if horizon_days > 0 else 0.0
+        )
         forecast_qty = round(recent_usage_qty, 4)
         in_transit_qty = _as_float(in_transit_by_ingredient.get(ingredient.id))
         stock_position = current_qty + in_transit_qty
         criticality_item = criticidade_by_ingredient.get(ingredient.id)
-        criticality = _purchase_criticality_label(criticality_item, stock_position, forecast_qty)
+        criticality, criticality_source = _resolve_purchase_criticality(
+            criticality_item,
+            abt_criticality_by_ingredient.get(ingredient.id),
+            stock_position,
+            forecast_qty,
+        )
         recommended_qty = max(0.0, forecast_qty)
         recommended_qty = round(recommended_qty, 2)
         if recommended_qty <= 0 and not _purchase_status_is_critical(criticality):
@@ -4819,7 +6519,12 @@ def _build_purchase_plan(payload: PurchasePlanGenerateRequest, db: Session) -> P
             .all()
         )
         option_payloads: list[dict] = []
-        for supplier_option, supplier_name, supplier_email, avg_delivery_time in supplier_rows:
+        for (
+            supplier_option,
+            supplier_name,
+            supplier_email,
+            avg_delivery_time,
+        ) in supplier_rows:
             delivery_days = int(avg_delivery_time or 0)
             effective_price, _ = _effective_unit_price(
                 supplier_option.price,
@@ -4829,7 +6534,9 @@ def _build_purchase_plan(payload: PurchasePlanGenerateRequest, db: Session) -> P
             )
             delay_risk = 0.0
             if avg_daily_usage > 0 and coverage_before < delivery_days:
-                delay_risk = min(1.0, (delivery_days - coverage_before) / max(1, delivery_days))
+                delay_risk = min(
+                    1.0, (delivery_days - coverage_before) / max(1, delivery_days)
+                )
             score = _purchase_option_score(
                 effective_price,
                 delivery_days,
@@ -4850,9 +6557,13 @@ def _build_purchase_plan(payload: PurchasePlanGenerateRequest, db: Session) -> P
                     "score": score,
                 }
             )
-        option_payloads.sort(key=lambda option: (option["score"], option["supplier_name"]))
+        option_payloads.sort(
+            key=lambda option: (option["score"], option["supplier_name"])
+        )
         selected = option_payloads[0] if option_payloads else None
-        selected_unit_price = _as_float(selected["effective_unit_price"]) if selected else 0.0
+        selected_unit_price = (
+            _as_float(selected["effective_unit_price"]) if selected else 0.0
+        )
         coverage_after = (
             (stock_position + recommended_qty) / avg_daily_usage
             if avg_daily_usage > 0
@@ -4881,6 +6592,7 @@ def _build_purchase_plan(payload: PurchasePlanGenerateRequest, db: Session) -> P
             estimated_total=round(selected_unit_price * recommended_qty, 2),
             coverage_days=round(min(coverage_after, 999.0), 2),
             criticality=criticality,
+            criticality_source=criticality_source,
             justification=justification,
         )
         plan.items.append(item)
@@ -4935,13 +6647,19 @@ def _get_purchase_plan_or_404(db: Session, plan_id: int) -> PurchasePlan:
     return plan
 
 
-def _find_item_option(item: PurchasePlanItem, supplier_id: Optional[str]) -> Optional[PurchasePlanSupplierOption]:
+def _find_item_option(
+    item: PurchasePlanItem, supplier_id: Optional[str]
+) -> Optional[PurchasePlanSupplierOption]:
     if not supplier_id:
         return None
-    return next((option for option in item.options if option.supplier_id == supplier_id), None)
+    return next(
+        (option for option in item.options if option.supplier_id == supplier_id), None
+    )
 
 
-def _purchase_simulation(plan: PurchasePlan, payload: PurchasePlanSimulationRequest) -> PurchasePlanSimulationOut:
+def _purchase_simulation(
+    plan: PurchasePlan, payload: PurchasePlanSimulationRequest
+) -> PurchasePlanSimulationOut:
     overrides = {item.ingredient_id: item for item in payload.items}
     approved_total = 0.0
     best_total = 0.0
@@ -4952,29 +6670,55 @@ def _purchase_simulation(plan: PurchasePlan, payload: PurchasePlanSimulationRequ
 
     for item in plan.items:
         override = overrides.get(item.ingredient_id)
-        approved_qty = _as_float(override.approved_qty) if override else _as_float(item.approved_qty)
+        approved_qty = (
+            _as_float(override.approved_qty)
+            if override
+            else _as_float(item.approved_qty)
+        )
         selected_option = (
             _find_item_option(item, override.selected_supplier_id)
             if override and override.selected_supplier_id
             else _find_item_option(item, item.selected_supplier_id)
         )
-        unit_price = _as_float(selected_option.effective_unit_price) if selected_option else _as_float(item.estimated_unit_price)
+        unit_price = (
+            _as_float(selected_option.effective_unit_price)
+            if selected_option
+            else _as_float(item.estimated_unit_price)
+        )
         approved_total += approved_qty * unit_price
         if item.options and approved_qty > 0:
-            best_total += min(_as_float(option.effective_unit_price) * approved_qty for option in item.options)
+            best_total += min(
+                _as_float(option.effective_unit_price) * approved_qty
+                for option in item.options
+            )
         avg_usage = _as_float(item.avg_daily_usage)
-        stock_after = _as_float(item.current_qty) + _as_float(item.in_transit_qty) + approved_qty
-        coverage = stock_after / avg_usage if avg_usage > 0 else (90.0 if stock_after > 0 else 0.0)
+        stock_after = (
+            _as_float(item.current_qty) + _as_float(item.in_transit_qty) + approved_qty
+        )
+        coverage = (
+            stock_after / avg_usage
+            if avg_usage > 0
+            else (90.0 if stock_after > 0 else 0.0)
+        )
         if avg_usage > 0:
             coverage_values.append(min(coverage, 90.0))
-        lead_time = int(selected_option.delivery_time_days or 0) if selected_option else 0
+        lead_time = (
+            int(selected_option.delivery_time_days or 0) if selected_option else 0
+        )
         if avg_usage > 0 and coverage < lead_time:
             rupture_risk_items += 1
-            notes.append(f"{item.ingredient_name}: cobertura ({coverage:.1f} dias) menor que prazo ({lead_time} dias).")
-        if _purchase_status_is_critical(item.criticality) or coverage < plan.horizon_days:
+            notes.append(
+                f"{item.ingredient_name}: cobertura ({coverage:.1f} dias) menor que prazo ({lead_time} dias)."
+            )
+        if (
+            _purchase_status_is_critical(item.criticality)
+            or coverage < plan.horizon_days
+        ):
             critical_items_count += 1
 
-    projected_coverage = round(sum(coverage_values) / len(coverage_values), 2) if coverage_values else 0
+    projected_coverage = (
+        round(sum(coverage_values) / len(coverage_values), 2) if coverage_values else 0
+    )
     return PurchasePlanSimulationOut(
         total_estimated=_as_float(plan.total_estimated),
         approved_total=round(approved_total, 2),
@@ -4987,13 +6731,19 @@ def _purchase_simulation(plan: PurchasePlan, payload: PurchasePlanSimulationRequ
 
 
 @app.post("/api/compras/planos/gerar", response_model=PurchasePlanOut)
-def generate_purchase_plan(payload: PurchasePlanGenerateRequest, db: Session = Depends(get_db)):
+def generate_purchase_plan(
+    payload: PurchasePlanGenerateRequest, db: Session = Depends(get_db)
+):
     return _serialize_purchase_plan(_build_purchase_plan(payload, db))
 
 
 @app.get("/api/compras/planos/latest", response_model=Optional[PurchasePlanOut])
 def get_latest_purchase_plan(db: Session = Depends(get_db)):
-    plan = db.query(PurchasePlan).order_by(PurchasePlan.created_at.desc(), PurchasePlan.id.desc()).first()
+    plan = (
+        db.query(PurchasePlan)
+        .order_by(PurchasePlan.created_at.desc(), PurchasePlan.id.desc())
+        .first()
+    )
     return _serialize_purchase_plan(plan) if plan else None
 
 
@@ -5002,7 +6752,10 @@ def get_purchase_plan(plan_id: int, db: Session = Depends(get_db)):
     return _serialize_purchase_plan(_get_purchase_plan_or_404(db, plan_id))
 
 
-@app.patch("/api/compras/planos/{plan_id}/items/{ingredient_id}", response_model=PurchasePlanOut)
+@app.patch(
+    "/api/compras/planos/{plan_id}/items/{ingredient_id}",
+    response_model=PurchasePlanOut,
+)
 def update_purchase_plan_item(
     plan_id: int,
     ingredient_id: str,
@@ -5010,7 +6763,18 @@ def update_purchase_plan_item(
     db: Session = Depends(get_db),
 ):
     plan = _get_purchase_plan_or_404(db, plan_id)
-    item = next((plan_item for plan_item in plan.items if plan_item.ingredient_id == ingredient_id), None)
+    if plan.status == "aprovado":
+        raise HTTPException(
+            status_code=409, detail="Plano aprovado não pode ser alterado"
+        )
+    item = next(
+        (
+            plan_item
+            for plan_item in plan.items
+            if plan_item.ingredient_id == ingredient_id
+        ),
+        None,
+    )
     if item is None:
         raise HTTPException(status_code=404, detail="Item do plano não encontrado")
     if payload.approved_qty is not None:
@@ -5018,18 +6782,30 @@ def update_purchase_plan_item(
     if payload.selected_supplier_id is not None:
         option = _find_item_option(item, payload.selected_supplier_id)
         if option is None:
-            raise HTTPException(status_code=400, detail="Fornecedor inválido para o item")
+            raise HTTPException(
+                status_code=400, detail="Fornecedor inválido para o item"
+            )
         for item_option in item.options:
-            item_option.recommended = 1 if item_option.supplier_id == option.supplier_id else 0
+            item_option.recommended = (
+                1 if item_option.supplier_id == option.supplier_id else 0
+            )
         item.selected_supplier_id = option.supplier_id
         item.selected_supplier_name = option.supplier_name
         item.estimated_unit_price = option.effective_unit_price
     if payload.note is not None:
         item.note = payload.note
-    item.estimated_total = round(_as_float(item.approved_qty) * _as_float(item.estimated_unit_price), 2)
+    item.estimated_total = round(
+        _as_float(item.approved_qty) * _as_float(item.estimated_unit_price), 2
+    )
     avg_usage = _as_float(item.avg_daily_usage)
-    stock_after = _as_float(item.current_qty) + _as_float(item.in_transit_qty) + _as_float(item.approved_qty)
-    item.coverage_days = round(min(stock_after / avg_usage if avg_usage > 0 else 90.0, 999.0), 2)
+    stock_after = (
+        _as_float(item.current_qty)
+        + _as_float(item.in_transit_qty)
+        + _as_float(item.approved_qty)
+    )
+    item.coverage_days = round(
+        min(stock_after / avg_usage if avg_usage > 0 else 90.0, 999.0), 2
+    )
     plan.status = "em_revisao" if plan.status == "rascunho" else plan.status
     _sync_purchase_plan_quotes(db, plan)
     _recalculate_purchase_plan(plan)
@@ -5038,7 +6814,43 @@ def update_purchase_plan_item(
     return _serialize_purchase_plan(plan)
 
 
-@app.post("/api/compras/planos/{plan_id}/simular", response_model=PurchasePlanSimulationOut)
+@app.delete(
+    "/api/compras/planos/{plan_id}/items/{ingredient_id}",
+    response_model=PurchasePlanOut,
+)
+def delete_purchase_plan_item(
+    plan_id: int,
+    ingredient_id: str,
+    db: Session = Depends(get_db),
+):
+    plan = _get_purchase_plan_or_404(db, plan_id)
+    if plan.status == "aprovado":
+        raise HTTPException(
+            status_code=409, detail="Plano aprovado não pode ser alterado"
+        )
+    item = next(
+        (
+            plan_item
+            for plan_item in plan.items
+            if plan_item.ingredient_id == ingredient_id
+        ),
+        None,
+    )
+    if item is None:
+        raise HTTPException(status_code=404, detail="Item do plano não encontrado")
+
+    plan.items.remove(item)
+    plan.status = "em_revisao" if plan.status == "rascunho" else plan.status
+    _sync_purchase_plan_quotes(db, plan)
+    _recalculate_purchase_plan(plan)
+    db.commit()
+    db.refresh(plan)
+    return _serialize_purchase_plan(plan)
+
+
+@app.post(
+    "/api/compras/planos/{plan_id}/simular", response_model=PurchasePlanSimulationOut
+)
 def simulate_purchase_plan(
     plan_id: int,
     payload: PurchasePlanSimulationRequest,
@@ -5055,8 +6867,13 @@ def _purchase_plan_email_groups(plan: PurchasePlan) -> dict[str, dict]:
         option = _find_item_option(item, item.selected_supplier_id)
         if option is None:
             continue
-        quote = next((quote for quote in plan.quotes if quote.supplier_id == option.supplier_id), None)
-        expected_date = _now_recife().date() + timedelta(days=int(option.delivery_time_days or 0))
+        quote = next(
+            (quote for quote in plan.quotes if quote.supplier_id == option.supplier_id),
+            None,
+        )
+        expected_date = _now_recife().date() + timedelta(
+            days=int(option.delivery_time_days or 0)
+        )
         group = groups.setdefault(
             option.supplier_id,
             {
@@ -5073,17 +6890,25 @@ def _purchase_plan_email_groups(plan: PurchasePlan) -> dict[str, dict]:
                 qty=_as_float(item.approved_qty),
                 unit=item.unit or "",
                 unit_price=_as_float(option.effective_unit_price),
-                total_value=round(_as_float(option.effective_unit_price) * _as_float(item.approved_qty), 2),
+                total_value=round(
+                    _as_float(option.effective_unit_price)
+                    * _as_float(item.approved_qty),
+                    2,
+                ),
             )
         )
     return groups
 
 
-@app.post("/api/compras/planos/{plan_id}/cotacoes/enviar", response_model=PurchasePlanOut)
+@app.post(
+    "/api/compras/planos/{plan_id}/cotacoes/enviar", response_model=PurchasePlanOut
+)
 def send_purchase_plan_quotes(plan_id: int, db: Session = Depends(get_db)):
     plan = _get_purchase_plan_or_404(db, plan_id)
     _sync_purchase_plan_quotes(db, plan)
-    email_results = _send_pedido_emails(_purchase_plan_email_groups(plan), _now_recife().date())
+    email_results = _send_pedido_emails(
+        _purchase_plan_email_groups(plan), _now_recife().date()
+    )
     by_supplier = {result.supplier_id: result for result in email_results}
     sent_any = False
     for quote in plan.quotes:
@@ -5108,7 +6933,11 @@ def approve_purchase_plan(plan_id: int, db: Session = Depends(get_db)):
     plan = _get_purchase_plan_or_404(db, plan_id)
     _sync_purchase_plan_quotes(db, plan)
     items = [
-        PedidoCreateItem(supplier_id=item.selected_supplier_id, ingredient_id=item.ingredient_id, qty=_as_float(item.approved_qty))
+        PedidoCreateItem(
+            supplier_id=item.selected_supplier_id,
+            ingredient_id=item.ingredient_id,
+            qty=_as_float(item.approved_qty),
+        )
         for item in plan.items
         if item.selected_supplier_id and _as_float(item.approved_qty) > 0
     ]
@@ -5155,6 +6984,7 @@ def export_purchase_plan(
             "total": _as_float(item.estimated_total),
             "cobertura_dias": _as_float(item.coverage_days),
             "criticidade": item.criticality,
+            "origem_criticidade": item.criticality_source,
             "justificativa": item.justification,
         }
         for item in plan.items
@@ -5553,7 +7383,9 @@ def export_pedidos(
         .join(Categoria, Categoria.id == Ingrediente.category_id)
         .filter(Pedido.data_pedido >= date_from)
         .filter(Pedido.data_pedido <= date_to)
-        .order_by(Pedido.data_pedido.asc(), Fornecedor.name.asc(), Ingrediente.name.asc())
+        .order_by(
+            Pedido.data_pedido.asc(), Fornecedor.name.asc(), Ingrediente.name.asc()
+        )
         .all()
     )
     data = [
@@ -5812,6 +7644,7 @@ def get_pedido_detail(pedido_id: str, db: Session = Depends(get_db)):
 # Log de contagem
 # ---------------------------------------------------------------------------
 
+
 def _serializa_log(e: LogContagem) -> LogContagemOut:
     return LogContagemOut(
         id=e.id,
@@ -5860,6 +7693,7 @@ def get_log_ingrediente(ingrediente_id: str, db: Session = Depends(get_db)):
 # Agente
 # ---------------------------------------------------------------------------
 
+
 def _normalize_agent_question(value: str) -> str:
     ascii_text = normalize("NFKD", value).encode("ascii", "ignore").decode("ascii")
     return re.sub(r"\s+", " ", ascii_text.lower()).strip()
@@ -5867,15 +7701,23 @@ def _normalize_agent_question(value: str) -> str:
 
 def _is_purchase_needed_question(message: str) -> bool:
     normalized = _normalize_agent_question(message)
-    has_item = any(term in normalized for term in ("item", "itens", "ingrediente", "insumo"))
-    has_purchase = any(term in normalized for term in ("compra", "comprar", "repor", "reposicao"))
-    has_need = any(term in normalized for term in ("precis", "necess", "alerta", "critico"))
+    has_item = any(
+        term in normalized for term in ("item", "itens", "ingrediente", "insumo")
+    )
+    has_purchase = any(
+        term in normalized for term in ("compra", "comprar", "repor", "reposicao")
+    )
+    has_need = any(
+        term in normalized for term in ("precis", "necess", "alerta", "critico")
+    )
     return has_item and has_purchase and has_need
 
 
 def _purchase_needed_fallback_rows() -> tuple[list[dict], int]:
     with engine.connect() as conn:
-        total = int(conn.execute(text(PURCHASE_NEEDED_FALLBACK_COUNT_SQL)).scalar() or 0)
+        total = int(
+            conn.execute(text(PURCHASE_NEEDED_FALLBACK_COUNT_SQL)).scalar() or 0
+        )
         result = conn.execute(
             text(PURCHASE_NEEDED_FALLBACK_SQL),
             {"limit": AGENT_ROWS_PREVIEW_LIMIT},

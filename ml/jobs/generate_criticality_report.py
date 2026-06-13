@@ -64,6 +64,12 @@ EXCLUDED_PURCHASE_CATEGORY_ID = "CAT0015"
 RECIFE_TZ = ZoneInfo("America/Recife")
 
 
+def normalize_database_url(url: str) -> str:
+    if url.startswith("postgresql+psycopg://"):
+        return url.replace("postgresql+psycopg://", "postgresql://", 1)
+    return url
+
+
 def today_recife() -> date:
     return datetime.now(RECIFE_TZ).date()
 
@@ -799,7 +805,7 @@ def insert_items(engine, run_id: int, scored: pd.DataFrame) -> None:
 
 
 def run_job(args: argparse.Namespace) -> int:
-    engine = create_engine(args.database_url)
+    engine = create_engine(normalize_database_url(args.database_url))
     ensure_schema(engine)
     reference_date = resolve_reference_date(engine, args.reference_date)
     model_run_id = model_run_id_from_uri(args.model_uri)

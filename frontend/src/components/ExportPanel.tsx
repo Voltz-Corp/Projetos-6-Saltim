@@ -37,7 +37,7 @@ export function ExportPanel({
       return
     }
     if (requiresDateRange && dateFrom > dateTo) {
-      setError('A data inicial nao pode ser maior que a data final.')
+      setError('A data inicial não pode ser maior que a data final.')
       return
     }
 
@@ -51,7 +51,7 @@ export function ExportPanel({
         themeId,
       })
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Nao foi possivel exportar.')
+      setError(err instanceof Error ? err.message : 'Não foi possível exportar.')
     } finally {
       setIsExporting(false)
     }

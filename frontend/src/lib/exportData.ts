@@ -49,7 +49,7 @@ export async function downloadExport({
   const response = await fetch(`${API_URL}/api/export/${area}?${params.toString()}`)
   if (!response.ok) {
     const detail = await readErrorDetail(response)
-    throw new Error(detail || 'Nao foi possivel exportar os dados.')
+    throw new Error(detail || 'Não foi possível exportar os dados.')
   }
 
   const blob = await response.blob()
@@ -77,7 +77,7 @@ export async function downloadDashboardExport(
   const response = await fetch(`${API_URL}/api/export/dashboard?${params.toString()}`)
   if (!response.ok) {
     const detail = await readErrorDetail(response)
-    throw new Error(detail || 'Nao foi possivel exportar o dashboard.')
+    throw new Error(detail || 'Não foi possível exportar o dashboard.')
   }
 
   const blob = await response.blob()
@@ -106,7 +106,7 @@ export async function downloadPurchasePlanExport(
   )
   if (!response.ok) {
     const detail = await readErrorDetail(response)
-    throw new Error(detail || 'Nao foi possivel exportar o plano de compra.')
+    throw new Error(detail || 'Não foi possível exportar o plano de compra.')
   }
 
   const blob = await response.blob()

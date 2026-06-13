@@ -149,7 +149,7 @@ function FornecedoresPage() {
                 isEmpty={isError || fornecedores.length === 0}
                 emptyMessage={
                   isError
-                    ? 'Nao foi possivel carregar os fornecedores.'
+                    ? 'Não foi possível carregar os fornecedores.'
                     : 'Nenhum fornecedor encontrado.'
                 }
                 embedded
@@ -221,7 +221,7 @@ function FornecedorProfilePage() {
       <main className="flex-1 overflow-auto p-6">
         {showLoading ? null : isError || !data ? (
           <section className="rounded-xl border border-stone-200 bg-white p-10 text-center text-sm text-stone-400 shadow-sm">
-            Fornecedor nao encontrado.
+            Fornecedor não encontrado.
           </section>
         ) : (
           <div className="space-y-6">

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type CSSProperties } from 'react'
 import { createRoute } from '@tanstack/react-router'
-import { Check, Moon, Palette, Sun, Trophy } from 'lucide-react'
+import { Check, Moon, Palette, Search, Sun, Trophy } from 'lucide-react'
 import { rootRoute } from './Root'
 import {
   CLASSIC_THEME_OPTIONS,
@@ -29,10 +29,34 @@ function AparenciaPage() {
     : 'classic'
   const [collection, setCollection] = useState<ThemeCollection>(initialCollection)
   const [confetti, setConfetti] = useState<ConfettiBurst | null>(null)
+  const [worldCupSearch, setWorldCupSearch] = useState('')
+  const [worldCupContinent, setWorldCupContinent] = useState('all')
 
-  const visibleThemes = collection === 'classic'
-    ? CLASSIC_THEME_OPTIONS
-    : WORLD_CUP_THEME_OPTIONS
+  const worldCupContinents = useMemo(
+    () =>
+      Array.from(
+        new Set(WORLD_CUP_THEME_OPTIONS.map((theme) => getWorldCupContinent(theme)).filter(Boolean)),
+      ).sort(),
+    [],
+  )
+
+  const visibleThemes = useMemo(() => {
+    if (collection === 'classic') return CLASSIC_THEME_OPTIONS
+
+    const searchTerm = normalizeThemeSearch(worldCupSearch)
+    return WORLD_CUP_THEME_OPTIONS
+      .filter((theme) => {
+        const continent = getWorldCupContinent(theme)
+        const matchesContinent = worldCupContinent === 'all' || continent === worldCupContinent
+        const matchesSearch =
+          !searchTerm ||
+          normalizeThemeSearch(theme.name).includes(searchTerm) ||
+          normalizeThemeSearch(theme.description).includes(searchTerm)
+
+        return matchesContinent && matchesSearch
+      })
+      .sort((current, next) => current.name.localeCompare(next.name, 'pt-BR'))
+  }, [collection, worldCupContinent, worldCupSearch])
 
   function handleThemeSelect(theme: ThemeOption) {
     const shouldCelebrate = theme.category === 'world-cup' && theme.id !== themeId
@@ -60,15 +84,15 @@ function AparenciaPage() {
       <header className="flex h-[73px] flex-shrink-0 items-center justify-between gap-4 border-b border-stone-200 bg-white px-8">
         <div>
           <p className="text-xs font-bold uppercase tracking-wide text-brand-600">
-            Configuracoes
+            Configurações
           </p>
           <h1 className="text-xl font-semibold text-stone-900">
-            Aparencia
+            Aparência
           </h1>
         </div>
         <div className="hidden items-center gap-2 rounded-lg border border-stone-200 bg-stone-50 px-3 py-2 text-xs font-bold text-stone-600 sm:flex">
           <Palette className="size-4 text-brand-600" strokeWidth={2} />
-          Aplicacao global e persistente
+          Aplicação global e persistente
         </div>
       </header>
 
@@ -106,7 +130,7 @@ function AparenciaPage() {
               <div>
                 <h2 className="text-base font-black text-stone-900">Temas visuais</h2>
                 <p className="mt-1 text-sm font-medium text-stone-500">
-                  Escolha uma identidade completa para cores, fundos, cards, tabelas, formularios e menus.
+                  Escolha uma identidade completa para cores, fundos, cards, tabelas, formulários e menus.
                 </p>
               </div>
               <ThemeCollectionToggle
@@ -115,11 +139,24 @@ function AparenciaPage() {
               />
             </div>
 
-            {collection === 'world-cup' && <WorldCupHeader />}
+            {collection === 'world-cup' && (
+              <>
+                <WorldCupHeader />
+                <WorldCupControls
+                  continents={worldCupContinents}
+                  search={worldCupSearch}
+                  selectedContinent={worldCupContinent}
+                  totalCount={WORLD_CUP_THEME_OPTIONS.length}
+                  visibleCount={visibleThemes.length}
+                  onContinentChange={setWorldCupContinent}
+                  onSearchChange={setWorldCupSearch}
+                />
+              </>
+            )}
 
             <div className="mb-4 flex items-center justify-between gap-3">
               <p className="text-xs font-bold uppercase tracking-wide text-stone-400">
-                {visibleThemes.length} opcoes
+                {visibleThemes.length} opções
               </p>
               {collection === 'world-cup' && (
                 <span className="inline-flex items-center gap-1.5 rounded-full border border-brand-200 bg-brand-50 px-3 py-1 text-[11px] font-black uppercase text-brand-700">
@@ -129,7 +166,7 @@ function AparenciaPage() {
               )}
             </div>
 
-            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
               {visibleThemes.map((theme) => (
                 <ThemeCard
                   key={theme.id}
@@ -139,6 +176,15 @@ function AparenciaPage() {
                 />
               ))}
             </div>
+
+            {visibleThemes.length === 0 && (
+              <div className="rounded-lg border border-dashed border-stone-300 bg-stone-50 p-8 text-center">
+                <p className="text-sm font-black text-stone-900">Nenhuma seleção encontrada</p>
+                <p className="mt-1 text-sm font-medium text-stone-500">
+                  Ajuste a busca ou selecione outro continente.
+                </p>
+              </div>
+            )}
           </section>
         </div>
       </main>
@@ -151,6 +197,33 @@ type ThemeCollection = 'classic' | 'world-cup'
 interface ConfettiBurst {
   id: number
   colors: string[]
+}
+
+const WORLD_CUP_THEME_CONTINENTS: Record<string, string> = {
+  'world-cup-france': 'UEFA',
+  'world-cup-spain': 'UEFA',
+  'world-cup-argentina': 'CONMEBOL',
+  'world-cup-england': 'UEFA',
+  'world-cup-brazil': 'CONMEBOL',
+  'world-cup-portugal': 'UEFA',
+  'world-cup-germany': 'UEFA',
+  'world-cup-netherlands': 'UEFA',
+  'world-cup-belgium': 'UEFA',
+  'world-cup-uruguay': 'CONMEBOL',
+  'world-cup-colombia': 'CONMEBOL',
+  'world-cup-croatia': 'UEFA',
+}
+
+function getWorldCupContinent(theme: ThemeOption) {
+  return theme.continent ?? WORLD_CUP_THEME_CONTINENTS[theme.id] ?? 'Outros'
+}
+
+function normalizeThemeSearch(value: string) {
+  return value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim()
 }
 
 function ModeButton({
@@ -192,7 +265,7 @@ function ThemeCollectionToggle({
   return (
     <div className="grid w-full max-w-md grid-cols-2 rounded-full bg-stone-100 p-1">
       {[
-        ['classic', 'Temas Classicos'],
+        ['classic', 'Temas Clássicos'],
         ['world-cup', 'Copa do Mundo'],
       ].map(([key, label]) => (
         <button
@@ -226,7 +299,7 @@ function WorldCupHeader() {
               Copa 2026
             </p>
             <h3 className="truncate text-base font-black text-stone-900">
-              Temas inspirados em selecoes
+              Temas inspirados em seleções
             </h3>
           </div>
         </div>
@@ -241,6 +314,64 @@ function WorldCupHeader() {
         </div>
       </div>
     </section>
+  )
+}
+
+function WorldCupControls({
+  continents,
+  search,
+  selectedContinent,
+  totalCount,
+  visibleCount,
+  onContinentChange,
+  onSearchChange,
+}: {
+  continents: string[]
+  search: string
+  selectedContinent: string
+  totalCount: number
+  visibleCount: number
+  onContinentChange: (continent: string) => void
+  onSearchChange: (search: string) => void
+}) {
+  return (
+    <div className="mb-5 rounded-lg border border-stone-200 bg-stone-50 p-3">
+      <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_220px_auto] lg:items-center">
+        <label className="relative block">
+          <span className="sr-only">Buscar seleção</span>
+          <Search
+            className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-stone-400"
+            strokeWidth={2}
+          />
+          <input
+            value={search}
+            onChange={(event) => onSearchChange(event.target.value)}
+            placeholder="Buscar seleção"
+            className="h-10 w-full rounded-md border border-stone-200 bg-white pl-9 pr-3 text-sm font-semibold text-stone-900 outline-none transition placeholder:text-stone-400 focus:border-brand-600"
+          />
+        </label>
+
+        <label className="block">
+          <span className="sr-only">Filtrar por continente</span>
+          <select
+            value={selectedContinent}
+            onChange={(event) => onContinentChange(event.target.value)}
+            className="h-10 w-full rounded-md border border-stone-200 bg-white px-3 text-sm font-black text-stone-700 outline-none transition focus:border-brand-600"
+          >
+            <option value="all">Todos</option>
+            {continents.map((continent) => (
+              <option key={continent} value={continent}>
+                {continent}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <div className="rounded-md border border-brand-100 bg-white px-3 py-2 text-xs font-black uppercase text-brand-700">
+          {visibleCount} de {totalCount}
+        </div>
+      </div>
+    </div>
   )
 }
 
@@ -371,17 +502,17 @@ function WorldCupConfetti({
   onDone: () => void
 }) {
   useEffect(() => {
-    const timeoutId = window.setTimeout(onDone, 1100)
+    const timeoutId = window.setTimeout(onDone, 3100)
     return () => window.clearTimeout(timeoutId)
   }, [burst.id, onDone])
 
   const pieces = useMemo(
     () =>
-      Array.from({ length: 42 }, (_, index) => ({
+      Array.from({ length: 96 }, (_, index) => ({
         color: burst.colors[index % burst.colors.length],
-        delay: (index % 8) * 24,
-        drift: ((index * 37) % 180) - 90,
-        left: 6 + ((index * 19) % 88),
+        delay: (index % 12) * 45,
+        drift: ((index * 37) % 260) - 130,
+        left: 2 + ((index * 19) % 96),
         rotate: 180 + ((index * 47) % 360),
         width: 6 + (index % 3) * 3,
       })),

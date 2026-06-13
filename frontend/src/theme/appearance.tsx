@@ -16,6 +16,7 @@ export interface ThemeOption {
   name: string
   mode: AppearanceMode
   category: ThemeCategory
+  continent?: string
   description: string
   preview?: {
     colors: string[]
@@ -411,10 +412,10 @@ export const WORLD_CUP_THEME_OPTIONS: ThemeOption[] = [
   },
   {
     id: 'world-cup-croatia',
-    name: 'Croacia',
+    name: 'Croácia',
     mode: 'light',
     category: 'world-cup',
-    description: 'Xadrez vermelho e branco da selecao croata',
+    description: 'Xadrez vermelho e branco da seleção croata',
     preview: { colors: ['#F7F7F7', '#D20A11', '#171796'], pattern: 'checker' },
     colors: {
       surface: '#FFF1F1',
@@ -422,6 +423,582 @@ export const WORLD_CUP_THEME_OPTIONS: ThemeOption[] = [
       primary: '#D20A11',
       secondary: '#171796',
       text: '#1F1720',
+    },
+  },
+  {
+    id: 'world-cup-mexico',
+    name: 'México',
+    mode: 'light',
+    category: 'world-cup',
+    continent: 'CONCACAF',
+    description: 'Verde mexicano com branco e vermelho',
+    preview: { colors: ['#006847', '#FFFFFF', '#CE1126'], pattern: 'bands' },
+    colors: {
+      surface: '#EAF7EF',
+      card: '#FFFFFF',
+      primary: '#006847',
+      secondary: '#CE1126',
+      text: '#102A20',
+    },
+  },
+  {
+    id: 'world-cup-czechia',
+    name: 'Tchequia',
+    mode: 'light',
+    category: 'world-cup',
+    continent: 'UEFA',
+    description: 'Vermelho tcheco com azul e branco',
+    preview: { colors: ['#D7141A', '#11457E', '#FFFFFF'], pattern: 'bands' },
+    colors: {
+      surface: '#FFF1F2',
+      card: '#FFFFFF',
+      primary: '#D7141A',
+      secondary: '#11457E',
+      text: '#1E1720',
+    },
+  },
+  {
+    id: 'world-cup-south-africa',
+    name: 'África do Sul',
+    mode: 'dark',
+    category: 'world-cup',
+    continent: 'CAF',
+    description: 'Dourado e verde vibrantes da seleção sul-africana',
+    preview: { colors: ['#FFB612', '#007A4D', '#000000', '#FFFFFF'], pattern: 'bands' },
+    colors: {
+      surface: '#152414',
+      card: '#20351E',
+      primary: '#FFB612',
+      secondary: '#007A4D',
+      text: '#FFFBEA',
+    },
+  },
+  {
+    id: 'world-cup-south-korea',
+    name: 'Coreia do Sul',
+    mode: 'light',
+    category: 'world-cup',
+    continent: 'AFC',
+    description: 'Vermelho vivo com azul e branco modernos',
+    preview: { colors: ['#E6002D', '#0047A0', '#FFFFFF'], pattern: 'bands' },
+    colors: {
+      surface: '#FFF1F4',
+      card: '#FFFFFF',
+      primary: '#E6002D',
+      secondary: '#0047A0',
+      text: '#1B1D2A',
+    },
+  },
+  {
+    id: 'world-cup-canada',
+    name: 'Canadá',
+    mode: 'light',
+    category: 'world-cup',
+    continent: 'CONCACAF',
+    description: 'Vermelho e branco limpos da identidade canadense',
+    preview: { colors: ['#FF0000', '#FFFFFF', '#C8102E'], pattern: 'cross' },
+    colors: {
+      surface: '#FFF5F5',
+      card: '#FFFFFF',
+      primary: '#C8102E',
+      secondary: '#FFFFFF',
+      text: '#221112',
+    },
+  },
+  {
+    id: 'world-cup-bosnia-herzegovina',
+    name: 'Bósnia e Herzegovina',
+    mode: 'dark',
+    category: 'world-cup',
+    continent: 'UEFA',
+    description: 'Azul profundo com dourado e branco da bandeira',
+    preview: { colors: ['#002F6C', '#FECB00', '#FFFFFF'], pattern: 'bands' },
+    colors: {
+      surface: '#081B3A',
+      card: '#102A55',
+      primary: '#1E5AA8',
+      secondary: '#FECB00',
+      text: '#F8FBFF',
+    },
+  },
+  {
+    id: 'world-cup-qatar',
+    name: 'Catar',
+    mode: 'dark',
+    category: 'world-cup',
+    continent: 'AFC',
+    description: 'Bordô elegante com branco da seleção catari',
+    preview: { colors: ['#8A1538', '#FFFFFF', '#5B0F28'], pattern: 'bands' },
+    colors: {
+      surface: '#240711',
+      card: '#3A0E20',
+      primary: '#8A1538',
+      secondary: '#FFFFFF',
+      text: '#FFF5F8',
+    },
+  },
+  {
+    id: 'world-cup-switzerland',
+    name: 'Suíça',
+    mode: 'light',
+    category: 'world-cup',
+    continent: 'UEFA',
+    description: 'Vermelho forte com branco da bandeira suíça',
+    preview: { colors: ['#D52B1E', '#FFFFFF', '#B61F16'], pattern: 'cross' },
+    colors: {
+      surface: '#FFF2F0',
+      card: '#FFFFFF',
+      primary: '#D52B1E',
+      secondary: '#FFFFFF',
+      text: '#241312',
+    },
+  },
+  {
+    id: 'world-cup-haiti',
+    name: 'Haiti',
+    mode: 'dark',
+    category: 'world-cup',
+    continent: 'CONCACAF',
+    description: 'Azul e vermelho de alto contraste da bandeira haitiana',
+    preview: { colors: ['#00209F', '#D21034', '#FFFFFF'], pattern: 'bands' },
+    colors: {
+      surface: '#07133E',
+      card: '#101F55',
+      primary: '#1647B8',
+      secondary: '#D21034',
+      text: '#F8FAFF',
+    },
+  },
+  {
+    id: 'world-cup-morocco',
+    name: 'Marrocos',
+    mode: 'dark',
+    category: 'world-cup',
+    continent: 'CAF',
+    description: 'Vermelho tradicional com verde marroquino',
+    preview: { colors: ['#C1272D', '#006233', '#8A1A20'], pattern: 'bands' },
+    colors: {
+      surface: '#28080A',
+      card: '#3B1013',
+      primary: '#C1272D',
+      secondary: '#00A651',
+      text: '#FFF5F5',
+    },
+  },
+  {
+    id: 'world-cup-scotland',
+    name: 'Escócia',
+    mode: 'dark',
+    category: 'world-cup',
+    continent: 'UEFA',
+    description: 'Azul escuro com branco e leitura tartan discreta',
+    preview: { colors: ['#002B5C', '#FFFFFF', '#1B365D'], pattern: 'cross' },
+    colors: {
+      surface: '#081528',
+      card: '#10233F',
+      primary: '#1B365D',
+      secondary: '#FFFFFF',
+      text: '#F8FAFC',
+    },
+  },
+  {
+    id: 'world-cup-united-states',
+    name: 'Estados Unidos',
+    mode: 'dark',
+    category: 'world-cup',
+    continent: 'CONCACAF',
+    description: 'Marinho esportivo com vermelho e branco',
+    preview: { colors: ['#1D3557', '#FFFFFF', '#E63946'], pattern: 'stripes' },
+    colors: {
+      surface: '#0B1629',
+      card: '#14233A',
+      primary: '#1D3557',
+      secondary: '#E63946',
+      text: '#F8FAFC',
+    },
+  },
+  {
+    id: 'world-cup-australia',
+    name: 'Austrália',
+    mode: 'light',
+    category: 'world-cup',
+    continent: 'AFC',
+    description: 'Dourado australiano com verde esportivo',
+    preview: { colors: ['#FFCD00', '#00843D', '#FFFFFF'], pattern: 'bands' },
+    colors: {
+      surface: '#FFF8D6',
+      card: '#FFFFFF',
+      primary: '#FFCD00',
+      secondary: '#00843D',
+      text: '#1E2A12',
+    },
+  },
+  {
+    id: 'world-cup-paraguay',
+    name: 'Paraguai',
+    mode: 'light',
+    category: 'world-cup',
+    continent: 'CONMEBOL',
+    description: 'Vermelho, branco e azul da camisa tradicional',
+    preview: { colors: ['#D52B1E', '#FFFFFF', '#0038A8'], pattern: 'stripes' },
+    colors: {
+      surface: '#FFF4F4',
+      card: '#FFFFFF',
+      primary: '#D52B1E',
+      secondary: '#0038A8',
+      text: '#1D1B2A',
+    },
+  },
+  {
+    id: 'world-cup-turkey',
+    name: 'Turquia',
+    mode: 'dark',
+    category: 'world-cup',
+    continent: 'UEFA',
+    description: 'Vermelho intenso com branco da bandeira turca',
+    preview: { colors: ['#E30A17', '#FFFFFF', '#A80712'], pattern: 'bands' },
+    colors: {
+      surface: '#2A070A',
+      card: '#400E13',
+      primary: '#E30A17',
+      secondary: '#FFFFFF',
+      text: '#FFF5F5',
+    },
+  },
+  {
+    id: 'world-cup-curacao',
+    name: 'Curaçao',
+    mode: 'dark',
+    category: 'world-cup',
+    continent: 'CONCACAF',
+    description: 'Azul tropical com amarelo e branco vibrantes',
+    preview: { colors: ['#002B7F', '#F9D616', '#FFFFFF'], pattern: 'bands' },
+    colors: {
+      surface: '#071A3F',
+      card: '#102A5C',
+      primary: '#0061A8',
+      secondary: '#F9D616',
+      text: '#F8FBFF',
+    },
+  },
+  {
+    id: 'world-cup-ecuador',
+    name: 'Equador',
+    mode: 'light',
+    category: 'world-cup',
+    continent: 'CONMEBOL',
+    description: 'Amarelo equatoriano com azul e vermelho',
+    preview: { colors: ['#FFD100', '#003893', '#CE1126'], pattern: 'bands' },
+    colors: {
+      surface: '#FFF7CC',
+      card: '#FFFFFF',
+      primary: '#FFD100',
+      secondary: '#003893',
+      text: '#211A08',
+    },
+  },
+  {
+    id: 'world-cup-ivory-coast',
+    name: 'Costa do Marfim',
+    mode: 'light',
+    category: 'world-cup',
+    continent: 'CAF',
+    description: 'Laranja marfinense com verde e branco',
+    preview: { colors: ['#F77F00', '#FFFFFF', '#009E60'], pattern: 'bands' },
+    colors: {
+      surface: '#FFF1E3',
+      card: '#FFFFFF',
+      primary: '#F77F00',
+      secondary: '#009E60',
+      text: '#24180E',
+    },
+  },
+  {
+    id: 'world-cup-japan',
+    name: 'Japão',
+    mode: 'dark',
+    category: 'world-cup',
+    continent: 'AFC',
+    description: 'Azul samurai com branco e vermelho',
+    preview: { colors: ['#003F88', '#FFFFFF', '#BC002D'], pattern: 'bands' },
+    colors: {
+      surface: '#071933',
+      card: '#102A4C',
+      primary: '#003F88',
+      secondary: '#BC002D',
+      text: '#F8FAFC',
+    },
+  },
+  {
+    id: 'world-cup-sweden',
+    name: 'Suécia',
+    mode: 'dark',
+    category: 'world-cup',
+    continent: 'UEFA',
+    description: 'Azul sueco com amarelo de alto contraste',
+    preview: { colors: ['#006AA7', '#FECC00', '#004B7A'], pattern: 'cross' },
+    colors: {
+      surface: '#071E32',
+      card: '#102F4A',
+      primary: '#006AA7',
+      secondary: '#FECC00',
+      text: '#F5FAFF',
+    },
+  },
+  {
+    id: 'world-cup-tunisia',
+    name: 'Tunísia',
+    mode: 'light',
+    category: 'world-cup',
+    continent: 'CAF',
+    description: 'Vermelho e branco limpos da identidade tunisiana',
+    preview: { colors: ['#E70013', '#FFFFFF', '#C90010'], pattern: 'bands' },
+    colors: {
+      surface: '#FFF1F2',
+      card: '#FFFFFF',
+      primary: '#E70013',
+      secondary: '#FFFFFF',
+      text: '#221112',
+    },
+  },
+  {
+    id: 'world-cup-egypt',
+    name: 'Egito',
+    mode: 'dark',
+    category: 'world-cup',
+    continent: 'CAF',
+    description: 'Vermelho egípcio com preto, branco e dourado',
+    preview: { colors: ['#CE1126', '#FFFFFF', '#000000', '#C09300'], pattern: 'bands' },
+    colors: {
+      surface: '#1F0D10',
+      card: '#2D1618',
+      primary: '#CE1126',
+      secondary: '#C09300',
+      text: '#FFF7ED',
+    },
+  },
+  {
+    id: 'world-cup-iran',
+    name: 'Irã',
+    mode: 'light',
+    category: 'world-cup',
+    continent: 'AFC',
+    description: 'Base branca com verde e vermelho nacionais',
+    preview: { colors: ['#FFFFFF', '#239F40', '#DA0000'], pattern: 'bands' },
+    colors: {
+      surface: '#F7FFF8',
+      card: '#FFFFFF',
+      primary: '#239F40',
+      secondary: '#DA0000',
+      text: '#15231A',
+    },
+  },
+  {
+    id: 'world-cup-new-zealand',
+    name: 'Nova Zelândia',
+    mode: 'dark',
+    category: 'world-cup',
+    continent: 'OFC',
+    description: 'Preto sóbrio com branco da identidade esportiva',
+    preview: { colors: ['#111111', '#FFFFFF', '#2D3748'], pattern: 'bands' },
+    colors: {
+      surface: '#0B0B0B',
+      card: '#181818',
+      primary: '#111111',
+      secondary: '#FFFFFF',
+      text: '#F8FAFC',
+    },
+  },
+  {
+    id: 'world-cup-cape-verde',
+    name: 'Cabo Verde',
+    mode: 'dark',
+    category: 'world-cup',
+    continent: 'CAF',
+    description: 'Azul leve com vermelho, branco e amarelo',
+    preview: { colors: ['#003893', '#FFFFFF', '#CF2027', '#F7D117'], pattern: 'stripes' },
+    colors: {
+      surface: '#071B3D',
+      card: '#102B5C',
+      primary: '#003893',
+      secondary: '#F7D117',
+      text: '#F8FBFF',
+    },
+  },
+  {
+    id: 'world-cup-saudi-arabia',
+    name: 'Arábia Saudita',
+    mode: 'dark',
+    category: 'world-cup',
+    continent: 'AFC',
+    description: 'Verde saudita tradicional com branco',
+    preview: { colors: ['#006C35', '#FFFFFF', '#004B25'], pattern: 'bands' },
+    colors: {
+      surface: '#062416',
+      card: '#0D3923',
+      primary: '#006C35',
+      secondary: '#FFFFFF',
+      text: '#F4FFF8',
+    },
+  },
+  {
+    id: 'world-cup-norway',
+    name: 'Noruega',
+    mode: 'light',
+    category: 'world-cup',
+    continent: 'UEFA',
+    description: 'Vermelho norueguês com azul escuro e branco',
+    preview: { colors: ['#BA0C2F', '#FFFFFF', '#00205B'], pattern: 'cross' },
+    colors: {
+      surface: '#FFF2F4',
+      card: '#FFFFFF',
+      primary: '#BA0C2F',
+      secondary: '#00205B',
+      text: '#1E1720',
+    },
+  },
+  {
+    id: 'world-cup-senegal',
+    name: 'Senegal',
+    mode: 'dark',
+    category: 'world-cup',
+    continent: 'CAF',
+    description: 'Verde senegalês com amarelo e vermelho vibrantes',
+    preview: { colors: ['#00853F', '#FDEF42', '#E31B23'], pattern: 'bands' },
+    colors: {
+      surface: '#062314',
+      card: '#0E3A23',
+      primary: '#00853F',
+      secondary: '#FDEF42',
+      text: '#F8FFF2',
+    },
+  },
+  {
+    id: 'world-cup-iraq',
+    name: 'Iraque',
+    mode: 'light',
+    category: 'world-cup',
+    continent: 'AFC',
+    description: 'Branco com vermelho, preto e verde iraquianos',
+    preview: { colors: ['#FFFFFF', '#CE1126', '#000000', '#007A3D'], pattern: 'bands' },
+    colors: {
+      surface: '#F8FAF8',
+      card: '#FFFFFF',
+      primary: '#CE1126',
+      secondary: '#007A3D',
+      text: '#171717',
+    },
+  },
+  {
+    id: 'world-cup-algeria',
+    name: 'Argélia',
+    mode: 'light',
+    category: 'world-cup',
+    continent: 'CAF',
+    description: 'Verde e branco limpos com detalhe vermelho',
+    preview: { colors: ['#006233', '#FFFFFF', '#D21034'], pattern: 'bands' },
+    colors: {
+      surface: '#F0FFF6',
+      card: '#FFFFFF',
+      primary: '#006233',
+      secondary: '#D21034',
+      text: '#10261A',
+    },
+  },
+  {
+    id: 'world-cup-austria',
+    name: 'Áustria',
+    mode: 'light',
+    category: 'world-cup',
+    continent: 'UEFA',
+    description: 'Vermelho e branco clássicos da bandeira austríaca',
+    preview: { colors: ['#ED2939', '#FFFFFF', '#C8102E'], pattern: 'stripes' },
+    colors: {
+      surface: '#FFF2F3',
+      card: '#FFFFFF',
+      primary: '#ED2939',
+      secondary: '#FFFFFF',
+      text: '#241315',
+    },
+  },
+  {
+    id: 'world-cup-jordan',
+    name: 'Jordania',
+    mode: 'dark',
+    category: 'world-cup',
+    continent: 'AFC',
+    description: 'Vermelho, preto, branco e verde da bandeira jordaniana',
+    preview: { colors: ['#CE1126', '#000000', '#FFFFFF', '#007A3D'], pattern: 'bands' },
+    colors: {
+      surface: '#151515',
+      card: '#242424',
+      primary: '#CE1126',
+      secondary: '#007A3D',
+      text: '#F8FAFC',
+    },
+  },
+  {
+    id: 'world-cup-jamaica',
+    name: 'Jamaica',
+    mode: 'dark',
+    category: 'world-cup',
+    continent: 'CONCACAF',
+    description: 'Dourado vibrante com verde e preto jamaicanos',
+    preview: { colors: ['#FED100', '#009B3A', '#000000'], pattern: 'cross' },
+    colors: {
+      surface: '#0E170C',
+      card: '#182414',
+      primary: '#FED100',
+      secondary: '#009B3A',
+      text: '#FFFBEA',
+    },
+  },
+  {
+    id: 'world-cup-uzbekistan',
+    name: 'Uzbequistao',
+    mode: 'light',
+    category: 'world-cup',
+    continent: 'AFC',
+    description: 'Azul claro com branco, verde e vermelho',
+    preview: { colors: ['#0099B5', '#FFFFFF', '#1EB53A', '#CE1126'], pattern: 'stripes' },
+    colors: {
+      surface: '#EAFBFF',
+      card: '#FFFFFF',
+      primary: '#0099B5',
+      secondary: '#1EB53A',
+      text: '#10252A',
+    },
+  },
+  {
+    id: 'world-cup-ghana',
+    name: 'Gana',
+    mode: 'dark',
+    category: 'world-cup',
+    continent: 'CAF',
+    description: 'Vermelho, dourado, verde e preto fortes',
+    preview: { colors: ['#CE1126', '#FCD116', '#006B3F', '#000000'], pattern: 'bands' },
+    colors: {
+      surface: '#1F0D0E',
+      card: '#2E1714',
+      primary: '#CE1126',
+      secondary: '#FCD116',
+      text: '#FFF8E6',
+    },
+  },
+  {
+    id: 'world-cup-panama',
+    name: 'Panama',
+    mode: 'light',
+    category: 'world-cup',
+    continent: 'CONCACAF',
+    description: 'Base branca com destaques vermelho e azul',
+    preview: { colors: ['#FFFFFF', '#D21034', '#005293'], pattern: 'checker' },
+    colors: {
+      surface: '#F7FAFF',
+      card: '#FFFFFF',
+      primary: '#005293',
+      secondary: '#D21034',
+      text: '#151B2A',
     },
   },
 ]
@@ -433,6 +1010,30 @@ export const THEME_OPTIONS: ThemeOption[] = [
 
 const STORAGE_KEY = 'saltim-appearance-theme'
 const DEFAULT_THEME = 'maestro-light'
+const RUNTIME_WORLD_CUP_PROPERTIES = [
+  '--cup-surface',
+  '--cup-card',
+  '--cup-sidebar',
+  '--cup-logo',
+  '--cup-primary',
+  '--cup-secondary',
+  '--cup-accent',
+  '--cup-red',
+  '--cup-green',
+  '--cup-blue',
+  '--theme-on-primary',
+  '--theme-stone-50',
+  '--theme-stone-100',
+  '--theme-stone-200',
+  '--theme-stone-300',
+  '--theme-stone-400',
+  '--theme-stone-500',
+  '--theme-stone-600',
+  '--theme-stone-700',
+  '--theme-stone-800',
+  '--theme-stone-900',
+  '--theme-stone-950',
+]
 
 interface AppearanceContextValue {
   themeId: string
@@ -448,6 +1049,72 @@ function resolveTheme(themeId: string | null | undefined) {
   return THEME_OPTIONS.find((theme) => theme.id === themeId) ?? THEME_OPTIONS[0]
 }
 
+function isLightHexColor(hexColor: string) {
+  const hex = hexColor.replace('#', '')
+  if (hex.length !== 6) return false
+  const red = parseInt(hex.slice(0, 2), 16)
+  const green = parseInt(hex.slice(2, 4), 16)
+  const blue = parseInt(hex.slice(4, 6), 16)
+  return (red * 299 + green * 587 + blue * 114) / 1000 > 155
+}
+
+function applyRuntimeWorldCupTheme(root: HTMLElement, theme: ThemeOption) {
+  const shouldApplyRuntimeCupTheme = theme.category === 'world-cup' && Boolean(theme.continent)
+  if (!shouldApplyRuntimeCupTheme) {
+    RUNTIME_WORLD_CUP_PROPERTIES.forEach((property) => root.style.removeProperty(property))
+    return
+  }
+
+  const previewColors = theme.preview?.colors ?? [
+    theme.colors.primary,
+    theme.colors.secondary,
+    theme.colors.card,
+  ]
+  const accent = previewColors[2] ?? theme.colors.card
+  const support = previewColors[3] ?? theme.colors.secondary
+
+  root.style.setProperty('--cup-surface', theme.colors.surface)
+  root.style.setProperty('--cup-card', theme.colors.card)
+  root.style.setProperty('--cup-sidebar', theme.mode === 'dark' ? theme.colors.surface : theme.colors.primary)
+  root.style.setProperty('--cup-logo', theme.colors.secondary)
+  root.style.setProperty('--cup-primary', theme.colors.primary)
+  root.style.setProperty('--cup-secondary', theme.colors.secondary)
+  root.style.setProperty('--cup-accent', accent)
+  root.style.setProperty('--cup-red', accent)
+  root.style.setProperty('--cup-green', theme.colors.secondary)
+  root.style.setProperty('--cup-blue', support)
+  root.style.setProperty('--theme-on-primary', isLightHexColor(theme.colors.primary) ? '#18181B' : '#FFFFFF')
+
+  const lightScale = {
+    '--theme-stone-50': '#FAFAFA',
+    '--theme-stone-100': '#F4F4F5',
+    '--theme-stone-200': '#E4E4E7',
+    '--theme-stone-300': '#D4D4D8',
+    '--theme-stone-400': '#A1A1AA',
+    '--theme-stone-500': '#71717A',
+    '--theme-stone-600': '#52525B',
+    '--theme-stone-700': '#3F3F46',
+    '--theme-stone-800': '#27272A',
+    '--theme-stone-900': '#18181B',
+    '--theme-stone-950': '#09090B',
+  }
+  const darkScale = {
+    '--theme-stone-50': theme.colors.card,
+    '--theme-stone-100': `color-mix(in srgb, ${theme.colors.card} 86%, white)`,
+    '--theme-stone-200': `color-mix(in srgb, ${theme.colors.card} 70%, white)`,
+    '--theme-stone-300': `color-mix(in srgb, ${theme.colors.card} 52%, white)`,
+    '--theme-stone-400': `color-mix(in srgb, ${theme.colors.card} 34%, white)`,
+    '--theme-stone-500': `color-mix(in srgb, ${theme.colors.card} 16%, white)`,
+    '--theme-stone-600': '#E4E4E7',
+    '--theme-stone-700': '#F4F4F5',
+    '--theme-stone-800': '#FAFAFA',
+    '--theme-stone-900': '#FFFFFF',
+    '--theme-stone-950': '#FFFFFF',
+  }
+  const scale = theme.mode === 'light' ? lightScale : darkScale
+  Object.entries(scale).forEach(([property, value]) => root.style.setProperty(property, value))
+}
+
 export function AppearanceProvider({ children }: { children: ReactNode }) {
   const [themeId, setThemeIdState] = useState(() => {
     if (typeof window === 'undefined') return DEFAULT_THEME
@@ -461,6 +1128,7 @@ export function AppearanceProvider({ children }: { children: ReactNode }) {
     root.dataset.theme = theme.id
     root.dataset.mode = theme.mode
     root.style.colorScheme = theme.mode
+    applyRuntimeWorldCupTheme(root, theme)
     window.localStorage.setItem(STORAGE_KEY, theme.id)
   }, [theme])
 

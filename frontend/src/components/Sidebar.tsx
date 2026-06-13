@@ -5,7 +5,7 @@ import {
   LayoutDashboard,
   Package,
   PackageCheck,
-  Palette,
+  Settings,
   ShoppingCart,
   Truck,
 } from 'lucide-react';
@@ -72,9 +72,9 @@ export function Sidebar() {
         <NavItem to="/estoque/contagem" icon={ClipboardList} label="Contagem" />
         <NavItem to="/ml/criticidade" icon={Activity} label="Criticidade" />
         <NavItem
-          to="/configuracoes/aparencia"
-          icon={Palette}
-          label="Aparência"
+          to="/configuracoes"
+          icon={Settings}
+          label="Configurações"
         />
       </nav>
     </aside>

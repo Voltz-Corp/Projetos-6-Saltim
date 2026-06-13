@@ -6,7 +6,7 @@ services:
       POSTGRES_PASSWORD: saltim123
       POSTGRES_DB: saltim_db
     ports:
-      - "5433:5432"
+      - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./data:/data:ro

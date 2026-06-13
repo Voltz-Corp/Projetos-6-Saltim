@@ -315,8 +315,8 @@ export function EstoquePage() {
         <div className="space-y-6">
           <ExportPanel
             area="estoque"
-            title="Exportar historico de estoque"
-            subtitle="Baixe as movimentacoes do estoque dentro do periodo selecionado."
+            title="Exportar histórico de estoque"
+            subtitle="Baixe as movimentações do estoque dentro do período selecionado."
             requiresDateRange
           />
 

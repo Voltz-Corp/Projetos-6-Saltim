@@ -3,6 +3,8 @@
 
 DROP SCHEMA IF EXISTS dados CASCADE;
 DROP TABLE IF EXISTS
+    estoque_movimentos,
+    clientes,
     contagem_log,
     contagens,
     log_contagem,
@@ -40,6 +42,9 @@ CREATE TABLE IF NOT EXISTS ml.job_status (
 );
 
 CREATE INDEX IF NOT EXISTS idx_job_status_dia ON ml.job_status (dia);
+
+GRANT USAGE ON SCHEMA ml TO CURRENT_USER;
+GRANT SELECT ON ALL TABLES IN SCHEMA ml TO CURRENT_USER;
 
 CREATE TABLE categorias (
     id TEXT PRIMARY KEY,
@@ -148,7 +153,46 @@ CREATE TABLE vendas (
     date_time TIMESTAMP NOT NULL,
     recipe_id TEXT NOT NULL REFERENCES receitas (id),
     quantity NUMERIC(14, 4) NOT NULL,
-    unit_price NUMERIC(14, 4) NOT NULL
+    unit_price NUMERIC(14, 4) NOT NULL,
+    comanda_id TEXT,
+    mesa_numero INTEGER,
+    status TEXT NOT NULL DEFAULT 'paga',
+    cpf_cliente TEXT,
+    customer_name TEXT,
+    payment_method TEXT,
+    paid_amount NUMERIC(14, 4) NOT NULL DEFAULT 0,
+    change_amount NUMERIC(14, 4) NOT NULL DEFAULT 0,
+    discount_total NUMERIC(14, 4) NOT NULL DEFAULT 0,
+    total NUMERIC(14, 4) NOT NULL DEFAULT 0,
+    source TEXT NOT NULL DEFAULT 'historico',
+    notes TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    confirmed_at TIMESTAMPTZ,
+    canceled_at TIMESTAMPTZ
+);
+
+CREATE TABLE clientes (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    document TEXT,
+    email TEXT,
+    phone TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE estoque_movimentos (
+    id TEXT PRIMARY KEY,
+    ingredient_id TEXT NOT NULL REFERENCES ingredientes (id),
+    source_type TEXT NOT NULL,
+    source_id TEXT NOT NULL,
+    delta_qty NUMERIC(14, 4) NOT NULL,
+    previous_qty NUMERIC(14, 4) NOT NULL,
+    new_qty NUMERIC(14, 4) NOT NULL,
+    unit TEXT NOT NULL,
+    reason TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 CREATE TABLE pedidos (
@@ -277,6 +321,13 @@ COPY vendas (id, date_time, recipe_id, quantity, unit_price)
 FROM '/data/vendas.csv'
 WITH (FORMAT csv, HEADER true, NULL '', ENCODING 'UTF8');
 
+UPDATE vendas
+SET
+    comanda_id = id,
+    total = quantity * unit_price,
+    paid_amount = quantity * unit_price,
+    confirmed_at = date_time;
+
 COPY pedidos (
     id,
     supplier_id,
@@ -383,6 +434,24 @@ CREATE INDEX idx_receitas_ingredientes_ingredient
 CREATE INDEX idx_vendas_recipe_date
     ON vendas (recipe_id, date_time);
 
+CREATE INDEX idx_vendas_comanda
+    ON vendas (comanda_id);
+
+CREATE INDEX idx_vendas_mesa_status
+    ON vendas (mesa_numero, status);
+
+CREATE INDEX idx_clientes_name
+    ON clientes (name);
+
+CREATE INDEX idx_clientes_document
+    ON clientes (document);
+
+CREATE INDEX idx_estoque_movimentos_ingredient_date
+    ON estoque_movimentos (ingredient_id, created_at);
+
+CREATE INDEX idx_estoque_movimentos_source
+    ON estoque_movimentos (source_type, source_id);
+
 CREATE INDEX idx_pedidos_supplier_date
     ON pedidos (supplier_id, data_pedido);
 
@@ -405,6 +474,8 @@ ANALYZE produtos_indisponiveis;
 ANALYZE receitas;
 ANALYZE receitas_ingredientes;
 ANALYZE vendas;
+ANALYZE clientes;
+ANALYZE estoque_movimentos;
 ANALYZE pedidos;
 ANALYZE pedidos_log;
 ANALYZE resumo_diario_estoques;

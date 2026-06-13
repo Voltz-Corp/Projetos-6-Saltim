@@ -11,7 +11,9 @@ import { ingredienteEditRoute } from './routes/IngredienteEditPage'
 import { fornecedorNewRoute } from './routes/FornecedorNewPage'
 import { fornecedorProfileRoute, fornecedoresRoute } from './routes/FornecedoresPage'
 import { pedidoGroupDetailRoute, pedidoNewRoute, pedidosRoute } from './routes/PedidosPage'
+import { vendaMesaRoute, vendasRoute } from './routes/VendasPage'
 import { aparenciaAliasRoute, aparenciaRoute } from './routes/AparenciaPage'
+import { configuracoesRoute } from './routes/ConfiguracoesPage'
 import { comprasPlanejamentoRoute } from './routes/ComprasPlanejamentoPage'
 
 const routeTree = rootRoute.addChildren([
@@ -29,7 +31,10 @@ const routeTree = rootRoute.addChildren([
   pedidosRoute,
   pedidoNewRoute,
   pedidoGroupDetailRoute,
+  vendasRoute,
+  vendaMesaRoute,
   comprasPlanejamentoRoute,
+  configuracoesRoute,
   aparenciaRoute,
   aparenciaAliasRoute,
 ])

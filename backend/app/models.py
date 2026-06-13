@@ -195,15 +195,73 @@ class ReceitaIngrediente(Base):
 
 class Venda(Base):
     __tablename__ = "vendas"
-    __table_args__ = (Index("idx_vendas_recipe_date", "recipe_id", "date_time"),)
+    __table_args__ = (
+        Index("idx_vendas_recipe_date", "recipe_id", "date_time"),
+        Index("idx_vendas_comanda", "comanda_id"),
+        Index("idx_vendas_mesa_status", "mesa_numero", "status"),
+    )
 
     id = Column(String, primary_key=True)
     date_time = Column(DateTime, nullable=False)
     recipe_id = Column(String, ForeignKey("receitas.id"), nullable=False)
     quantity = Column(Numeric(14, 4), nullable=False)
     unit_price = Column(Numeric(14, 4), nullable=False)
+    comanda_id = Column(String)
+    mesa_numero = Column(Integer)
+    status = Column(String, nullable=False, default="paga")
+    cpf_cliente = Column(String)
+    customer_name = Column(String)
+    payment_method = Column(String)
+    paid_amount = Column(Numeric(14, 4), nullable=False, default=0)
+    change_amount = Column(Numeric(14, 4), nullable=False, default=0)
+    discount_total = Column(Numeric(14, 4), nullable=False, default=0)
+    total = Column(Numeric(14, 4), nullable=False, default=0)
+    source = Column(String, nullable=False, default="historico")
+    notes = Column(String)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    confirmed_at = Column(DateTime(timezone=True))
+    canceled_at = Column(DateTime(timezone=True))
 
     receita = relationship("Receita", back_populates="vendas")
+
+
+class Cliente(Base):
+    __tablename__ = "clientes"
+    __table_args__ = (
+        Index("idx_clientes_name", "name"),
+        Index("idx_clientes_document", "document"),
+    )
+
+    id = Column(String, primary_key=True)
+    name = Column(String, nullable=False)
+    document = Column(String)
+    email = Column(String)
+    phone = Column(String)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+
+class EstoqueMovimento(Base):
+    __tablename__ = "estoque_movimentos"
+    __table_args__ = (
+        Index("idx_estoque_movimentos_ingredient_date", "ingredient_id", "created_at"),
+        Index("idx_estoque_movimentos_source", "source_type", "source_id"),
+    )
+
+    id = Column(String, primary_key=True)
+    ingredient_id = Column(String, ForeignKey("ingredientes.id"), nullable=False)
+    source_type = Column(String, nullable=False)
+    source_id = Column(String, nullable=False)
+    delta_qty = Column(Numeric(14, 4), nullable=False)
+    previous_qty = Column(Numeric(14, 4), nullable=False)
+    new_qty = Column(Numeric(14, 4), nullable=False)
+    unit = Column(String, nullable=False)
+    reason = Column(String, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    ingrediente = relationship("Ingrediente")
 
 
 class Pedido(Base):
@@ -504,6 +562,7 @@ class PurchasePlanItem(Base):
     estimated_total = Column(Numeric(14, 4), nullable=False, default=0)
     coverage_days = Column(Float, nullable=False, default=0)
     criticality = Column(String, nullable=False, default="OK")
+    criticality_source = Column(String, nullable=False, default="operational_rule")
     justification = Column(String)
     note = Column(String)
 

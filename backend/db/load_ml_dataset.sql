@@ -185,3 +185,6 @@ CREATE INDEX IF NOT EXISTS idx_ml_pedidos_eventos_ingredient_date
 ANALYZE ml.abt_reposicao;
 ANALYZE ml.abt_reposicao_sample_100;
 ANALYZE ml.abt_pedidos_eventos;
+
+GRANT USAGE ON SCHEMA ml TO CURRENT_USER;
+GRANT SELECT ON ALL TABLES IN SCHEMA ml TO CURRENT_USER;
